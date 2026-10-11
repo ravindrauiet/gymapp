@@ -1,0 +1,17 @@
+name: fitkey_core
+description: Shared API client, theme, formatting and widgets for the FITKEY User and Partner apps.
+version: 1.0.0
+publish_to: none
+
+environment:
+  sdk: ^3.9.0
+  flutter: ">=3.35.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+  dio: ^5.11.1
+  intl: ^0.20.3
+
+dev_dependencies:
+  flutter_lints: ^6.0.0
