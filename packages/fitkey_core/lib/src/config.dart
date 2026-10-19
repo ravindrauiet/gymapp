@@ -9,9 +9,7 @@ class AppConfig {
 
   static String get apiUrl {
     if (_fromEnv.isNotEmpty) return _fromEnv;
-    // Android emulator reaches the host machine via 10.0.2.2; iOS simulator via localhost.
-    if (!kIsWeb && Platform.isAndroid) return 'http://10.0.2.2:4000/api/v1';
-    return 'http://localhost:4000/api/v1';
+    return 'https://gymapp-lo23.onrender.com/api/v1';
   }
 }
 

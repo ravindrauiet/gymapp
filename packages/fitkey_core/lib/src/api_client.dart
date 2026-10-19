@@ -20,8 +20,8 @@ class ApiClient {
   ApiClient({required this.onUnauthorized})
       : _dio = Dio(BaseOptions(
           baseUrl: AppConfig.apiUrl,
-          connectTimeout: const Duration(seconds: 15),
-          receiveTimeout: const Duration(seconds: 20),
+          connectTimeout: const Duration(seconds: 60),
+          receiveTimeout: const Duration(seconds: 60),
           contentType: Headers.jsonContentType,
         ));
 

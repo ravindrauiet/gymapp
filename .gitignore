@@ -1,0 +1,8 @@
+demo/
+
+# Memory heap dumps
+*.hprof
+
+# Android build outputs & binaries
+*.apk
+*.aab
