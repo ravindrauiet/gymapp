@@ -54,4 +54,64 @@ class PartnerApi {
 
   Future<AttendanceSummary> attendanceSummary(String venueId, {String? month}) async =>
       AttendanceSummary.fromJson(await _client.get('/partner/venues/$venueId/attendance/summary', query: {'month': month}));
+
+  // ---- Vendor Portal (Marketplace) ------------------------------------------
+  Future<VendorProfile?> vendorProfile() async {
+    final r = await _client.get('/partner/vendor/profile');
+    final v = r['vendor'];
+    return v == null ? null : VendorProfile.fromJson(v);
+  }
+
+  Future<VendorProfile> saveVendorProfile(Json fields) async {
+    final r = await _client.post('/partner/vendor/profile', fields);
+    return VendorProfile.fromJson(r['vendor']);
+  }
+
+  Future<List<VendorProduct>> vendorProducts() async {
+    final r = await _client.get('/partner/vendor/products');
+    return (r['products'] as List).map((p) => VendorProduct.fromJson(p)).toList();
+  }
+
+  Future<VendorProduct> createVendorProduct(Json fields) async {
+    final r = await _client.post('/partner/vendor/products', fields);
+    return VendorProduct.fromJson(r['product']);
+  }
+
+  Future<VendorProduct> updateVendorProduct(String id, Json fields) async {
+    final r = await _client.put('/partner/vendor/products/$id', fields);
+    return VendorProduct.fromJson(r['product']);
+  }
+
+  Future<List<VendorOrder>> vendorOrders() async {
+    final r = await _client.get('/partner/vendor/orders');
+    return (r['orders'] as List).map((o) => VendorOrder.fromJson(o)).toList();
+  }
+
+  Future<void> updateOrderStatus(String orderId, String status, {String? trackingNumber}) =>
+      _client.patch('/partner/vendor/orders/$orderId/status', {
+        'status': status,
+        'trackingNumber': ?trackingNumber,
+      });
+
+  Future<CommissionReport> commissionReport() async {
+    final r = await _client.get('/partner/vendor/commissions');
+    return CommissionReport.fromJson(r);
+  }
+
+  // ---- Trainer Module (FitPro On-Demand) -------------------------------------
+  Future<PartnerTrainerProfile?> trainerProfile() async {
+    final r = await _client.get('/partner/trainer/profile');
+    final t = r['trainer'];
+    return t == null ? null : PartnerTrainerProfile.fromJson(t);
+  }
+
+  Future<PartnerTrainerProfile> saveTrainerProfile(Json fields) async {
+    final r = await _client.post('/partner/trainer/profile', fields);
+    return PartnerTrainerProfile.fromJson(r['trainer']);
+  }
+
+  Future<List<TrainerBookingItem>> trainerBookings() async {
+    final r = await _client.get('/partner/trainer/bookings');
+    return (r['bookings'] as List).map((b) => TrainerBookingItem.fromJson(b)).toList();
+  }
 }

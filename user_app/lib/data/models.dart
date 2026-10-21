@@ -394,33 +394,45 @@ class WeightPoint {
 class HealthReport {
   HealthReport.fromJson(Json j)
       : days = _int(j['days']),
-        totalCheckins = _int(j['attendance']['totalCheckins']),
-        activeDays = _int(j['attendance']['activeDays']),
-        uniqueVenues = _int(j['attendance']['uniqueVenues']),
-        currentStreak = _int(j['attendance']['currentStreak']),
+        totalCheckins = _int(j['attendance']?['totalCheckins']),
+        activeDays = _int(j['attendance']?['activeDays']),
+        uniqueVenues = _int(j['attendance']?['uniqueVenues']),
+        currentStreak = _int(j['attendance']?['currentStreak']),
+        gymConsistencyScore = _int(j['attendance']?['gymConsistencyScore']),
         checkinsPerDay = {
-          for (final d in j['attendance']['perDay'] as List) DateTime.parse(d['date']): _int(d['count']),
+          if (j['attendance']?['perDay'] is List)
+            for (final d in j['attendance']['perDay'] as List) DateTime.parse(d['date']): _int(d['count']),
         },
         topVenues = [
-          for (final v in j['attendance']['topVenues'] as List) (name: v['name'] as String, visits: _int(v['visits'])),
+          if (j['attendance']?['topVenues'] is List)
+            for (final v in j['attendance']['topVenues'] as List) (name: v['name'] as String, visits: _int(v['visits'])),
         ],
-        workoutCount = _int(j['workouts']['count']),
-        totalMinutes = _int(j['workouts']['totalMinutes']),
-        totalDistanceKm = _double(j['workouts']['totalDistanceKm']) ?? 0,
-        totalCalories = _int(j['workouts']['totalCalories']),
+        workoutCount = _int(j['workouts']?['count']),
+        totalMinutes = _int(j['workouts']?['totalMinutes']),
+        totalDistanceKm = _double(j['workouts']?['totalDistanceKm']) ?? 0,
+        totalCalories = _int(j['workouts']?['totalCalories']),
         workoutsByType = [
-          for (final t in j['workouts']['byType'] as List)
-            (type: t['type'] as String, count: _int(t['count']), minutes: _int(t['minutes'])),
+          if (j['workouts']?['byType'] is List)
+            for (final t in j['workouts']['byType'] as List)
+              (type: t['type'] as String, count: _int(t['count']), minutes: _int(t['minutes'])),
         ],
-        latestWeight = j['weight']['latest'] == null ? null : WeightPoint.fromJson(j['weight']['latest']),
-        weightChangeKg = _double(j['weight']['changeKg']),
-        weightSeries = (j['weight']['series'] as List).map((w) => WeightPoint.fromJson(w)).toList();
+        latestWeight = j['weight']?['latest'] == null ? null : WeightPoint.fromJson(j['weight']['latest']),
+        weightChangeKg = _double(j['weight']?['changeKg']),
+        weightSeries = (j['weight']?['series'] as List? ?? const []).map((w) => WeightPoint.fromJson(w)).toList(),
+        movement = j['movement'] == null ? null : MovementReport.fromJson(j['movement']),
+        nutrition = j['nutrition'] == null ? null : NutritionReport.fromJson(j['nutrition']),
+        integrationRows = [
+          if (j['integrationArchitecture'] is List)
+            for (final r in j['integrationArchitecture'] as List)
+              (source: r['source'] as String, metric: r['metric'] as String, outcome: r['outcome'] as String),
+        ];
 
   final int days;
   final int totalCheckins;
   final int activeDays;
   final int uniqueVenues;
   final int currentStreak;
+  final int gymConsistencyScore;
   final Map<DateTime, int> checkinsPerDay;
   final List<({String name, int visits})> topVenues;
   final int workoutCount;
@@ -431,6 +443,370 @@ class HealthReport {
   final WeightPoint? latestWeight;
   final double? weightChangeKg;
   final List<WeightPoint> weightSeries;
+  final MovementReport? movement;
+  final NutritionReport? nutrition;
+  final List<({String source, String metric, String outcome})> integrationRows;
+}
+
+class MovementReport {
+  MovementReport.fromJson(Json j)
+      : totalSteps = _int(j['totalSteps']),
+        avgDailySteps = _int(j['avgDailySteps']),
+        totalDistanceKm = _double(j['totalDistanceKm']) ?? 0.0,
+        totalActiveBurn = _int(j['totalActiveBurn']),
+        avgDailyActiveBurn = _int(j['avgDailyActiveBurn']),
+        movementScore = _int(j['movementScore']);
+
+  final int totalSteps;
+  final int avgDailySteps;
+  final double totalDistanceKm;
+  final int totalActiveBurn;
+  final int avgDailyActiveBurn;
+  final int movementScore;
+}
+
+class NutritionReport {
+  NutritionReport.fromJson(Json j)
+      : avgDailyCalories = _int(j['avgDailyCalories']),
+        avgDailyProtein = _double(j['avgDailyProtein']) ?? 0.0,
+        avgDailyCarbs = _double(j['avgDailyCarbs']) ?? 0.0,
+        avgDailyFat = _double(j['avgDailyFat']) ?? 0.0,
+        deficitSurplusStatus = j['deficitSurplusStatus'] ?? 'Balanced',
+        mealDays = _int(j['mealDays']),
+        dailyCalorieBaseline = _int(j['baselines']?['dailyCalories']),
+        dailyProteinBaseline = _int(j['baselines']?['dailyProteinG']),
+        goalType = j['baselines']?['goalType'] ?? 'maintenance';
+
+  final int avgDailyCalories;
+  final double avgDailyProtein;
+  final double avgDailyCarbs;
+  final double avgDailyFat;
+  final String deficitSurplusStatus;
+  final int mealDays;
+  final int dailyCalorieBaseline;
+  final int dailyProteinBaseline;
+  final String goalType;
+}
+
+// ---- Goal-Based Onboarding & User Profiling ----------------------------------
+class UserGoal {
+  UserGoal.fromJson(Json j)
+      : goalType = j['goal_type'] ?? j['goalType'],
+        age = _int(j['age']),
+        gender = j['gender'],
+        heightCm = _double(j['height_cm'] ?? j['heightCm']) ?? 170.0,
+        currentWeightKg = _double(j['current_weight_kg'] ?? j['currentWeightKg']) ?? 70.0,
+        targetWeightKg = _double(j['target_weight_kg'] ?? j['targetWeightKg']) ?? 65.0,
+        activityLevel = j['activity_level'] ?? j['activityLevel'],
+        dailyCalorieTarget = _int(j['daily_calorie_target'] ?? j['dailyCalorieTarget']),
+        dailyProteinG = _int(j['daily_protein_g'] ?? j['dailyProteinG']),
+        dailyCarbsG = _int(j['daily_carbs_g'] ?? j['dailyCarbsG']),
+        dailyFatG = _int(j['daily_fat_g'] ?? j['dailyFatG']);
+
+  final String goalType; // weight_loss | muscle_gain | maintenance
+  final int age;
+  final String gender;
+  final double heightCm;
+  final double currentWeightKg;
+  final double targetWeightKg;
+  final String activityLevel; // sedentary | light | moderate | very_active
+  final int dailyCalorieTarget;
+  final int dailyProteinG;
+  final int dailyCarbsG;
+  final int dailyFatG;
+
+  String get goalLabel => switch (goalType) {
+        'weight_loss' => 'Weight Loss (Patla hona hai)',
+        'muscle_gain' => 'Muscle / Weight Gain (Bulk / Mota hona hai)',
+        _ => 'Maintenance (Jaisa hoon waisa rehna hai)',
+      };
+}
+
+// ---- Marketplace / Store ----------------------------------------------------
+class MarketplaceProduct {
+  MarketplaceProduct.fromJson(Json j)
+      : id = j['id'],
+        title = j['title'],
+        brand = j['brand'],
+        category = j['category'],
+        description = j['description'],
+        pricePaise = _int(j['price_paise'] ?? j['pricePaise']),
+        originalPricePaise = _int(j['original_price_paise'] ?? j['originalPricePaise']),
+        stockQuantity = _int(j['stock_quantity'] ?? j['stockQuantity']),
+        images = _strings(j['images']),
+        specs = (j['specs'] is Map) ? Map<String, dynamic>.from(j['specs'] as Map) : {},
+        vendorName = j['vendor_name'] ?? j['vendorName'];
+
+  final String id;
+  final String title;
+  final String brand;
+  final String category; // supplements | apparel | wearables | gear
+  final String description;
+  final int pricePaise;
+  final int originalPricePaise;
+  final int stockQuantity;
+  final List<String> images;
+  final Map<String, dynamic> specs;
+  final String? vendorName;
+
+  int get discountPercent =>
+      originalPricePaise > pricePaise ? (((originalPricePaise - pricePaise) / originalPricePaise) * 100).round() : 0;
+}
+
+class MarketplaceOrderItem {
+  MarketplaceOrderItem.fromJson(Json j)
+      : id = j['id'],
+        productId = j['productId'] ?? j['product_id'],
+        title = j['title'],
+        pricePaise = _int(j['pricePaise'] ?? j['price_paise']),
+        quantity = _int(j['quantity']);
+
+  final String? id;
+  final String? productId;
+  final String title;
+  final int pricePaise;
+  final int quantity;
+}
+
+class MarketplaceOrder {
+  MarketplaceOrder.fromJson(Json j)
+      : id = j['id'],
+        status = j['status'],
+        totalAmountPaise = _int(j['total_amount_paise'] ?? j['totalAmountPaise']),
+        paymentMethod = j['payment_method'] ?? j['paymentMethod'],
+        paymentStatus = j['payment_status'] ?? j['paymentStatus'],
+        trackingNumber = j['tracking_number'] ?? j['trackingNumber'],
+        createdAt = _date(j['created_at'] ?? j['createdAt']),
+        shippingAddress = (j['shipping_address'] is Map)
+            ? Map<String, dynamic>.from(j['shipping_address'] as Map)
+            : {},
+        items = (j['items'] as List? ?? const []).map((i) => MarketplaceOrderItem.fromJson(i)).toList();
+
+  final String id;
+  final String status;
+  final int totalAmountPaise;
+  final String paymentMethod;
+  final String paymentStatus;
+  final String? trackingNumber;
+  final DateTime createdAt;
+  final Map<String, dynamic> shippingAddress;
+  final List<MarketplaceOrderItem> items;
+}
+
+// ---- Fuel Log (Nutrition & Meal Tracker) -------------------------------------
+class FoodItem {
+  FoodItem.fromJson(Json j)
+      : id = j['id'] ?? '',
+        name = j['name'] ?? 'Food',
+        servingUnit = j['serving_unit'] ?? j['servingUnit'] ?? '1 serving',
+        calories = _int(j['calories']),
+        proteinG = _double(j['protein_g'] ?? j['proteinG']) ?? 0.0,
+        carbsG = _double(j['carbs_g'] ?? j['carbsG']) ?? 0.0,
+        fatG = _double(j['fat_g'] ?? j['fatG']) ?? 0.0,
+        fibreG = _double(j['fibre_g'] ?? j['fibreG']) ?? 0.0,
+        ironMg = _double(j['iron_mg'] ?? j['ironMg']) ?? 0.0,
+        magnesiumMg = _double(j['magnesium_mg'] ?? j['magnesiumMg']) ?? 0.0,
+        calciumMg = _double(j['calcium_mg'] ?? j['calciumMg']) ?? 0.0,
+        sodiumMg = _double(j['sodium_mg'] ?? j['sodiumMg']) ?? 0.0,
+        category = j['category'] ?? 'General',
+        educationalNotes = j['educational_notes'] ?? j['educationalNotes'];
+
+  final String id;
+  final String name;
+  final String servingUnit;
+  final int calories;
+  final double proteinG;
+  final double carbsG;
+  final double fatG;
+  final double fibreG;
+  final double ironMg;
+  final double magnesiumMg;
+  final double calciumMg;
+  final double sodiumMg;
+  final String category;
+  final String? educationalNotes;
+}
+
+class MealLog {
+  MealLog.fromJson(Json j)
+      : id = j['id'],
+        mealType = j['meal_type'] ?? j['mealType'],
+        foodId = j['food_id'] ?? j['foodId'],
+        foodName = j['food_name'] ?? j['foodName'],
+        servings = _double(j['servings']) ?? 1.0,
+        calories = _int(j['calories']),
+        proteinG = _double(j['protein_g'] ?? j['proteinG']) ?? 0.0,
+        carbsG = _double(j['carbs_g'] ?? j['carbsG']) ?? 0.0,
+        fatG = _double(j['fat_g'] ?? j['fatG']) ?? 0.0,
+        loggedOn = j['logged_on'] ?? j['loggedOn'];
+
+  final String id;
+  final String mealType; // breakfast | lunch | dinner | snacks
+  final String? foodId;
+  final String foodName;
+  final double servings;
+  final int calories;
+  final double proteinG;
+  final double carbsG;
+  final double fatG;
+  final String loggedOn;
+}
+
+class MealDailySummary {
+  MealDailySummary.fromJson(Json j)
+      : date = j['date'] ?? 'today',
+        totalCalories = _int(j['summary']?['totalCalories']),
+        totalProteinG = _double(j['summary']?['totalProteinG']) ?? 0.0,
+        totalCarbsG = _double(j['summary']?['totalCarbsG']) ?? 0.0,
+        totalFatG = _double(j['summary']?['totalFatG']) ?? 0.0,
+        calorieBalance = j['summary']?['calorieBalance'] ?? '',
+        calorieTarget = _int(j['summary']?['targets']?['calories']),
+        proteinTarget = _int(j['summary']?['targets']?['proteinG']),
+        carbsTarget = _int(j['summary']?['targets']?['carbsG']),
+        fatTarget = _int(j['summary']?['targets']?['fatG']),
+        nudges = _strings(j['nudges']),
+        breakfast = (j['categories']?['breakfast'] as List? ?? const []).map((m) => MealLog.fromJson(m)).toList(),
+        lunch = (j['categories']?['lunch'] as List? ?? const []).map((m) => MealLog.fromJson(m)).toList(),
+        dinner = (j['categories']?['dinner'] as List? ?? const []).map((m) => MealLog.fromJson(m)).toList(),
+        snacks = (j['categories']?['snacks'] as List? ?? const []).map((m) => MealLog.fromJson(m)).toList();
+
+  final String date;
+  final int totalCalories;
+  final double totalProteinG;
+  final double totalCarbsG;
+  final double totalFatG;
+  final String calorieBalance;
+  final int calorieTarget;
+  final int proteinTarget;
+  final int carbsTarget;
+  final int fatTarget;
+  final List<String> nudges;
+  final List<MealLog> breakfast;
+  final List<MealLog> lunch;
+  final List<MealLog> dinner;
+  final List<MealLog> snacks;
+}
+
+// ---- FitPro On-Demand (Trainers) --------------------------------------------
+class Trainer {
+  Trainer.fromJson(Json j)
+      : id = j['id'],
+        name = j['name'],
+        photoUrl = j['photo_url'] ?? j['photoUrl'],
+        bio = j['bio'],
+        rating = _double(j['rating']) ?? 4.9,
+        reviewCount = _int(j['review_count'] ?? j['reviewCount']),
+        certifications = _strings(j['certifications']),
+        specializations = _strings(j['specializations']),
+        trainingModes = _strings(j['training_modes'] ?? j['trainingModes']),
+        hourlyRatePaise = _int(j['hourly_rate_paise'] ?? j['hourlyRatePaise']),
+        bufferMinutes = _int(j['buffer_minutes'] ?? j['bufferMinutes']);
+
+  final String id;
+  final String name;
+  final String? photoUrl;
+  final String bio;
+  final double rating;
+  final int reviewCount;
+  final List<String> certifications;
+  final List<String> specializations;
+  final List<String> trainingModes;
+  final int hourlyRatePaise;
+  final int bufferMinutes;
+}
+
+class TrainerBooking {
+  TrainerBooking.fromJson(Json j)
+      : id = j['id'],
+        trainerId = j['trainer_id'] ?? j['trainerId'],
+        trainerName = j['trainer_name'] ?? j['trainerName'] ?? 'Trainer',
+        photoUrl = j['photo_url'] ?? j['photoUrl'],
+        mode = j['mode'],
+        sessionDate = j['session_date'] ?? j['sessionDate'],
+        slotTime = j['slot_time'] ?? j['slotTime'],
+        amountPaise = _int(j['amount_paise'] ?? j['amountPaise']),
+        status = j['status'];
+
+  final String id;
+  final String trainerId;
+  final String trainerName;
+  final String? photoUrl;
+  final String mode; // online | home | gym
+  final String sessionDate;
+  final String slotTime;
+  final int amountPaise;
+  final String status;
+}
+
+// ---- HealthStop Near You ----------------------------------------------------
+class HealthChemist {
+  HealthChemist.fromJson(Json j)
+      : id = j['id'],
+        name = j['name'],
+        address = j['address'],
+        city = j['city'],
+        distanceKm = _double(j['distance_km'] ?? j['distanceKm']) ?? 1.0,
+        operationalHours = j['operational_hours'] ?? j['operationalHours'],
+        deliveryAvailable = j['delivery_available'] ?? j['deliveryAvailable'] ?? true,
+        deliveryTimeEst = j['delivery_time_est'] ?? j['deliveryTimeEst'] ?? '30-45 mins',
+        phone = j['phone'],
+        latitude = _double(j['latitude']),
+        longitude = _double(j['longitude']);
+
+  final String id;
+  final String name;
+  final String address;
+  final String city;
+  final double distanceKm;
+  final String operationalHours;
+  final bool deliveryAvailable;
+  final String deliveryTimeEst;
+  final String phone;
+  final double? latitude;
+  final double? longitude;
+}
+
+class ClinicDoctor {
+  ClinicDoctor.fromJson(Json j)
+      : name = j['name'] ?? '',
+        degree = j['degree'] ?? '',
+        specialty = j['specialty'] ?? '';
+
+  final String name;
+  final String degree;
+  final String specialty;
+}
+
+class HealthClinic {
+  HealthClinic.fromJson(Json j)
+      : id = j['id'],
+        name = j['name'],
+        address = j['address'],
+        city = j['city'],
+        distanceKm = _double(j['distance_km'] ?? j['distanceKm']) ?? 1.0,
+        doctors = [
+          if (j['doctors'] is List)
+            for (final d in j['doctors'] as List) ClinicDoctor.fromJson(Map<String, dynamic>.from(d as Map)),
+        ],
+        facilities = _strings(j['facilities']),
+        slotTimings = j['slot_timings'] ?? j['slotTimings'],
+        consultationFeePaise = _int(j['consultation_fee_paise'] ?? j['consultationFeePaise']),
+        phone = j['phone'],
+        latitude = _double(j['latitude']),
+        longitude = _double(j['longitude']);
+
+  final String id;
+  final String name;
+  final String address;
+  final String city;
+  final double distanceKm;
+  final List<ClinicDoctor> doctors;
+  final List<String> facilities;
+  final String slotTimings;
+  final int consultationFeePaise;
+  final String phone;
+  final double? latitude;
+  final double? longitude;
 }
 
 DateTime? parseDateOrNull(dynamic v) => _dateOrNull(v);

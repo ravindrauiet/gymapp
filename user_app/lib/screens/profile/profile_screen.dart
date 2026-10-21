@@ -4,6 +4,12 @@ import 'package:provider/provider.dart';
 import 'package:fitkey_core/fitkey_core.dart';
 import '../../state/session.dart';
 import '../auth/profile_setup_screen.dart';
+import '../goals/goal_selection_screen.dart';
+import '../nutrition/fuel_log_screen.dart';
+import '../nutrition/ai_food_scanner.dart';
+import '../ai/ai_coach_screen.dart';
+import '../store/store_screen.dart';
+import '../trainers/trainers_screen.dart';
 import '../health/attendance_screen.dart';
 import '../health/health_report_screen.dart';
 import '../plans/plans_screen.dart';
@@ -52,6 +58,12 @@ class ProfileScreen extends StatelessWidget {
             ),
           ),
           const SizedBox(height: 16),
+          _tile(Icons.smart_toy, 'FitKey AI Coach (ChatGPT)', () => open(const AiCoachScreen()), color: FkColors.sky),
+          _tile(Icons.camera_alt, 'AI Food & Label Scanner', () => open(const AiFoodScannerScreen()), color: FkColors.lime),
+          _tile(Icons.track_changes, 'Fitness Goal & Calorie Baselines', () => open(const GoalSelectionScreen(isEditing: true)), color: FkColors.lime),
+          _tile(Icons.restaurant, 'Fuel Log (Nutrition Diary)', () => open(const FuelLogScreen()), color: FkColors.orange),
+          _tile(Icons.shopping_bag, 'Marketplace Orders', () => open(const StoreScreen()), color: FkColors.violet),
+          _tile(Icons.sports, 'FitPro Trainer Bookings', () => open(const TrainersScreen()), color: FkColors.sky),
           _tile(Icons.card_membership, 'My plans & payments', () => open(const MySubscriptionsScreen())),
           _tile(Icons.insights, 'Progress report', () => open(const HealthReportScreen())),
           _tile(Icons.history, 'Attendance history', () => open(const AttendanceScreen())),

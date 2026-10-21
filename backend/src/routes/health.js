@@ -7,9 +7,53 @@ import { notFound, validate } from '../utils/http.js';
 import { ACTIVITY_TYPES } from '../utils/constants.js';
 import { dateSchema, pagination } from '../utils/schemas.js';
 
-/** Health / gym report (U9): weight log, activity log and an aggregated progress report. */
+/** Health / gym report (U9): weight log, activity log, step tracker and an aggregated progress report. */
 const router = Router();
 router.use(requireAuth('user'));
+
+// ---- Steps & Movement Tracking (Health Connect / Google Fit / Apple HealthKit) ----
+const stepSyncSchema = z.object({
+  date: dateSchema.optional(),
+  steps: z.number().int().min(0).max(100000),
+  distanceKm: z.number().min(0).max(200).optional(),
+  activeCalories: z.number().int().min(0).max(10000).optional(),
+  source: z.string().default('health_connect'),
+});
+
+router.post('/steps/sync', async (req, res) => {
+  const data = validate(stepSyncSchema, req.body);
+  const distance = data.distanceKm ?? Math.round((data.steps * 0.00075) * 100) / 100;
+  const calories = data.activeCalories ?? Math.round(data.steps * 0.04);
+
+  const entry = await queryOne(
+    `INSERT INTO step_logs (user_id, log_date, steps, distance_km, active_calories, source, synced_at)
+     VALUES ($1, COALESCE($2::date, (now() AT TIME ZONE $3)::date), $4, $5, $6, $7, now())
+     ON CONFLICT (user_id, log_date) DO UPDATE SET
+       steps = EXCLUDED.steps,
+       distance_km = EXCLUDED.distance_km,
+       active_calories = EXCLUDED.active_calories,
+       source = EXCLUDED.source,
+       synced_at = now()
+     RETURNING *`,
+    [req.user.id, data.date ?? null, config.tz, data.steps, distance, calories, data.source],
+  );
+  res.status(201).json({ stepLog: entry });
+});
+
+router.get('/steps/today', async (req, res) => {
+  const today = await queryOne(
+    `SELECT * FROM step_logs WHERE user_id = $1 AND log_date = (now() AT TIME ZONE $2)::date`,
+    [req.user.id, config.tz],
+  );
+  res.json({
+    today: today || {
+      steps: 0,
+      distance_km: 0,
+      active_calories: 0,
+      source: 'none',
+    },
+  });
+});
 
 router.post('/weights', async (req, res) => {
   const body = validate(z.object({ weightKg: z.number().min(20).max(400), loggedOn: dateSchema.optional() }), req.body);
@@ -88,13 +132,13 @@ function currentStreak(datesDesc, today) {
   return streak;
 }
 
-/** GET /health/report?days=30 — attendance, workouts and weight trend for the progress screen. */
+/** GET /health/report?days=30 — Central Integration Architecture (Gym & Health Report Engine). */
 router.get('/report', async (req, res) => {
   const { days } = validate(z.object({ days: z.coerce.number().int().min(7).max(365).default(30) }), req.query);
   const params = [req.user.id, config.tz, days];
   const since = `(now() AT TIME ZONE $2)::date - $3::int`;
 
-  const [today, attendance, perDay, allDates, venues, workouts, byType, weights] = await Promise.all([
+  const [today, attendance, perDay, allDates, venues, workouts, byType, weights, userGoal, stepsData, nutritionData] = await Promise.all([
     queryOne(`SELECT (now() AT TIME ZONE $1)::date AS d`, [config.tz]),
     queryOne(
       `SELECT COUNT(*) AS total_checkins, COUNT(DISTINCT venue_id) AS unique_venues, COUNT(DISTINCT checkin_date) AS active_days
@@ -128,6 +172,24 @@ router.get('/report', async (req, res) => {
       `SELECT weight_kg, logged_on FROM weight_logs WHERE user_id = $1 AND logged_on > ${since} ORDER BY logged_on`,
       params,
     ),
+    queryOne(`SELECT * FROM user_goals WHERE user_id = $1`, [req.user.id]),
+    queryOne(
+      `SELECT COALESCE(SUM(steps), 0) AS total_steps,
+              COALESCE(SUM(distance_km), 0) AS total_step_distance_km,
+              COALESCE(SUM(active_calories), 0) AS total_active_burn,
+              COUNT(DISTINCT log_date) AS logged_days
+       FROM step_logs WHERE user_id = $1 AND log_date > ${since}`,
+      params,
+    ),
+    queryOne(
+      `SELECT COALESCE(SUM(calories), 0) AS total_calories,
+              COALESCE(SUM(protein_g), 0) AS total_protein_g,
+              COALESCE(SUM(carbs_g), 0) AS total_carbs_g,
+              COALESCE(SUM(fat_g), 0) AS total_fat_g,
+              COUNT(DISTINCT logged_on) AS meal_days
+       FROM meal_logs WHERE user_id = $1 AND logged_on > ${since}`,
+      params,
+    ),
   ]);
 
   const latestWeight = await queryOne(
@@ -137,20 +199,93 @@ router.get('/report', async (req, res) => {
   const first = weights[0];
   const last = weights[weights.length - 1];
 
+  const streak = currentStreak(allDates.map((r) => r.d), today.d);
+
+  // 1. Gym Consistency Score (0-100) based on recommended 4 sessions/week
+  const targetCheckins = Math.max(1, Math.round((days / 7) * 4));
+  const totalCheckins = +(attendance.totalCheckins ?? attendance.total_checkins ?? 0);
+  const gymConsistencyScore = Math.min(100, Math.round(((totalCheckins + streak * 0.5) / targetCheckins) * 100));
+
+  // 2. Daily Movement Score (0-100) based on 8,000 steps/day or 400 active kcal/day
+  const totSteps = +(stepsData.totalSteps ?? stepsData.total_steps ?? 0);
+  const logDays = Math.max(1, +(stepsData.loggedDays ?? stepsData.logged_days ?? 1));
+  const totBurn = +(stepsData.totalActiveBurn ?? stepsData.total_active_burn ?? 0);
+  const totDist = +(stepsData.totalStepDistanceKm ?? stepsData.total_step_distance_km ?? 0);
+
+  const avgDailySteps = Math.round(totSteps / logDays);
+  const avgDailyActiveBurn = Math.round(totBurn / logDays);
+  const movementScore = Math.min(100, Math.round((avgDailySteps / 8000) * 60 + (avgDailyActiveBurn / 400) * 40));
+
+  // 3. Nutrition & Baselines
+  const mealDays = Math.max(1, +(nutritionData.mealDays ?? nutritionData.meal_days ?? 1));
+  const totCals = +(nutritionData.totalCalories ?? nutritionData.total_calories ?? 0);
+  const totProtein = +(nutritionData.totalProteinG ?? nutritionData.total_protein_g ?? 0);
+  const totCarbs = +(nutritionData.totalCarbsG ?? nutritionData.total_carbs_g ?? 0);
+  const totFat = +(nutritionData.totalFatG ?? nutritionData.total_fat_g ?? 0);
+
+  const avgDailyCalories = Math.round(totCals / mealDays);
+  const avgDailyProtein = Math.round((totProtein / mealDays) * 10) / 10;
+  const avgDailyCarbs = Math.round((totCarbs / mealDays) * 10) / 10;
+  const avgDailyFat = Math.round((totFat / mealDays) * 10) / 10;
+
+  const baselineCalories = userGoal ? (userGoal.dailyCalorieTarget ?? userGoal.daily_calorie_target ?? 2000) : 2000;
+  const baselineProtein = userGoal ? (userGoal.dailyProteinG ?? userGoal.daily_protein_g ?? 120) : 120;
+  const baselineCarbs = userGoal ? (userGoal.dailyCarbsG ?? userGoal.daily_carbs_g ?? 220) : 220;
+  const baselineFat = userGoal ? (userGoal.dailyFatG ?? userGoal.daily_fat_g ?? 55) : 55;
+  const goalType = userGoal ? (userGoal.goalType ?? userGoal.goal_type ?? 'maintenance') : 'maintenance';
+
+  const calorieDelta = avgDailyCalories - baselineCalories;
+  let deficitSurplusStatus = 'Balanced (Isocaloric)';
+  if (calorieDelta < -150) {
+    deficitSurplusStatus = `Deficit (-${Math.abs(calorieDelta)} kcal/day)`;
+  } else if (calorieDelta > 150) {
+    deficitSurplusStatus = `Surplus (+${calorieDelta} kcal/day)`;
+  }
+
   res.json({
     days,
     attendance: {
       ...attendance,
-      currentStreak: currentStreak(allDates.map((r) => r.d), today.d),
+      currentStreak: streak,
+      gymConsistencyScore,
       perDay,
       topVenues: venues,
     },
     workouts: { ...workouts, byType },
+    movement: {
+      totalSteps: totSteps,
+      avgDailySteps,
+      totalDistanceKm: Math.round(totDist * 10) / 10,
+      totalActiveBurn: totBurn,
+      avgDailyActiveBurn,
+      movementScore,
+    },
+    nutrition: {
+      avgDailyCalories,
+      avgDailyProtein,
+      avgDailyCarbs,
+      avgDailyFat,
+      deficitSurplusStatus,
+      mealDays,
+      baselines: {
+        dailyCalories: baselineCalories,
+        dailyProteinG: baselineProtein,
+        dailyCarbsG: baselineCarbs,
+        dailyFatG: baselineFat,
+        goalType,
+      },
+    },
     weight: {
       latest: latestWeight,
       changeKg: first && last ? Math.round((last.weightKg - first.weightKg) * 10) / 10 : null,
       series: weights,
     },
+    integrationArchitecture: [
+      { source: 'Onboarding Profile', metric: 'Calorie & Nutrient Target Baselines', outcome: `${baselineCalories} kcal / ${baselineProtein}g protein daily benchmark` },
+      { source: 'Activity Tracker', metric: 'Steps, Distance (KM), Active Burn', outcome: `${avgDailySteps.toLocaleString()} steps/day · Movement Score ${movementScore}/100` },
+      { source: 'FitKey Gym Check-in', metric: 'Attendance Logs, Session Frequency', outcome: `${totalCheckins} check-ins · Consistency Score ${gymConsistencyScore}/100` },
+      { source: 'Fuel Log (Nutrition)', metric: 'Total Calorie & Macro/Micro Intake', outcome: deficitSurplusStatus },
+    ],
   });
 });
 

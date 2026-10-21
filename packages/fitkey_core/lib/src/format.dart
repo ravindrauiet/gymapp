@@ -3,6 +3,7 @@ import 'package:intl/intl.dart';
 final _rupees = NumberFormat.currency(locale: 'en_IN', symbol: '₹', decimalDigits: 0);
 
 String formatPaise(int paise) => _rupees.format(paise / 100);
+String formatInr(int paise) => formatPaise(paise);
 
 String formatDate(DateTime d) => DateFormat('d MMM yyyy').format(d);
 String formatShortDate(DateTime d) => DateFormat('d MMM').format(d);

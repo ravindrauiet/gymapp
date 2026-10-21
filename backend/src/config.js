@@ -23,5 +23,6 @@ export const config = {
   exposeDevOtp: !isProd && process.env.EXPOSE_DEV_OTP === 'true',
   paymentsMode: process.env.PAYMENTS_MODE ?? 'mock',
   adminPhone: process.env.ADMIN_PHONE,
+  openaiApiKey: process.env.OPENAI_API_KEY || '',
   corsOrigins: (process.env.CORS_ORIGINS ?? '*').split(',').map((s) => s.trim()),
 };

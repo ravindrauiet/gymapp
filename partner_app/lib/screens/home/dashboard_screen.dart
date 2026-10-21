@@ -9,6 +9,8 @@ import '../auth/profile_screen.dart';
 import '../checkin/checkin_code_screen.dart';
 import '../venue/venue_editor_screen.dart';
 import '../venue/venue_overview_screen.dart';
+import '../vendor/vendor_portal_screen.dart';
+import '../trainer/partner_trainer_screen.dart';
 
 /// Partner home: all my venues, today's check-ins, quick access to the front-desk QR.
 class DashboardScreen extends StatefulWidget {
@@ -108,6 +110,62 @@ class _DashboardScreenState extends State<DashboardScreen> {
                           value: '${live.length}/${venues.length}',
                           icon: Icons.storefront,
                           color: FkColors.orange),
+                    ),
+                  ]),
+                  const SizedBox(height: 16),
+                  Row(children: [
+                    Expanded(
+                      child: InkWell(
+                        onTap: () => _open(const VendorPortalScreen()),
+                        borderRadius: BorderRadius.circular(16),
+                        child: Container(
+                          padding: const EdgeInsets.all(14),
+                          decoration: BoxDecoration(
+                            color: FkColors.lime.withValues(alpha: 0.12),
+                            borderRadius: BorderRadius.circular(16),
+                            border: Border.all(color: FkColors.lime.withValues(alpha: 0.4)),
+                          ),
+                          child: const Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                            Row(children: [
+                              Icon(Icons.storefront, color: FkColors.lime, size: 22),
+                              Spacer(),
+                              Icon(Icons.arrow_forward, color: FkColors.lime, size: 16),
+                            ]),
+                            SizedBox(height: 10),
+                            Text('Vendor Portal', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 15)),
+                            SizedBox(height: 2),
+                            Text('SKUs, inventory & order dispatch',
+                                style: TextStyle(color: FkColors.textSecondary, fontSize: 11)),
+                          ]),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: InkWell(
+                        onTap: () => _open(const PartnerTrainerScreen()),
+                        borderRadius: BorderRadius.circular(16),
+                        child: Container(
+                          padding: const EdgeInsets.all(14),
+                          decoration: BoxDecoration(
+                            color: FkColors.sky.withValues(alpha: 0.12),
+                            borderRadius: BorderRadius.circular(16),
+                            border: Border.all(color: FkColors.sky.withValues(alpha: 0.4)),
+                          ),
+                          child: const Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                            Row(children: [
+                              Icon(Icons.sports, color: FkColors.sky, size: 22),
+                              Spacer(),
+                              Icon(Icons.arrow_forward, color: FkColors.sky, size: 16),
+                            ]),
+                            SizedBox(height: 10),
+                            Text('Trainer Module', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 15)),
+                            SizedBox(height: 2),
+                            Text('Verification, slots & pricing',
+                                style: TextStyle(color: FkColors.textSecondary, fontSize: 11)),
+                          ]),
+                        ),
+                      ),
                     ),
                   ]),
                   if (live.length == 1) ...[

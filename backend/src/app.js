@@ -19,6 +19,12 @@ import partnerRouter from './routes/partner.js';
 import { plansRouter, subscriptionsRouter } from './routes/plans.js';
 import venuesRouter from './routes/venues.js';
 import videosRouter from './routes/videos.js';
+import goalsRouter from './routes/goals.js';
+import { marketplaceRouter, partnerVendorRouter } from './routes/marketplace.js';
+import nutritionRouter from './routes/nutrition.js';
+import { trainersRouter, partnerTrainerRouter } from './routes/trainers.js';
+import healthstopRouter from './routes/healthstop.js';
+import aiRouter from './routes/ai.js';
 
 export function createApp() {
   const app = express();
@@ -36,7 +42,7 @@ export function createApp() {
     }),
   );
   app.use(cors({ origin: config.corsOrigins.includes('*') ? true : config.corsOrigins }));
-  app.use(express.json({ limit: '1mb' }));
+  app.use(express.json({ limit: '15mb' }));
   app.use(morgan(config.isProd ? 'combined' : 'dev'));
 
   app.get('/health', async (_req, res) => {
@@ -61,8 +67,16 @@ export function createApp() {
   api.use('/contests', contestsRouter);
   api.use('/leaderboard', leaderboardRouter);
   api.use('/health', healthRouter);
-  // Venue owner (Partner app)
+  api.use('/goals', goalsRouter);
+  api.use('/marketplace', marketplaceRouter);
+  api.use('/nutrition', nutritionRouter);
+  api.use('/trainers', trainersRouter);
+  api.use('/healthstop', healthstopRouter);
+  api.use('/ai', aiRouter);
+  // Venue owner & vendor/trainer (Partner app)
   api.use('/partner', partnerRouter);
+  api.use('/partner/vendor', partnerVendorRouter);
+  api.use('/partner/trainer', partnerTrainerRouter);
   // FITKEY team
   api.use('/admin', adminRouter);
 

@@ -10,6 +10,12 @@ import '../community/contest_detail_screen.dart';
 import '../explore/venue_detail_screen.dart';
 import '../health/health_report_screen.dart';
 import '../plans/plans_screen.dart';
+import '../healthstop/healthstop_screen.dart';
+import '../nutrition/fuel_log_screen.dart';
+import '../nutrition/ai_food_scanner.dart';
+import '../ai/ai_coach_screen.dart';
+import '../store/store_screen.dart';
+import '../trainers/trainers_screen.dart';
 import 'home_shell.dart';
 
 class HomeScreen extends StatefulWidget {
@@ -75,7 +81,9 @@ class _HomeScreenState extends State<HomeScreen> {
               ),
               const SizedBox(height: 20),
               _MembershipCard(subscription: session.subscription),
-              const SizedBox(height: 16),
+              const SizedBox(height: 18),
+              const _TopActionQuickGrid(),
+              const SizedBox(height: 14),
               const _QuickActions(),
               FutureBuilder<_HomeData>(
                 future: _future,
@@ -223,6 +231,128 @@ class _MembershipCard extends StatelessWidget {
                 ]),
               ),
       ),
+    );
+  }
+}
+
+class _TopActionQuickGrid extends StatelessWidget {
+  const _TopActionQuickGrid();
+
+  @override
+  Widget build(BuildContext context) {
+    Widget gridItem({
+      required String label,
+      required String subtitle,
+      required IconData icon,
+      required Color color,
+      required VoidCallback onTap,
+    }) {
+      return Expanded(
+        child: InkWell(
+          onTap: onTap,
+          borderRadius: BorderRadius.circular(16),
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+            decoration: BoxDecoration(
+              color: color.withValues(alpha: 0.1),
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(color: color.withValues(alpha: 0.35)),
+            ),
+            child: Row(
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(8),
+                  decoration: BoxDecoration(
+                    color: color.withValues(alpha: 0.2),
+                    shape: BoxShape.circle,
+                  ),
+                  child: Icon(icon, color: color, size: 20),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        label,
+                        style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 13, color: Colors.white),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        subtitle,
+                        style: const TextStyle(fontSize: 10, color: FkColors.textSecondary),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
+    }
+
+    return Column(
+      children: [
+        Row(children: [
+          gridItem(
+            label: 'FitPro On-Demand',
+            subtitle: 'Book a Trainer',
+            icon: Icons.sports,
+            color: FkColors.lime,
+            onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const TrainersScreen())),
+          ),
+          const SizedBox(width: 10),
+          gridItem(
+            label: 'HealthStop Near You',
+            subtitle: 'Clinics & Chemists',
+            icon: Icons.local_hospital,
+            color: FkColors.sky,
+            onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const HealthStopScreen())),
+          ),
+        ]),
+        const SizedBox(height: 10),
+        Row(children: [
+          gridItem(
+            label: 'Fuel Log',
+            subtitle: 'Nutrition & Meals',
+            icon: Icons.restaurant,
+            color: FkColors.orange,
+            onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const FuelLogScreen())),
+          ),
+          const SizedBox(width: 10),
+          gridItem(
+            label: 'Marketplace',
+            subtitle: 'Gear & Supplements',
+            icon: Icons.shopping_bag,
+            color: FkColors.violet,
+            onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const StoreScreen())),
+          ),
+        ]),
+        const SizedBox(height: 10),
+        Row(children: [
+          gridItem(
+            label: 'FitKey AI Coach',
+            subtitle: 'Chat with GPT-4o',
+            icon: Icons.smart_toy,
+            color: FkColors.sky,
+            onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const AiCoachScreen())),
+          ),
+          const SizedBox(width: 10),
+          gridItem(
+            label: 'AI Meal Scanner',
+            subtitle: 'Snap Plate / Label',
+            icon: Icons.camera_alt,
+            color: FkColors.lime,
+            onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const AiFoodScannerScreen())),
+          ),
+        ]),
+      ],
     );
   }
 }

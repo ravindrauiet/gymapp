@@ -22,7 +22,11 @@ router.get('/stats', async (_req, res) => {
        (SELECT COUNT(*) FROM subscriptions WHERE status = 'active' AND now() BETWEEN starts_at AND ends_at) AS active_subscriptions,
        (SELECT COALESCE(SUM(amount_paise), 0) FROM subscriptions WHERE created_at >= date_trunc('month', now())) AS revenue_this_month_paise,
        (SELECT COUNT(*) FROM checkins WHERE checkin_date = (now() AT TIME ZONE $1)::date) AS checkins_today,
-       (SELECT COUNT(*) FROM user_reports) AS reports`,
+       (SELECT COUNT(*) FROM user_reports) AS reports,
+       (SELECT COUNT(*) FROM marketplace_orders) AS total_orders,
+       (SELECT COALESCE(SUM(total_amount_paise), 0) FROM marketplace_orders WHERE payment_status = 'paid') AS store_revenue_paise,
+       (SELECT COUNT(*) FROM trainers WHERE verification_status = 'verified') AS verified_trainers,
+       (SELECT COUNT(*) FROM marketplace_products WHERE is_active = true) AS active_products`,
     [config.tz],
   );
   res.json({ stats });
@@ -170,6 +174,54 @@ router.get('/reports', async (_req, res) => {
      ORDER BY r.created_at DESC LIMIT 200`,
   );
   res.json({ reports });
+});
+
+// Marketplace Orders overview for Admin
+router.get('/orders', async (_req, res) => {
+  const orders = await query(
+    `SELECT o.*, u.name AS member_name, u.phone AS member_phone
+     FROM marketplace_orders o
+     JOIN users u ON u.id = o.user_id
+     ORDER BY o.created_at DESC LIMIT 200`,
+  );
+  res.json({ orders });
+});
+
+// Vendor verification for Admin
+router.get('/vendors', async (_req, res) => {
+  const vendors = await query(
+    `SELECT v.*, u.name AS partner_name, u.phone AS partner_phone
+     FROM marketplace_vendors v
+     JOIN users u ON u.id = v.partner_id
+     ORDER BY v.created_at DESC`,
+  );
+  res.json({ vendors });
+});
+
+router.patch('/vendors/:id/status', async (req, res) => {
+  const { status } = validate(z.object({ status: z.enum(['pending', 'verified', 'rejected']) }), req.body);
+  const vendor = await queryOne(
+    `UPDATE marketplace_vendors SET verification_status = $1 WHERE id = $2 RETURNING *`,
+    [status, req.params.id],
+  );
+  if (!vendor) throw notFound('Vendor not found');
+  res.json({ vendor });
+});
+
+// Trainer verification for Admin
+router.get('/trainers', async (_req, res) => {
+  const trainers = await query(`SELECT * FROM trainers ORDER BY created_at DESC`);
+  res.json({ trainers });
+});
+
+router.patch('/trainers/:id/status', async (req, res) => {
+  const { status } = validate(z.object({ status: z.enum(['pending', 'verified', 'rejected']) }), req.body);
+  const trainer = await queryOne(
+    `UPDATE trainers SET verification_status = $1 WHERE id = $2 RETURNING *`,
+    [status, req.params.id],
+  );
+  if (!trainer) throw notFound('Trainer not found');
+  res.json({ trainer });
 });
 
 export default router;

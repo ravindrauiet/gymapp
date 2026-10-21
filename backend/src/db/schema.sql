@@ -254,3 +254,208 @@ CREATE TABLE IF NOT EXISTS files (
   data       BYTEA NOT NULL,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+-- ---------------------------------------------------------------------------
+-- 1. Goal-Based Onboarding & User Profiling
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS user_goals (
+  user_id               UUID PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+  goal_type             VARCHAR(20) NOT NULL CHECK (goal_type IN ('weight_loss', 'muscle_gain', 'maintenance')),
+  age                   INT NOT NULL CHECK (age >= 10 AND age <= 120),
+  gender                VARCHAR(12) NOT NULL CHECK (gender IN ('male', 'female', 'other')),
+  height_cm             NUMERIC(5, 2) NOT NULL CHECK (height_cm >= 50 AND height_cm <= 300),
+  current_weight_kg     NUMERIC(5, 2) NOT NULL CHECK (current_weight_kg >= 20 AND current_weight_kg <= 400),
+  target_weight_kg      NUMERIC(5, 2) NOT NULL CHECK (target_weight_kg >= 20 AND target_weight_kg <= 400),
+  activity_level        VARCHAR(20) NOT NULL CHECK (activity_level IN ('sedentary', 'light', 'moderate', 'very_active')),
+  daily_calorie_target  INT NOT NULL CHECK (daily_calorie_target > 0),
+  daily_protein_g       INT NOT NULL CHECK (daily_protein_g >= 0),
+  daily_carbs_g         INT NOT NULL CHECK (daily_carbs_g >= 0),
+  daily_fat_g           INT NOT NULL CHECK (daily_fat_g >= 0),
+  created_at            TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at            TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+-- ---------------------------------------------------------------------------
+-- 2. Marketplace / Store Module
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS marketplace_vendors (
+  id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  partner_id          UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  business_name       VARCHAR(160) NOT NULL,
+  gstin               VARCHAR(30),
+  bank_name           VARCHAR(100),
+  bank_account_no     VARCHAR(40),
+  ifsc_code           VARCHAR(20),
+  verification_status VARCHAR(20) NOT NULL DEFAULT 'verified' CHECK (verification_status IN ('pending', 'verified', 'rejected')),
+  commission_rate     NUMERIC(4, 2) NOT NULL DEFAULT 10.00,
+  created_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
+  UNIQUE (partner_id)
+);
+
+CREATE TABLE IF NOT EXISTS marketplace_products (
+  id                   UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  vendor_id            UUID REFERENCES marketplace_vendors(id) ON DELETE CASCADE,
+  title                VARCHAR(200) NOT NULL,
+  brand                VARCHAR(100) NOT NULL,
+  category             VARCHAR(30) NOT NULL CHECK (category IN ('supplements', 'apparel', 'wearables', 'gear')),
+  description          TEXT NOT NULL,
+  price_paise          INT NOT NULL CHECK (price_paise >= 0),
+  original_price_paise INT NOT NULL CHECK (original_price_paise >= 0),
+  stock_quantity       INT NOT NULL DEFAULT 10 CHECK (stock_quantity >= 0),
+  images               TEXT[] NOT NULL DEFAULT '{}',
+  specs                JSONB NOT NULL DEFAULT '{}',
+  is_active            BOOLEAN NOT NULL DEFAULT true,
+  created_at           TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS marketplace_products_cat_idx ON marketplace_products (category, is_active);
+
+CREATE TABLE IF NOT EXISTS marketplace_orders (
+  id                 UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id            UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  status             VARCHAR(20) NOT NULL DEFAULT 'placed'
+                     CHECK (status IN ('placed', 'processing', 'dispatched', 'out_for_delivery', 'delivered', 'cancelled')),
+  total_amount_paise INT NOT NULL CHECK (total_amount_paise >= 0),
+  payment_method     VARCHAR(30) NOT NULL CHECK (payment_method IN ('upi', 'card', 'netbanking', 'cod')),
+  payment_status     VARCHAR(20) NOT NULL DEFAULT 'paid' CHECK (payment_status IN ('pending', 'paid', 'cod_pending')),
+  shipping_address   JSONB NOT NULL,
+  tracking_number    VARCHAR(80),
+  dispatched_at      TIMESTAMPTZ,
+  delivered_at       TIMESTAMPTZ,
+  created_at         TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS marketplace_orders_user_idx ON marketplace_orders (user_id, created_at DESC);
+
+CREATE TABLE IF NOT EXISTS marketplace_order_items (
+  id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  order_id    UUID NOT NULL REFERENCES marketplace_orders(id) ON DELETE CASCADE,
+  product_id  UUID REFERENCES marketplace_products(id) ON DELETE SET NULL,
+  vendor_id   UUID REFERENCES marketplace_vendors(id) ON DELETE SET NULL,
+  title       VARCHAR(200) NOT NULL,
+  price_paise INT NOT NULL CHECK (price_paise >= 0),
+  quantity    INT NOT NULL DEFAULT 1 CHECK (quantity > 0)
+);
+
+-- ---------------------------------------------------------------------------
+-- 3. "Fuel Log" (Nutrition & Meal Tracker Module)
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS food_items (
+  id                UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  barcode           VARCHAR(32),
+  name              VARCHAR(160) NOT NULL,
+  serving_unit      VARCHAR(60) NOT NULL,
+  calories          INT NOT NULL CHECK (calories >= 0),
+  protein_g         NUMERIC(6, 2) NOT NULL DEFAULT 0,
+  carbs_g           NUMERIC(6, 2) NOT NULL DEFAULT 0,
+  fat_g             NUMERIC(6, 2) NOT NULL DEFAULT 0,
+  fibre_g           NUMERIC(6, 2) NOT NULL DEFAULT 0,
+  iron_mg           NUMERIC(6, 2) NOT NULL DEFAULT 0,
+  magnesium_mg      NUMERIC(6, 2) NOT NULL DEFAULT 0,
+  calcium_mg        NUMERIC(6, 2) NOT NULL DEFAULT 0,
+  sodium_mg         NUMERIC(6, 2) NOT NULL DEFAULT 0,
+  category          VARCHAR(40) NOT NULL DEFAULT 'general',
+  educational_notes TEXT,
+  created_at        TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS food_items_name_idx ON food_items (name);
+CREATE INDEX IF NOT EXISTS food_items_barcode_idx ON food_items (barcode);
+
+CREATE TABLE IF NOT EXISTS meal_logs (
+  id         UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id    UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  meal_type  VARCHAR(20) NOT NULL CHECK (meal_type IN ('breakfast', 'lunch', 'dinner', 'snacks')),
+  food_id    UUID REFERENCES food_items(id) ON DELETE SET NULL,
+  food_name  VARCHAR(160) NOT NULL,
+  servings   NUMERIC(4, 2) NOT NULL DEFAULT 1.0 CHECK (servings > 0),
+  calories   INT NOT NULL CHECK (calories >= 0),
+  protein_g  NUMERIC(6, 2) NOT NULL DEFAULT 0,
+  carbs_g    NUMERIC(6, 2) NOT NULL DEFAULT 0,
+  fat_g      NUMERIC(6, 2) NOT NULL DEFAULT 0,
+  logged_on  DATE NOT NULL,
+  logged_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS meal_logs_user_date_idx ON meal_logs (user_id, logged_on);
+
+-- ---------------------------------------------------------------------------
+-- 4. Activity & Movement Tracking Engine
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS step_logs (
+  id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id         UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  log_date        DATE NOT NULL,
+  steps           INT NOT NULL DEFAULT 0 CHECK (steps >= 0),
+  distance_km     NUMERIC(6, 2) NOT NULL DEFAULT 0 CHECK (distance_km >= 0),
+  active_calories INT NOT NULL DEFAULT 0 CHECK (active_calories >= 0),
+  source          VARCHAR(40) NOT NULL DEFAULT 'health_connect',
+  synced_at       TIMESTAMPTZ NOT NULL DEFAULT now(),
+  UNIQUE (user_id, log_date)
+);
+
+-- ---------------------------------------------------------------------------
+-- 6. FitPro On-Demand (Book a Trainer)
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS trainers (
+  id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  partner_id          UUID REFERENCES users(id) ON DELETE SET NULL,
+  name                VARCHAR(160) NOT NULL,
+  photo_url           TEXT,
+  bio                 TEXT NOT NULL,
+  rating              NUMERIC(3, 2) NOT NULL DEFAULT 4.9,
+  review_count        INT NOT NULL DEFAULT 24,
+  certifications      TEXT[] NOT NULL DEFAULT '{}',
+  specializations     TEXT[] NOT NULL DEFAULT '{}',
+  training_modes      TEXT[] NOT NULL DEFAULT '{online,home,gym}',
+  hourly_rate_paise   INT NOT NULL CHECK (hourly_rate_paise > 0),
+  buffer_minutes      INT NOT NULL DEFAULT 30,
+  working_hours       JSONB NOT NULL DEFAULT '{"start": "06:00", "end": "21:00"}',
+  verification_status VARCHAR(20) NOT NULL DEFAULT 'verified' CHECK (verification_status IN ('pending', 'verified', 'rejected')),
+  created_at          TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS trainer_bookings (
+  id               UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  trainer_id       UUID NOT NULL REFERENCES trainers(id) ON DELETE CASCADE,
+  user_id          UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  mode             VARCHAR(20) NOT NULL CHECK (mode IN ('online', 'home', 'gym')),
+  session_date     DATE NOT NULL,
+  slot_time        VARCHAR(20) NOT NULL,
+  duration_minutes INT NOT NULL DEFAULT 60,
+  amount_paise     INT NOT NULL CHECK (amount_paise >= 0),
+  status           VARCHAR(20) NOT NULL DEFAULT 'confirmed' CHECK (status IN ('confirmed', 'completed', 'cancelled')),
+  created_at       TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS trainer_bookings_trainer_idx ON trainer_bookings (trainer_id, session_date);
+CREATE INDEX IF NOT EXISTS trainer_bookings_user_idx ON trainer_bookings (user_id, session_date);
+
+-- ---------------------------------------------------------------------------
+-- 7. HealthStop Near You (Clinics & Chemists)
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS health_chemists (
+  id                 UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  name               VARCHAR(160) NOT NULL,
+  address            TEXT NOT NULL,
+  city               VARCHAR(80) NOT NULL,
+  distance_km        NUMERIC(4, 1) NOT NULL DEFAULT 1.2,
+  operational_hours  VARCHAR(80) NOT NULL,
+  delivery_available BOOLEAN NOT NULL DEFAULT true,
+  delivery_time_est  VARCHAR(60) NOT NULL DEFAULT '30-45 mins',
+  phone              VARCHAR(20) NOT NULL,
+  latitude           DOUBLE PRECISION,
+  longitude          DOUBLE PRECISION,
+  created_at         TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS health_clinics (
+  id                     UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  name                   VARCHAR(160) NOT NULL,
+  address                TEXT NOT NULL,
+  city                   VARCHAR(80) NOT NULL,
+  distance_km            NUMERIC(4, 1) NOT NULL DEFAULT 1.5,
+  doctors                JSONB NOT NULL DEFAULT '[]',
+  facilities             TEXT[] NOT NULL DEFAULT '{}',
+  slot_timings           VARCHAR(120) NOT NULL,
+  consultation_fee_paise INT NOT NULL CHECK (consultation_fee_paise >= 0),
+  phone                  VARCHAR(20) NOT NULL,
+  latitude               DOUBLE PRECISION,
+  longitude              DOUBLE PRECISION,
+  created_at             TIMESTAMPTZ NOT NULL DEFAULT now()
+);

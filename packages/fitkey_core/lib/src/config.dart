@@ -1,7 +1,3 @@
-import 'dart:io' show Platform;
-
-import 'package:flutter/foundation.dart';
-
 /// Backend base URL. Override at build time:
 ///   flutter run --dart-define=API_URL=https://api.fitkey.in/api/v1
 class AppConfig {

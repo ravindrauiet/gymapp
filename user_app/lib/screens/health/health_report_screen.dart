@@ -7,8 +7,10 @@ import 'package:provider/provider.dart';
 import 'package:fitkey_core/fitkey_core.dart';
 import '../../data/models.dart';
 import '../../state/session.dart';
+import '../goals/goal_selection_screen.dart';
 import 'attendance_screen.dart';
 import 'log_sheets.dart';
+import 'step_sync_sheet.dart';
 
 /// U9 — Health / gym report: attendance, workouts, weight trend.
 class HealthReportScreen extends StatefulWidget {
@@ -77,7 +79,7 @@ class _HealthReportScreenState extends State<HealthReportScreen> {
                     },
                   ),
                 ),
-                const SizedBox(width: 10),
+                const SizedBox(width: 8),
                 Expanded(
                   child: OutlinedButton.icon(
                     icon: const Icon(Icons.monitor_weight_outlined, color: FkColors.sky),
@@ -87,7 +89,167 @@ class _HealthReportScreenState extends State<HealthReportScreen> {
                     },
                   ),
                 ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: OutlinedButton.icon(
+                    icon: const Icon(Icons.directions_walk, color: FkColors.orange),
+                    label: const Text('Sync steps'),
+                    onPressed: () async {
+                      final updated = await showModalBottomSheet<bool>(
+                        context: context,
+                        isScrollControlled: true,
+                        builder: (_) => const StepSyncSheet(),
+                      );
+                      if (updated == true) _reload();
+                    },
+                  ),
+                ),
               ]),
+              const SizedBox(height: 16),
+
+              // 5. Central Integration Architecture (Gym & Health Report Engine)
+              Card(
+                color: const Color(0xFF1B2028),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(16),
+                  side: BorderSide(color: FkColors.lime.withValues(alpha: 0.3)),
+                ),
+                child: Padding(
+                  padding: const EdgeInsets.all(16),
+                  child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                    Row(children: [
+                      const Icon(Icons.hub, color: FkColors.lime, size: 22),
+                      const SizedBox(width: 8),
+                      const Expanded(
+                        child: Text(
+                          'Central Gym & Health Report Engine',
+                          style: TextStyle(fontWeight: FontWeight.w800, fontSize: 15, color: Colors.white),
+                        ),
+                      ),
+                      TextButton(
+                        onPressed: () async {
+                          await Navigator.push(
+                            context,
+                            MaterialPageRoute(builder: (_) => const GoalSelectionScreen(isEditing: true)),
+                          );
+                          _reload();
+                        },
+                        child: const Text('Edit Goal', style: TextStyle(color: FkColors.lime, fontSize: 12)),
+                      ),
+                    ]),
+                    const SizedBox(height: 10),
+                    const Text(
+                      'Cross-functional integration combining your Onboarding Profile, Activity Engine, Attendance QR Logs, and Fuel Nutrition tracker.',
+                      style: TextStyle(color: FkColors.textSecondary, fontSize: 12, height: 1.3),
+                    ),
+                    const Divider(height: 20),
+                    ...r.integrationRows.map((row) => Padding(
+                          padding: const EdgeInsets.symmetric(vertical: 6),
+                          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                            Row(children: [
+                              Container(
+                                width: 8,
+                                height: 8,
+                                decoration: const BoxDecoration(color: FkColors.lime, shape: BoxShape.circle),
+                              ),
+                              const SizedBox(width: 8),
+                              Text(row.source, style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13)),
+                              const Spacer(),
+                              Text(row.metric,
+                                  style: const TextStyle(color: FkColors.textSecondary, fontSize: 11)),
+                            ]),
+                            Padding(
+                              padding: const EdgeInsets.only(left: 16, top: 2),
+                              child: Text(row.outcome,
+                                  style: const TextStyle(
+                                      color: FkColors.lime, fontWeight: FontWeight.w600, fontSize: 12)),
+                            ),
+                          ]),
+                        )),
+                  ]),
+                ),
+              ),
+
+              // Activity & Movement Engine
+              if (r.movement != null) ...[
+                const SectionHeader('Activity & Movement Engine'),
+                Row(children: [
+                  Expanded(
+                    child: StatTile(
+                      label: 'Avg Daily Steps',
+                      value: r.movement!.avgDailySteps.toString(),
+                      icon: Icons.directions_walk,
+                      color: FkColors.lime,
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: StatTile(
+                      label: 'Distance (KM)',
+                      value: formatNumber(r.movement!.totalDistanceKm),
+                      icon: Icons.route,
+                      color: FkColors.sky,
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: StatTile(
+                      label: 'Movement Score',
+                      value: '${r.movement!.movementScore}/100',
+                      icon: Icons.speed,
+                      color: FkColors.orange,
+                    ),
+                  ),
+                ]),
+              ],
+
+              // Fuel Log (Nutrition Integration)
+              if (r.nutrition != null) ...[
+                const SectionHeader('Fuel Log (Nutrition Progress)'),
+                Card(
+                  child: Padding(
+                    padding: const EdgeInsets.all(16),
+                    child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                      Row(children: [
+                        Expanded(
+                          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                            const Text('Daily Average Intake', style: TextStyle(color: FkColors.textSecondary, fontSize: 12)),
+                            const SizedBox(height: 2),
+                            Text('${r.nutrition!.avgDailyCalories} kcal',
+                                style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w900, color: FkColors.lime)),
+                          ]),
+                        ),
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                          decoration: BoxDecoration(
+                            color: FkColors.lime.withValues(alpha: 0.15),
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                          child: Text(
+                            r.nutrition!.deficitSurplusStatus,
+                            style: const TextStyle(color: FkColors.lime, fontSize: 11, fontWeight: FontWeight.bold),
+                          ),
+                        ),
+                      ]),
+                      const SizedBox(height: 12),
+                      Row(children: [
+                        Expanded(
+                          child: Text(
+                            'Daily Baseline Benchmark: ${r.nutrition!.dailyCalorieBaseline} kcal · ${r.nutrition!.dailyProteinBaseline}g protein',
+                            style: const TextStyle(color: FkColors.textSecondary, fontSize: 12),
+                          ),
+                        ),
+                      ]),
+                      const Divider(height: 20),
+                      Row(mainAxisAlignment: MainAxisAlignment.spaceAround, children: [
+                        _nutriTile('Protein', '${r.nutrition!.avgDailyProtein}g', FkColors.sky),
+                        _nutriTile('Carbs', '${r.nutrition!.avgDailyCarbs}g', FkColors.orange),
+                        _nutriTile('Fats', '${r.nutrition!.avgDailyFat}g', FkColors.violet),
+                      ]),
+                    ]),
+                  ),
+                ),
+              ],
               const SectionHeader('Attendance'),
               GridView.count(
                 crossAxisCount: 2,
@@ -342,4 +504,12 @@ class _WeightChart extends StatelessWidget {
       ],
     ));
   }
+}
+
+Widget _nutriTile(String label, String value, Color color) {
+  return Column(children: [
+    Text(label, style: const TextStyle(color: FkColors.textSecondary, fontSize: 11)),
+    const SizedBox(height: 2),
+    Text(value, style: TextStyle(fontWeight: FontWeight.w800, fontSize: 15, color: color)),
+  ]);
 }

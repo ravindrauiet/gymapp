@@ -153,4 +153,158 @@ class FitkeyApi {
           .toList();
 
   Future<void> deleteActivity(String id) => _client.delete('/health/activities/$id');
+
+  // ---- Goals & Profiling ---------------------------------------------------
+  Future<UserGoal?> goal() async {
+    final r = await _client.get('/goals');
+    final g = r['goal'];
+    return g == null ? null : UserGoal.fromJson(g);
+  }
+
+  Future<UserGoal> saveGoal(Json fields) async {
+    final r = await _client.post('/goals', fields);
+    return UserGoal.fromJson(r['goal']);
+  }
+
+  // ---- Marketplace / Store --------------------------------------------------
+  Future<List<MarketplaceProduct>> marketplaceProducts({String? category, String? q, int page = 1}) async {
+    final r = await _client.get('/marketplace/products', query: {'category': category, 'q': q, 'page': page});
+    return (r['products'] as List).map((p) => MarketplaceProduct.fromJson(p)).toList();
+  }
+
+  Future<MarketplaceProduct> marketplaceProduct(String id) async {
+    final r = await _client.get('/marketplace/products/$id');
+    return MarketplaceProduct.fromJson(r['product']);
+  }
+
+  Future<MarketplaceOrder> createMarketplaceOrder({
+    required List<({String productId, int quantity})> items,
+    required Json shippingAddress,
+    required String paymentMethod,
+  }) async {
+    final payload = {
+      'items': items.map((i) => {'productId': i.productId, 'quantity': i.quantity}).toList(),
+      'shippingAddress': shippingAddress,
+      'paymentMethod': paymentMethod,
+    };
+    final r = await _client.post('/marketplace/orders', payload);
+    return MarketplaceOrder.fromJson(r['order']);
+  }
+
+  Future<List<MarketplaceOrder>> myMarketplaceOrders() async {
+    final r = await _client.get('/marketplace/orders/me');
+    return (r['orders'] as List).map((o) => MarketplaceOrder.fromJson(o)).toList();
+  }
+
+  Future<({MarketplaceOrder order, List<Json> timeline})> marketplaceOrder(String id) async {
+    final r = await _client.get('/marketplace/orders/$id');
+    return (
+      order: MarketplaceOrder.fromJson(r['order']),
+      timeline: List<Json>.from(r['timeline'] as List),
+    );
+  }
+
+  // ---- Fuel Log (Nutrition) -------------------------------------------------
+  Future<List<FoodItem>> foodEncyclopedia({String? q, String? category}) async {
+    final r = await _client.get('/nutrition/foods', query: {'q': q, 'category': category});
+    return (r['foods'] as List).map((f) => FoodItem.fromJson(f)).toList();
+  }
+
+  Future<FoodItem> foodItemDetails(String id) async {
+    final r = await _client.get('/nutrition/foods/$id');
+    return FoodItem.fromJson(r['food']);
+  }
+
+  Future<MealDailySummary> dailyMeals({String? date}) async {
+    final r = await _client.get('/nutrition/meals', query: {'date': date});
+    return MealDailySummary.fromJson(r);
+  }
+
+  Future<MealLog> logMeal(Json meal) async {
+    final r = await _client.post('/nutrition/meals', meal);
+    return MealLog.fromJson(r['meal']);
+  }
+
+  Future<void> deleteMeal(String id) => _client.delete('/nutrition/meals/$id');
+
+  Future<({bool found, FoodItem? food, String barcode})> lookupBarcode(String barcode) async {
+    final r = await _client.get('/nutrition/barcode/$barcode');
+    final found = r['found'] == true;
+    return (
+      found: found,
+      food: found && r['food'] != null ? FoodItem.fromJson(r['food']) : null,
+      barcode: barcode,
+    );
+  }
+
+  Future<FoodItem> registerBarcodeFood(Json fields) async {
+    final r = await _client.post('/nutrition/barcode/register', fields);
+    return FoodItem.fromJson(r['food']);
+  }
+
+  // ---- Movement & Step Tracker ----------------------------------------------
+  Future<void> syncSteps({required int steps, double? distanceKm, int? activeCalories, String source = 'health_connect'}) =>
+      _client.post('/health/steps/sync', {
+        'steps': steps,
+        'distanceKm': ?distanceKm,
+        'activeCalories': ?activeCalories,
+        'source': source,
+      });
+
+  Future<Json> todaySteps() async => (await _client.get('/health/steps/today'))['today'];
+
+  // ---- FitPro On-Demand (Trainers) -------------------------------------------
+  Future<List<Trainer>> trainers({String? modes, String? category, String? q}) async {
+    final r = await _client.get('/trainers', query: {'modes': modes, 'category': category, 'q': q});
+    return (r['trainers'] as List).map((t) => Trainer.fromJson(t)).toList();
+  }
+
+  Future<({Trainer trainer, List<String> availableSlots})> trainer(String id) async {
+    final r = await _client.get('/trainers/$id');
+    return (
+      trainer: Trainer.fromJson(r['trainer']),
+      availableSlots: List<String>.from(r['availableSlots'] as List),
+    );
+  }
+
+  Future<TrainerBooking> bookTrainer({
+    required String trainerId,
+    required String mode,
+    required String sessionDate,
+    required String slotTime,
+  }) async {
+    final r = await _client.post('/trainers/$trainerId/book', {
+      'mode': mode,
+      'sessionDate': sessionDate,
+      'slotTime': slotTime,
+    });
+    return TrainerBooking.fromJson(r['booking']);
+  }
+
+  Future<List<TrainerBooking>> myTrainerBookings() async {
+    final r = await _client.get('/trainers/bookings/me');
+    return (r['bookings'] as List).map((b) => TrainerBooking.fromJson(b)).toList();
+  }
+
+  // ---- HealthStop Near You --------------------------------------------------
+  Future<List<HealthChemist>> healthChemists({String? city}) async {
+    final r = await _client.get('/healthstop/chemists', query: {'city': city});
+    return (r['chemists'] as List).map((c) => HealthChemist.fromJson(c)).toList();
+  }
+
+  Future<List<HealthClinic>> healthClinics({String? city}) async {
+    final r = await _client.get('/healthstop/clinics', query: {'city': city});
+    return (r['clinics'] as List).map((c) => HealthClinic.fromJson(c)).toList();
+  }
+
+  // ---- AI Vision & FitKey AI Coach ------------------------------------------
+  Future<FoodItem> extractNutritionFromImage(String base64Image) async {
+    final r = await _client.post('/ai/nutrition-from-image', {'imageBase64': base64Image});
+    return FoodItem.fromJson(r['extracted'] as Json);
+  }
+
+  Future<String> sendChatMessage(List<Map<String, String>> messages) async {
+    final r = await _client.post('/ai/chat', {'messages': messages});
+    return r['reply'] as String;
+  }
 }

@@ -3,6 +3,7 @@ import 'package:provider/provider.dart';
 
 import 'package:fitkey_core/fitkey_core.dart';
 import '../../state/session.dart';
+import '../goals/goal_selection_screen.dart';
 
 /// Shown after first login (and from Profile → Edit) to capture name, email, city and gender.
 class ProfileSetupScreen extends StatefulWidget {
@@ -47,7 +48,17 @@ class _ProfileSetupScreenState extends State<ProfileSetupScreen> {
         'city': _city.text.trim(),
         'gender': ?_gender,
       });
-      if (mounted && widget.editing) Navigator.pop(context);
+      if (mounted) {
+        if (widget.editing) {
+          Navigator.pop(context);
+        } else {
+          // Flow: User Registration / Profile Setup -> Goal Selection Screen
+          await Navigator.push(
+            context,
+            MaterialPageRoute(builder: (_) => const GoalSelectionScreen()),
+          );
+        }
+      }
     } catch (e) {
       if (mounted) showSnack(context, errorMessage(e), error: true);
     } finally {

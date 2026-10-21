@@ -108,6 +108,10 @@ const views = {
       ['Revenue this month', rupees(stats.revenueThisMonthPaise)],
       ['Check-ins today', stats.checkinsToday],
       ['User reports', stats.reports],
+      ['Marketplace Orders', stats.totalOrders || 0],
+      ['Store Revenue', rupees(stats.storeRevenuePaise || 0)],
+      ['Verified Trainers', stats.verifiedTrainers || 0],
+      ['Active SKUs', stats.activeProducts || 0],
     ];
     return h('div', {},
       h('h2', {}, 'Dashboard'),
