@@ -8,7 +8,8 @@
     "dev": "nodemon src/index.js",
     "start": "node src/index.js",
     "migrate": "node src/db/migrate.js",
-    "seed": "node src/db/seed.js"
+    "seed": "node src/db/seed.js",
+    "fix-demo-photos": "node src/db/fixDemoPhotos.js"
   },
   "engines": {
     "node": ">=20"

@@ -2,7 +2,7 @@ import { Router } from 'express';
 import { z } from 'zod';
 import { query, queryOne, withTransaction } from '../db/index.js';
 import { requireAuth } from '../middleware/auth.js';
-import { notFound, validate } from '../utils/http.js';
+import { notFound, validate, conflict } from '../utils/http.js';
 
 export const marketplaceRouter = Router();
 
@@ -84,7 +84,7 @@ marketplaceRouter.post('/orders', requireAuth('user'), async (req, res) => {
       const prod = pRes.rows[0];
       if (!prod) throw notFound(`Product not found: ${item.productId}`);
       if (prod.stock_quantity < item.quantity) {
-        throw new Error(`Insufficient stock for "${prod.title}". Only ${prod.stock_quantity} left.`);
+        throw conflict(`Insufficient stock for "${prod.title}". Only ${prod.stock_quantity} left.`);
       }
 
       const itemTotal = prod.price_paise * item.quantity;

@@ -297,14 +297,16 @@ class FitkeyApi {
     return (r['clinics'] as List).map((c) => HealthClinic.fromJson(c)).toList();
   }
 
-  // ---- AI Vision & FitKey AI Coach ------------------------------------------
-  Future<FoodItem> extractNutritionFromImage(String base64Image) async {
-    final r = await _client.post('/ai/nutrition-from-image', {'imageBase64': base64Image});
+  // ---- AI Vision & Mansi (AI coach) -----------------------------------------
+  /// Reads a meal photo (`mode: 'meal'`) or a packaged-food nutrition label (`mode: 'label'`).
+  Future<FoodItem> extractNutritionFromImage(String base64Image, {String mode = 'meal'}) async {
+    final r = await _client.post('/ai/nutrition-from-image', {'imageBase64': base64Image, 'mode': mode});
     return FoodItem.fromJson(r['extracted'] as Json);
   }
 
-  Future<String> sendChatMessage(List<Map<String, String>> messages) async {
-    final r = await _client.post('/ai/chat', {'messages': messages});
+  /// Sends the conversation to Mansi. [imageBase64] is attached to the latest user message.
+  Future<String> sendChatMessage(List<Map<String, String>> messages, {String? imageBase64}) async {
+    final r = await _client.post('/ai/chat', {'messages': messages, 'imageBase64': ?imageBase64});
     return r['reply'] as String;
   }
 }

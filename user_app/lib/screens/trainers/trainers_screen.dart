@@ -1,12 +1,48 @@
+import 'dart:async';
+
+import 'package:fitkey_core/fitkey_core.dart' show formatPaise, formatDayDate;
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
-import 'package:fitkey_core/fitkey_core.dart';
 import '../../data/models.dart';
 import '../../state/session.dart';
+import '../../ui/ui.dart';
 import 'trainer_detail_screen.dart';
 
-/// 6. FitPro On-Demand (Book a Trainer)
+/// How a backend training mode (`online` | `home` | `gym`) is shown.
+class TrainerMode {
+  const TrainerMode(this.id, this.label, this.long, this.icon, this.color);
+  final String id;
+  final String label;
+  final String long;
+  final IconData icon;
+  final Color color;
+
+  static const all = [
+    TrainerMode('online', 'Online', 'Live video session', Icons.videocam_rounded, AppColors.purple),
+    TrainerMode('home', 'At home', 'Trainer comes to you', Icons.home_rounded, AppColors.teal),
+    TrainerMode('gym', 'At gym', 'At a partner gym', Icons.fitness_center_rounded, AppColors.primary),
+  ];
+
+  static TrainerMode of(String id) =>
+      all.firstWhere((m) => m.id == id, orElse: () => TrainerMode(id, id, id, Icons.bolt_rounded, AppColors.text2));
+}
+
+/// Parses a booking's "YYYY-MM-DD" + "06:30 AM" into a local DateTime.
+DateTime? sessionStart(String date, String slot) {
+  final d = DateTime.tryParse(date);
+  if (d == null) return null;
+  final m = RegExp(r'^(\d{1,2}):(\d{2})\s*([AaPp][Mm])?$').firstMatch(slot.trim());
+  if (m == null) return d;
+  var h = int.parse(m.group(1)!);
+  final min = int.parse(m.group(2)!);
+  final ap = m.group(3)?.toUpperCase();
+  if (ap == 'PM' && h < 12) h += 12;
+  if (ap == 'AM' && h == 12) h = 0;
+  return DateTime(d.year, d.month, d.day, h, min);
+}
+
+/// FitPro On-Demand — find and book certified personal trainers.
 class TrainersScreen extends StatefulWidget {
   const TrainersScreen({super.key});
 
@@ -14,308 +50,639 @@ class TrainersScreen extends StatefulWidget {
   State<TrainersScreen> createState() => _TrainersScreenState();
 }
 
-class _TrainersScreenState extends State<TrainersScreen> {
-  // Multi-select training modes
-  final Set<String> _selectedModes = {'online', 'home', 'gym'};
+class _TrainersScreenState extends State<TrainersScreen> with SingleTickerProviderStateMixin {
+  late final TabController _tabs = TabController(length: 2, vsync: this);
+  final _search = TextEditingController();
+  Timer? _debounce;
 
-  // Category filter
-  String _selectedCategory = 'all';
-
-  final List<String> _categories = const [
-    'all',
-    'Gym Training',
-    'Yoga',
-    'Dance/Zumba',
-    'MMA/Boxing',
-    'Weightlifting',
-    'Swimming',
-    'Judo/Karate',
-    'Personal Rehab',
-  ];
+  String? _mode; // null = any mode
+  String? _category; // null = all specializations
+  final Set<String> _specs = {};
 
   late Future<List<Trainer>> _future;
+  late Future<List<TrainerBooking>> _bookings;
 
   @override
   void initState() {
     super.initState();
-    _load();
+    _future = _loadTrainers();
+    _bookings = context.read<Session>().api.myTrainerBookings();
   }
 
-  void _load() {
-    final modesParam = _selectedModes.isEmpty ? null : _selectedModes.join(',');
-    final catParam = _selectedCategory == 'all' ? null : _selectedCategory;
-    _future = context.read<Session>().api.trainers(modes: modesParam, category: catParam);
+  @override
+  void dispose() {
+    _debounce?.cancel();
+    _search.dispose();
+    _tabs.dispose();
+    super.dispose();
   }
 
-  void _reload() => setState(_load);
+  Future<List<Trainer>> _loadTrainers() async {
+    final q = _search.text.trim();
+    final list = await context.read<Session>().api.trainers(modes: _mode, category: _category, q: q.isEmpty ? null : q);
+    // Specialization chips are derived from what trainers actually offer.
+    final before = _specs.length;
+    for (final t in list) {
+      _specs.addAll(t.specializations.where((s) => s.trim().isNotEmpty));
+    }
+    if (_specs.length != before && mounted) setState(() {});
+    return list;
+  }
+
+  Future<void> _reloadTrainers() async {
+    final f = _loadTrainers();
+    setState(() => _future = f);
+    await f;
+  }
+
+  Future<void> _reloadBookings() async {
+    final f = context.read<Session>().api.myTrainerBookings();
+    setState(() => _bookings = f);
+    await f;
+  }
+
+  void _onSearch(String _) {
+    _debounce?.cancel();
+    _debounce = Timer(const Duration(milliseconds: 400), () {
+      if (mounted) _reloadTrainers();
+    });
+  }
+
+  Future<void> _open(Trainer t) async {
+    final booked = await push<bool>(context, TrainerDetailScreen(trainerId: t.id));
+    if (!mounted) return;
+    if (booked == true) {
+      _reloadBookings();
+      _tabs.animateTo(1);
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      backgroundColor: AppColors.bg,
       appBar: AppBar(
-        title: const Text('FitPro On-Demand'),
-        actions: [
-          IconButton(
-            tooltip: 'My Booked Sessions',
-            icon: const Icon(Icons.calendar_month),
-            onPressed: () => _openMyBookings(context),
-          ),
+        title: const Text('Book a trainer'),
+        bottom: TabBar(
+          controller: _tabs,
+          tabs: const [
+            Tab(text: 'Find trainers'),
+            Tab(text: 'My bookings'),
+          ],
+        ),
+      ),
+      body: TabBarView(
+        controller: _tabs,
+        children: [
+          _buildFind(),
+          _MyBookings(future: _bookings, onRefresh: _reloadBookings, onFind: () => _tabs.animateTo(0)),
         ],
       ),
-      body: Column(
-        children: [
-          // Mode multi-selection row
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-            color: FkColors.surface,
-            child: Row(children: [
-              const Text('Modes:', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 12)),
-              const SizedBox(width: 8),
-              Expanded(
-                child: Wrap(
-                  spacing: 6,
-                  children: [
-                    _modeFilterChip('online', 'Online/Virtual'),
-                    _modeFilterChip('home', 'At Home'),
-                    _modeFilterChip('gym', 'At Gym'),
-                  ],
-                ),
-              ),
-            ]),
-          ),
+    );
+  }
 
-          // Categories horizontal scroll list
-          SizedBox(
-            height: 48,
-            child: ListView.separated(
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-              scrollDirection: Axis.horizontal,
-              itemCount: _categories.length,
-              separatorBuilder: (_, _) => const SizedBox(width: 8),
-              itemBuilder: (context, idx) {
-                final cat = _categories[idx];
-                final isSelected = _selectedCategory == cat;
-                return ChoiceChip(
-                  label: Text(cat == 'all' ? 'All Specializations' : cat),
-                  selected: isSelected,
-                  selectedColor: FkColors.lime,
-                  labelStyle: TextStyle(
-                    color: isSelected ? Colors.black : Colors.white70,
-                    fontWeight: isSelected ? FontWeight.w800 : FontWeight.w500,
-                    fontSize: 12,
+  Widget _buildFind() {
+    final specs = _specs.toList()..sort();
+    return RefreshIndicator(
+      color: AppColors.primary,
+      onRefresh: _reloadTrainers,
+      child: CustomScrollView(
+        physics: const AlwaysScrollableScrollPhysics(),
+        slivers: [
+          SliverToBoxAdapter(
+            child: Container(
+              color: AppColors.surface,
+              padding: const EdgeInsets.only(top: 14, bottom: 14),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 16),
+                    child: RotatingSearchBar(
+                      hints: const [
+                        "'yoga coach'",
+                        "'strength training'",
+                        "'boxing'",
+                        "'swimming coach'",
+                        "'weight loss'",
+                      ],
+                      controller: _search,
+                      onChanged: _onSearch,
+                      onSubmitted: (_) {
+                        _debounce?.cancel();
+                        _reloadTrainers();
+                      },
+                    ),
                   ),
-                  onSelected: (val) {
-                    if (val) {
-                      _selectedCategory = cat;
-                      _reload();
-                    }
-                  },
-                );
-              },
-            ),
-          ),
-          const Divider(height: 1),
-
-          // Trainers Directory List
-          Expanded(
-            child: FutureBuilder<List<Trainer>>(
-              future: _future,
-              builder: (context, snap) {
-                if (snap.connectionState != ConnectionState.done) {
-                  return const Center(child: CircularProgressIndicator());
-                }
-                if (snap.hasError) {
-                  return ErrorState(message: errorMessage(snap.error!), onRetry: _reload);
-                }
-
-                final trainers = snap.data!;
-                if (trainers.isEmpty) {
-                  return const EmptyState(
-                    icon: Icons.sports,
-                    title: 'No trainers found',
-                    message: 'Try clearing your category or mode filters.',
-                  );
-                }
-
-                return RefreshIndicator(
-                  onRefresh: () async => _reload(),
-                  child: ListView.separated(
-                    padding: const EdgeInsets.all(16),
-                    itemCount: trainers.length,
-                    separatorBuilder: (_, _) => const SizedBox(height: 12),
-                    itemBuilder: (context, idx) {
-                      final t = trainers[idx];
-                      return Card(
-                        clipBehavior: Clip.antiAlias,
-                        child: InkWell(
-                          onTap: () => Navigator.push(
-                            context,
-                            MaterialPageRoute(builder: (_) => TrainerDetailScreen(trainerId: t.id)),
-                          ),
-                          child: Padding(
-                            padding: const EdgeInsets.all(14),
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Row(
-                                  children: [
-                                    CircleAvatar(
-                                      radius: 28,
-                                      backgroundImage: t.photoUrl != null ? NetworkImage(t.photoUrl!) : null,
-                                      backgroundColor: const Color(0xFF252B35),
-                                      child: t.photoUrl == null ? const Icon(Icons.person) : null,
-                                    ),
-                                    const SizedBox(width: 14),
-                                    Expanded(
-                                      child: Column(
-                                        crossAxisAlignment: CrossAxisAlignment.start,
-                                        children: [
-                                          Text(t.name,
-                                              style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 16)),
-                                          const SizedBox(height: 2),
-                                          Row(children: [
-                                            const Icon(Icons.star, color: Color(0xFFFFC145), size: 14),
-                                            const SizedBox(width: 4),
-                                            Text('${t.rating} · ${t.reviewCount} reviews',
-                                                style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12)),
-                                            const Spacer(),
-                                            Text(
-                                              '${formatInr(t.hourlyRatePaise)}/hr',
-                                              style: const TextStyle(
-                                                  fontWeight: FontWeight.w900, color: FkColors.lime, fontSize: 15),
-                                            ),
-                                          ]),
-                                        ],
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                                const SizedBox(height: 10),
-                                Text(
-                                  t.bio,
-                                  maxLines: 2,
-                                  overflow: TextOverflow.ellipsis,
-                                  style: const TextStyle(color: FkColors.textSecondary, fontSize: 13),
-                                ),
-                                const SizedBox(height: 10),
-                                Wrap(
-                                  spacing: 6,
-                                  runSpacing: 4,
-                                  children: t.specializations
-                                      .map((s) => Container(
-                                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-                                            decoration: BoxDecoration(
-                                              color: const Color(0xFF252B35),
-                                              borderRadius: BorderRadius.circular(6),
-                                            ),
-                                            child: Text(s,
-                                                style: const TextStyle(
-                                                    color: FkColors.lime, fontSize: 11, fontWeight: FontWeight.bold)),
-                                          ))
-                                      .toList(),
-                                ),
-                              ],
-                            ),
-                          ),
-                        ),
-                      );
+                  const SizedBox(height: 14),
+                  ChoiceChips<String?>(
+                    options: [null, ...TrainerMode.all.map((m) => m.id)],
+                    selected: _mode,
+                    label: (m) => m == null ? 'Any mode' : TrainerMode.of(m).label,
+                    icon: (m) => m == null ? Icons.tune_rounded : TrainerMode.of(m).icon,
+                    onSelected: (m) {
+                      if (m == _mode) return;
+                      _mode = m;
+                      _reloadTrainers();
                     },
                   ),
-                );
-              },
+                  if (specs.isNotEmpty) ...[
+                    const SizedBox(height: 10),
+                    _SpecChips(
+                      specs: specs,
+                      selected: _category,
+                      onSelected: (s) {
+                        _category = s == _category ? null : s;
+                        _reloadTrainers();
+                      },
+                    ),
+                  ],
+                ],
+              ),
             ),
           ),
-        ],
-      ),
-    );
-  }
-
-  Widget _modeFilterChip(String modeKey, String label) {
-    final selected = _selectedModes.contains(modeKey);
-    return FilterChip(
-      label: Text(label),
-      selected: selected,
-      selectedColor: FkColors.sky.withValues(alpha: 0.2),
-      checkmarkColor: FkColors.sky,
-      labelStyle: TextStyle(
-        fontSize: 11,
-        color: selected ? FkColors.sky : Colors.white70,
-        fontWeight: selected ? FontWeight.bold : FontWeight.normal,
-      ),
-      onSelected: (val) {
-        setState(() {
-          if (val) {
-            _selectedModes.add(modeKey);
-          } else {
-            if (_selectedModes.length > 1) {
-              _selectedModes.remove(modeKey);
-            }
-          }
-        });
-        _reload();
-      },
-    );
-  }
-
-  void _openMyBookings(BuildContext context) {
-    showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      builder: (ctx) => SizedBox(
-        height: MediaQuery.of(ctx).size.height * 0.7,
-        child: Scaffold(
-          appBar: AppBar(
-            title: const Text('My Trainer Bookings'),
-            automaticallyImplyLeading: false,
-            actions: [IconButton(icon: const Icon(Icons.close), onPressed: () => Navigator.pop(ctx))],
-          ),
-          body: FutureBuilder<List<TrainerBooking>>(
-            future: context.read<Session>().api.myTrainerBookings(),
+          FutureBuilder<List<Trainer>>(
+            future: _future,
             builder: (context, snap) {
               if (snap.connectionState != ConnectionState.done) {
-                return const Center(child: CircularProgressIndicator());
+                return const SliverToBoxAdapter(child: _TrainerSkeleton());
               }
-              final bookings = snap.data ?? [];
-              if (bookings.isEmpty) {
-                return const EmptyState(
-                  icon: Icons.calendar_today,
-                  title: 'No sessions booked yet',
-                  message: 'Book certified trainers for online, home, or gym workouts.',
+              if (snap.hasError) {
+                return SliverFillRemaining(
+                  hasScrollBody: false,
+                  child: ErrorView(error: snap.error!, onRetry: _reloadTrainers),
                 );
               }
-
-              return ListView.separated(
-                padding: const EdgeInsets.all(16),
-                itemCount: bookings.length,
-                separatorBuilder: (_, _) => const SizedBox(height: 10),
-                itemBuilder: (context, idx) {
-                  final b = bookings[idx];
-                  return Card(
-                    child: ListTile(
-                      leading: const Icon(Icons.person_pin, color: FkColors.lime, size: 30),
-                      title: Text(b.trainerName, style: const TextStyle(fontWeight: FontWeight.w700)),
-                      subtitle: Text(
-                        'Date: ${b.sessionDate} at ${b.slotTime}\nMode: ${b.mode.toUpperCase()} · ${formatInr(b.amountPaise)}',
-                      ),
-                      isThreeLine: true,
-                      trailing: Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                        decoration: BoxDecoration(
-                          color: FkColors.lime.withValues(alpha: 0.15),
-                          borderRadius: BorderRadius.circular(8),
-                        ),
-                        child: Text(
-                          b.status.toUpperCase(),
-                          style: const TextStyle(color: FkColors.lime, fontSize: 10, fontWeight: FontWeight.bold),
-                        ),
-                      ),
+              final list = snap.data!;
+              if (list.isEmpty) {
+                final filtered = _mode != null || _category != null || _search.text.trim().isNotEmpty;
+                return SliverFillRemaining(
+                  hasScrollBody: false,
+                  child: EmptyView(
+                    icon: Icons.sports_rounded,
+                    color: AppColors.blue,
+                    title: 'No trainers found',
+                    message: filtered
+                        ? 'Try a different search or clear your filters.'
+                        : 'Certified trainers will show up here as they join.',
+                    action: filtered
+                        ? SizedBox(
+                            width: 180,
+                            child: OutlinedButton(
+                              onPressed: () {
+                                _search.clear();
+                                _mode = null;
+                                _category = null;
+                                _reloadTrainers();
+                              },
+                              child: const Text('Clear filters'),
+                            ),
+                          )
+                        : null,
+                  ),
+                );
+              }
+              return SliverPadding(
+                padding: const EdgeInsets.fromLTRB(16, 4, 16, 32),
+                sliver: SliverList.list(
+                  children: [
+                    SectionTitle(
+                      '${list.length} trainer${list.length == 1 ? '' : 's'} available',
+                      subtitle: 'Verified & certified · 60-min sessions',
+                      padding: const EdgeInsets.fromLTRB(0, 18, 0, 12),
                     ),
-                  );
-                },
+                    for (final t in list) ...[
+                      _TrainerCard(trainer: t, onTap: () => _open(t)),
+                      const SizedBox(height: 12),
+                    ],
+                  ],
+                ),
               );
             },
           ),
+        ],
+      ),
+    );
+  }
+}
+
+class _SpecChips extends StatelessWidget {
+  const _SpecChips({required this.specs, required this.selected, required this.onSelected});
+  final List<String> specs;
+  final String? selected;
+  final ValueChanged<String> onSelected;
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      height: 34,
+      child: ListView.separated(
+        padding: const EdgeInsets.symmetric(horizontal: 16),
+        scrollDirection: Axis.horizontal,
+        itemCount: specs.length,
+        separatorBuilder: (_, _) => const SizedBox(width: 8),
+        itemBuilder: (_, i) {
+          final s = specs[i];
+          final on = s == selected;
+          return Tap(
+            onTap: () => onSelected(s),
+            child: AnimatedContainer(
+              duration: const Duration(milliseconds: 180),
+              padding: const EdgeInsets.symmetric(horizontal: 12),
+              alignment: Alignment.center,
+              decoration: BoxDecoration(
+                color: on ? AppColors.primarySoft : AppColors.surfaceAlt,
+                borderRadius: BorderRadius.circular(30),
+                border: Border.all(color: on ? AppColors.primary : Colors.transparent),
+              ),
+              child: Row(
+                children: [
+                  Text(
+                    s,
+                    style: TextStyle(
+                      fontSize: 12.5,
+                      fontWeight: FontWeight.w700,
+                      color: on ? AppColors.primary : AppColors.text2,
+                    ),
+                  ),
+                  if (on) ...[
+                    const SizedBox(width: 4),
+                    const Icon(Icons.close_rounded, size: 14, color: AppColors.primary),
+                  ],
+                ],
+              ),
+            ),
+          );
+        },
+      ),
+    );
+  }
+}
+
+/// Urban Company–style professional card.
+class _TrainerCard extends StatelessWidget {
+  const _TrainerCard({required this.trainer, required this.onTap});
+  final Trainer trainer;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final t = trainer;
+    return AppCard(
+      onTap: onTap,
+      padding: const EdgeInsets.all(12),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              SizedBox(
+                width: 96,
+                height: 116,
+                child: NetImage(t.photoUrl, fallback: AppImages.homeWorkout, radius: 16),
+              ),
+              const SizedBox(width: 14),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Flexible(
+                          child: Text(
+                            t.name,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(fontSize: 16.5, fontWeight: FontWeight.w800, letterSpacing: -0.3),
+                          ),
+                        ),
+                        const SizedBox(width: 4),
+                        const Icon(Icons.verified_rounded, size: 17, color: AppColors.blue),
+                      ],
+                    ),
+                    const SizedBox(height: 6),
+                    _RatingRow(rating: t.rating, reviews: t.reviewCount),
+                    const SizedBox(height: 8),
+                    if (t.specializations.isNotEmpty)
+                      Text(
+                        t.specializations.join(' · '),
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          fontSize: 12.5,
+                          color: AppColors.text2,
+                          fontWeight: FontWeight.w600,
+                          height: 1.35,
+                        ),
+                      ),
+                    const SizedBox(height: 8),
+                    if (t.certifications.isNotEmpty)
+                      Tag(
+                        t.certifications.length == 1 ? '1 certification' : '${t.certifications.length} certifications',
+                        icon: Icons.workspace_premium_rounded,
+                        color: AppColors.green,
+                        dense: true,
+                      ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          const Divider(height: 1),
+          const SizedBox(height: 10),
+          Row(
+            children: [
+              for (final m in t.trainingModes) ...[
+                Tooltip(
+                  message: TrainerMode.of(m).label,
+                  child: IconBubble(TrainerMode.of(m).icon, color: TrainerMode.of(m).color, size: 28, iconSize: 15),
+                ),
+                const SizedBox(width: 6),
+              ],
+              const Spacer(),
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.end,
+                children: [
+                  Text(
+                    formatPaise(t.hourlyRatePaise),
+                    style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w800, letterSpacing: -0.3),
+                  ),
+                  const Text(
+                    'per session',
+                    style: TextStyle(fontSize: 11.5, color: AppColors.text3, fontWeight: FontWeight.w600),
+                  ),
+                ],
+              ),
+              const SizedBox(width: 12),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 9),
+                decoration: BoxDecoration(color: AppColors.primary, borderRadius: BorderRadius.circular(12)),
+                child: const Text(
+                  'Book',
+                  style: TextStyle(color: Colors.white, fontWeight: FontWeight.w800, fontSize: 13.5),
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _RatingRow extends StatelessWidget {
+  const _RatingRow({required this.rating, required this.reviews});
+  final double rating;
+  final int reviews;
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      children: [
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2.5),
+          decoration: BoxDecoration(color: AppColors.green, borderRadius: BorderRadius.circular(6)),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                rating.toStringAsFixed(1),
+                style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w800, fontSize: 12),
+              ),
+              const SizedBox(width: 2),
+              const Icon(Icons.star_rounded, color: Colors.white, size: 13),
+            ],
+          ),
         ),
+        const SizedBox(width: 6),
+        Flexible(
+          child: Text(
+            '$reviews review${reviews == 1 ? '' : 's'}',
+            overflow: TextOverflow.ellipsis,
+            style: const TextStyle(fontSize: 12.5, color: AppColors.text2, fontWeight: FontWeight.w600),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _TrainerSkeleton extends StatelessWidget {
+  const _TrainerSkeleton();
+
+  @override
+  Widget build(BuildContext context) {
+    return Shimmer(
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(16, 22, 16, 16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const SkeletonBox(height: 18, width: 180),
+            const SizedBox(height: 16),
+            for (var i = 0; i < 3; i++) ...[
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(color: AppColors.surface, borderRadius: BorderRadius.circular(20)),
+                child: Column(
+                  children: [
+                    const Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        SkeletonBox(height: 116, width: 96, radius: 16),
+                        SizedBox(width: 14),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              SkeletonBox(height: 16, width: 140),
+                              SizedBox(height: 10),
+                              SkeletonBox(height: 12, width: 90),
+                              SizedBox(height: 10),
+                              SkeletonBox(height: 12),
+                              SizedBox(height: 10),
+                              SkeletonBox(height: 18, width: 110),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 14),
+                    Row(
+                      children: const [
+                        SkeletonBox(height: 28, width: 28),
+                        SizedBox(width: 6),
+                        SkeletonBox(height: 28, width: 28),
+                        Spacer(),
+                        SkeletonBox(height: 34, width: 120),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 12),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// ---------------------------------------------------------------------------
+// My bookings
+// ---------------------------------------------------------------------------
+
+class _MyBookings extends StatelessWidget {
+  const _MyBookings({required this.future, required this.onRefresh, required this.onFind});
+  final Future<List<TrainerBooking>> future;
+  final Future<void> Function() onRefresh;
+  final VoidCallback onFind;
+
+  @override
+  Widget build(BuildContext context) {
+    return RefreshIndicator(
+      color: AppColors.primary,
+      onRefresh: onRefresh,
+      child: FutureBuilder<List<TrainerBooking>>(
+        future: future,
+        builder: (context, snap) {
+          if (snap.connectionState != ConnectionState.done) return const SkeletonList(itemHeight: 72);
+          if (snap.hasError) return _scrollable(ErrorView(error: snap.error!, onRetry: onRefresh));
+          final all = snap.data!;
+          if (all.isEmpty) {
+            return _scrollable(
+              EmptyView(
+                icon: Icons.event_available_rounded,
+                color: AppColors.blue,
+                title: 'No sessions booked yet',
+                message: 'Book a certified trainer for an online, at-home or at-gym session.',
+                action: SizedBox(
+                  width: 180,
+                  child: AppButton(label: 'Find a trainer', height: 48, onPressed: onFind),
+                ),
+              ),
+            );
+          }
+          final now = DateTime.now();
+          bool upcoming(TrainerBooking b) =>
+              b.status == 'confirmed' && (sessionStart(b.sessionDate, b.slotTime)?.isAfter(now) ?? false);
+          final next = all.where(upcoming).toList()
+            ..sort(
+              (a, b) => sessionStart(a.sessionDate, a.slotTime)!.compareTo(sessionStart(b.sessionDate, b.slotTime)!),
+            );
+          final past = all.where((b) => !upcoming(b)).toList();
+
+          return ListView(
+            physics: const AlwaysScrollableScrollPhysics(),
+            padding: const EdgeInsets.fromLTRB(16, 0, 16, 32),
+            children: [
+              if (next.isNotEmpty) ...[
+                const SectionTitle('Upcoming', padding: EdgeInsets.fromLTRB(0, 20, 0, 12)),
+                for (final b in next) ...[_BookingCard(booking: b, upcoming: true), const SizedBox(height: 12)],
+              ],
+              if (past.isNotEmpty) ...[
+                const SectionTitle('Past & other', padding: EdgeInsets.fromLTRB(0, 20, 0, 12)),
+                for (final b in past) ...[_BookingCard(booking: b, upcoming: false), const SizedBox(height: 12)],
+              ],
+            ],
+          );
+        },
+      ),
+    );
+  }
+
+  Widget _scrollable(Widget child) => LayoutBuilder(
+    builder: (context, c) => SingleChildScrollView(
+      physics: const AlwaysScrollableScrollPhysics(),
+      child: ConstrainedBox(
+        constraints: BoxConstraints(minHeight: c.maxHeight),
+        child: child,
+      ),
+    ),
+  );
+}
+
+class _BookingCard extends StatelessWidget {
+  const _BookingCard({required this.booking, required this.upcoming});
+  final TrainerBooking booking;
+  final bool upcoming;
+
+  @override
+  Widget build(BuildContext context) {
+    final b = booking;
+    final mode = TrainerMode.of(b.mode);
+    final date = DateTime.tryParse(b.sessionDate);
+    final (String label, Color color) = switch (b.status) {
+      'confirmed' => upcoming ? ('UPCOMING', AppColors.green) : ('CONFIRMED', AppColors.blue),
+      'completed' => ('COMPLETED', AppColors.blue),
+      'cancelled' => ('CANCELLED', AppColors.red),
+      _ => (b.status.toUpperCase(), AppColors.text2),
+    };
+
+    return AppCard(
+      padding: const EdgeInsets.all(14),
+      child: Column(
+        children: [
+          Row(
+            children: [
+              SizedBox(width: 56, height: 56, child: NetImage(b.photoUrl, fallback: AppImages.homeWorkout, radius: 14)),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      b.trainerName,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(fontSize: 15.5, fontWeight: FontWeight.w800, letterSpacing: -0.2),
+                    ),
+                    const SizedBox(height: 4),
+                    Row(
+                      children: [
+                        Icon(mode.icon, size: 15, color: mode.color),
+                        const SizedBox(width: 4),
+                        Text(
+                          mode.label,
+                          style: TextStyle(fontSize: 12.5, color: mode.color, fontWeight: FontWeight.w700),
+                        ),
+                        const Text(
+                          '  ·  60 min',
+                          style: TextStyle(fontSize: 12.5, color: AppColors.text3, fontWeight: FontWeight.w600),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+              Tag(label, color: color, dense: true),
+            ],
+          ),
+          const SizedBox(height: 12),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+            decoration: BoxDecoration(color: AppColors.surfaceAlt, borderRadius: BorderRadius.circular(12)),
+            child: Row(
+              children: [
+                const Icon(Icons.calendar_today_rounded, size: 15, color: AppColors.text2),
+                const SizedBox(width: 6),
+                Text(
+                  date == null ? b.sessionDate : formatDayDate(date),
+                  style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w700),
+                ),
+                const SizedBox(width: 14),
+                const Icon(Icons.schedule_rounded, size: 15, color: AppColors.text2),
+                const SizedBox(width: 6),
+                Text(b.slotTime, style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w700)),
+                const Spacer(),
+                Text(formatPaise(b.amountPaise), style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w800)),
+              ],
+            ),
+          ),
+        ],
       ),
     );
   }

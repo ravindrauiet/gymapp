@@ -1,21 +1,47 @@
+import 'package:fitkey_core/fitkey_core.dart' show formatDate;
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:url_launcher/url_launcher.dart';
 
-import 'package:fitkey_core/fitkey_core.dart';
 import '../../state/session.dart';
+import '../../ui/ui.dart';
+import '../../widgets/brand.dart';
+import '../ai/ai_coach_screen.dart';
 import '../auth/profile_setup_screen.dart';
 import '../goals/goal_selection_screen.dart';
-import '../nutrition/fuel_log_screen.dart';
-import '../nutrition/ai_food_scanner.dart';
-import '../ai/ai_coach_screen.dart';
-import '../store/store_screen.dart';
-import '../trainers/trainers_screen.dart';
 import '../health/attendance_screen.dart';
 import '../health/health_report_screen.dart';
+import '../healthstop/healthstop_screen.dart';
+import '../nutrition/ai_food_scanner.dart';
+import '../nutrition/fuel_log_screen.dart';
 import '../plans/plans_screen.dart';
+import '../store/store_screen.dart';
+import '../trainers/trainers_screen.dart';
 
 class ProfileScreen extends StatelessWidget {
   const ProfileScreen({super.key});
+
+  Future<void> _logout(BuildContext context) async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Log out of FITKEY?'),
+        content: const Text('You can log back in anytime with your mobile number.'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            style: TextButton.styleFrom(foregroundColor: AppColors.red),
+            child: const Text('Log out'),
+          ),
+        ],
+      ),
+    );
+    if (ok == true && context.mounted) {
+      Navigator.of(context).popUntil((r) => r.isFirst);
+      await context.read<Session>().signOut();
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -23,82 +49,154 @@ class ProfileScreen extends StatelessWidget {
     final user = session.user;
     final sub = session.subscription;
 
-    void open(Widget screen) => Navigator.push(context, MaterialPageRoute(builder: (_) => screen));
-
     return Scaffold(
-      appBar: AppBar(title: const Text('Me')),
-      body: ListView(
-        padding: const EdgeInsets.fromLTRB(20, 4, 20, 32),
-        children: [
-          Row(children: [
-            Avatar(name: user?.name, radius: 34),
-            const SizedBox(width: 16),
+      appBar: AppBar(title: const Text('Profile')),
+      body: ListView(padding: const EdgeInsets.fromLTRB(16, 8, 16, 32), children: [
+        AppCard(
+          onTap: () => push(context, const ProfileSetupScreen(editing: true)),
+          child: Row(children: [
+            PersonAvatar(name: user?.name, size: 64),
+            const SizedBox(width: 14),
             Expanded(
               child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                Text(user?.name ?? '', style: Theme.of(context).textTheme.titleLarge),
-                Text(user?.phone ?? '', style: const TextStyle(color: FkColors.textSecondary)),
-                if (user?.city != null) Text(user!.city!, style: const TextStyle(color: FkColors.textSecondary)),
+                Text(user?.name ?? '', style: const TextStyle(fontSize: 19, fontWeight: FontWeight.w800, letterSpacing: -0.4)),
+                const SizedBox(height: 2),
+                Text(user?.phone ?? '', style: const TextStyle(color: AppColors.text2, fontWeight: FontWeight.w600)),
+                if (user?.city != null)
+                  Text(user!.city!, style: const TextStyle(color: AppColors.text3, fontSize: 12.5)),
               ]),
             ),
-            IconButton(
-              tooltip: 'Edit profile',
-              icon: const Icon(Icons.edit_outlined),
-              onPressed: () => open(const ProfileSetupScreen(editing: true)),
-            ),
+            const Text('Edit', style: TextStyle(color: AppColors.primary, fontWeight: FontWeight.w800)),
+            const Icon(Icons.chevron_right_rounded, color: AppColors.primary),
           ]),
-          const SizedBox(height: 20),
-          Card(
-            child: ListTile(
-              contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-              leading: const Icon(Icons.key, color: FkColors.lime),
-              title: Text(sub?.planName ?? 'No active plan', style: const TextStyle(fontWeight: FontWeight.w700)),
-              subtitle: Text(sub == null ? 'Get a plan to start checking in' : 'Valid till ${formatDate(sub.endsAt)}'),
-              trailing: const Icon(Icons.chevron_right),
-              onTap: () => open(const PlansScreen()),
-            ),
-          ),
-          const SizedBox(height: 16),
-          _tile(Icons.smart_toy, 'FitKey AI Coach (ChatGPT)', () => open(const AiCoachScreen()), color: FkColors.sky),
-          _tile(Icons.camera_alt, 'AI Food & Label Scanner', () => open(const AiFoodScannerScreen()), color: FkColors.lime),
-          _tile(Icons.track_changes, 'Fitness Goal & Calorie Baselines', () => open(const GoalSelectionScreen(isEditing: true)), color: FkColors.lime),
-          _tile(Icons.restaurant, 'Fuel Log (Nutrition Diary)', () => open(const FuelLogScreen()), color: FkColors.orange),
-          _tile(Icons.shopping_bag, 'Marketplace Orders', () => open(const StoreScreen()), color: FkColors.violet),
-          _tile(Icons.sports, 'FitPro Trainer Bookings', () => open(const TrainersScreen()), color: FkColors.sky),
-          _tile(Icons.card_membership, 'My plans & payments', () => open(const MySubscriptionsScreen())),
-          _tile(Icons.insights, 'Progress report', () => open(const HealthReportScreen())),
-          _tile(Icons.history, 'Attendance history', () => open(const AttendanceScreen())),
-          _tile(Icons.list_alt, 'Activity log', () => open(const ActivityLogScreen())),
-          const Divider(height: 32),
-          _tile(Icons.help_outline, 'Help & support', () => showSnack(context, 'Write to support@fitkey.in')),
-          _tile(Icons.logout, 'Log out', () async {
-            final ok = await showDialog<bool>(
-              context: context,
-              builder: (ctx) => AlertDialog(
-                title: const Text('Log out?'),
-                actions: [
-                  TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
-                  TextButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Log out')),
-                ],
+        ),
+        const SizedBox(height: 14),
+        Tap(
+          onTap: () => push(context, const PlansScreen()),
+          child: Container(
+            padding: const EdgeInsets.all(18),
+            decoration: BoxDecoration(gradient: AppColors.passGradient, borderRadius: BorderRadius.circular(20)),
+            child: Row(children: [
+              const Icon(Icons.key_rounded, color: AppColors.lime, size: 28),
+              const SizedBox(width: 14),
+              Expanded(
+                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  Text(sub?.planName ?? 'No active FitKey Pass',
+                      style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w800, fontSize: 16)),
+                  const SizedBox(height: 2),
+                  Text(sub == null ? 'Get a pass to start checking in' : 'Valid till ${formatDate(sub.endsAt)} · ${sub.daysLeft} days left',
+                      style: TextStyle(color: Colors.white.withValues(alpha: 0.65), fontSize: 12.5)),
+                ]),
               ),
-            );
-            if (ok == true && context.mounted) await context.read<Session>().signOut();
-          }, color: FkColors.danger),
-          const SizedBox(height: 24),
-          const Center(child: FitKeyLogo(size: 24)),
-          const SizedBox(height: 6),
-          const Center(
-            child: Text('Your Key to Fitness Everywhere.', style: TextStyle(color: FkColors.textSecondary, fontSize: 12)),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+                decoration: BoxDecoration(color: AppColors.lime, borderRadius: BorderRadius.circular(10)),
+                child: Text(sub == null ? 'Get pass' : 'Manage',
+                    style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 12.5, color: AppColors.ink)),
+              ),
+            ]),
           ),
-        ],
-      ),
+        ),
+        _Group(title: 'AI & nutrition', items: [
+          _Item(Icons.auto_awesome_rounded, 'Chat with Mansi', 'Your AI fitness & diet coach', AppColors.purple,
+              () => push(context, const AiCoachScreen())),
+          _Item(Icons.document_scanner_rounded, 'AI meal & label scanner', 'Snap food to log macros', AppColors.green,
+              () => push(context, const AiFoodScannerScreen())),
+          _Item(Icons.restaurant_rounded, 'Fuel Log', 'Your daily meal diary', AppColors.amber,
+              () => push(context, const FuelLogScreen())),
+          _Item(Icons.track_changes_rounded, 'Fitness goal & targets', 'Calories and macros', AppColors.primary,
+              () => push(context, const GoalSelectionScreen(isEditing: true))),
+        ]),
+        _Group(title: 'Activity', items: [
+          _Item(Icons.insights_rounded, 'Progress report', 'Streaks, workouts, weight', AppColors.blue,
+              () => push(context, const HealthReportScreen())),
+          _Item(Icons.history_rounded, 'Check-in history', 'Every venue you visited', AppColors.teal,
+              () => push(context, const AttendanceScreen())),
+          _Item(Icons.list_alt_rounded, 'Activity log', 'Runs, rides & workouts', AppColors.pink,
+              () => push(context, const ActivityLogScreen())),
+        ]),
+        _Group(title: 'Bookings & orders', items: [
+          _Item(Icons.receipt_long_rounded, 'Passes & payments', 'Your FitKey Pass history', AppColors.ink,
+              () => push(context, const MySubscriptionsScreen())),
+          _Item(Icons.sports_rounded, 'Trainer sessions', 'Find trainers & your bookings', AppColors.blue,
+              () => push(context, const TrainersScreen())),
+          _Item(Icons.shopping_bag_rounded, 'Store & orders', 'Shop and track orders', AppColors.pink,
+              () => push(context, const StoreScreen())),
+          _Item(Icons.local_hospital_rounded, 'HealthStop', 'Clinics & chemists near you', AppColors.red,
+              () => push(context, const HealthStopScreen())),
+        ]),
+        _Group(title: 'Support', items: [
+          _Item(Icons.support_agent_rounded, 'Help & support', 'support@fitkey.in', AppColors.text2, () async {
+            final ok = await launchUrl(Uri.parse('mailto:support@fitkey.in?subject=FITKEY%20app%20help'))
+                .catchError((_) => false);
+            if (!ok && context.mounted) toast(context, 'Write to us at support@fitkey.in', icon: Icons.mail_rounded);
+          }),
+          _Item(Icons.logout_rounded, 'Log out', null, AppColors.red, () => _logout(context)),
+        ]),
+        const SizedBox(height: 28),
+        const Center(child: BrandLockup(size: 26)),
+        const SizedBox(height: 6),
+        const Center(
+          child: Text('Your key to fitness, everywhere', style: TextStyle(color: AppColors.text3, fontSize: 12)),
+        ),
+      ]),
     );
   }
+}
 
-  Widget _tile(IconData icon, String title, VoidCallback onTap, {Color? color}) => ListTile(
-        contentPadding: EdgeInsets.zero,
-        leading: Icon(icon, color: color ?? FkColors.textSecondary),
-        title: Text(title, style: TextStyle(color: color, fontWeight: FontWeight.w500)),
-        trailing: const Icon(Icons.chevron_right, color: FkColors.textSecondary),
-        onTap: onTap,
-      );
+class _Item {
+  const _Item(this.icon, this.title, this.subtitle, this.color, this.onTap);
+  final IconData icon;
+  final String title;
+  final String? subtitle;
+  final Color color;
+  final VoidCallback onTap;
+}
+
+class _Group extends StatelessWidget {
+  const _Group({required this.title, required this.items});
+  final String title;
+  final List<_Item> items;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      Padding(
+        padding: const EdgeInsets.fromLTRB(4, 24, 0, 10),
+        child: Text(title.toUpperCase(),
+            style: const TextStyle(fontSize: 12, letterSpacing: 1.4, fontWeight: FontWeight.w800, color: AppColors.text3)),
+      ),
+      AppCard(
+        padding: EdgeInsets.zero,
+        child: Column(children: [
+          for (var i = 0; i < items.length; i++) ...[
+            InkWell(
+              onTap: items[i].onTap,
+              borderRadius: BorderRadius.circular(20),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                child: Row(children: [
+                  IconBubble(items[i].icon, color: items[i].color, size: 38),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                      Text(items[i].title,
+                          style: TextStyle(
+                              fontWeight: FontWeight.w700,
+                              fontSize: 14.5,
+                              color: items[i].color == AppColors.red ? AppColors.red : AppColors.text)),
+                      if (items[i].subtitle != null)
+                        Text(items[i].subtitle!, style: const TextStyle(fontSize: 12, color: AppColors.text3)),
+                    ]),
+                  ),
+                  const Icon(Icons.chevron_right_rounded, color: AppColors.text3),
+                ]),
+              ),
+            ),
+            if (i < items.length - 1) const Divider(indent: 64, height: 1),
+          ],
+        ]),
+      ),
+    ]);
+  }
 }

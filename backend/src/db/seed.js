@@ -4,6 +4,7 @@
  * Safe to re-run: existing rows are left alone.
  */
 import { config } from '../config.js';
+import { photosFor } from './demoPhotos.js';
 import { pool, query, queryOne } from './index.js';
 
 const PLANS = [
@@ -33,8 +34,6 @@ const PLANS = [
   },
 ];
 
-const photo = (seed, i) => `https://picsum.photos/seed/fitkey-${seed}-${i}/800/500`;
-const photos = (seed) => [1, 2, 3, 4, 5].map((i) => photo(seed, i));
 
 const VENUES = [
   { name: 'Iron Paradise Gym', area: 'Indiranagar', categories: ['gym'], lat: 12.9719, lng: 77.6412, trainer: true,
@@ -89,7 +88,7 @@ async function seed() {
        VALUES ($1, $2, $3, $4, $5, $6, 'Bengaluru', $7, $8, '06:00', '22:00', '{mon,tue,wed,thu,fri,sat,sun}',
                '+910000000001', $9, $10, $11, $12, 'live')`,
       [partner.id, v.name, `${v.name} — a FITKEY partner venue in ${v.area}.`, v.categories, `${v.area}, Bengaluru`,
-        v.area, v.lat, v.lng, v.trainer, v.equipment, v.amenities, photos(v.name.replace(/\W+/g, '').toLowerCase())],
+        v.area, v.lat, v.lng, v.trainer, v.equipment, v.amenities, photosFor(v.categories, VENUES.indexOf(v))],
     );
   }
   console.log(`✔ Demo partner (+910000000001) with ${VENUES.length} live venues in Bengaluru`);

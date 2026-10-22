@@ -1,8 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
-import 'package:fitkey_core/fitkey_core.dart';
 import '../../state/session.dart';
+import '../../ui/ui.dart';
 import '../goals/goal_selection_screen.dart';
 
 /// Shown after first login (and from Profile → Edit) to capture name, email, city and gender.
@@ -33,6 +33,7 @@ class _ProfileSetupScreenState extends State<ProfileSetupScreen> {
     _email = TextEditingController(text: user?.email);
     _city = TextEditingController(text: user?.city);
     _gender = user?.gender;
+    _name.addListener(() => setState(() {}));
     session.api.cities().then((c) {
       if (mounted) setState(() => _cities = c);
     }).catchError((_) {});
@@ -40,7 +41,11 @@ class _ProfileSetupScreenState extends State<ProfileSetupScreen> {
 
   Future<void> _save() async {
     if (!_form.currentState!.validate()) return;
+    FocusScope.of(context).unfocus();
     setState(() => _saving = true);
+    // Saving a first profile flips the session to signed-in, which replaces this screen;
+    // grab the navigator first so the goal step can still be pushed on top of Home.
+    final nav = Navigator.of(context);
     try {
       await context.read<Session>().updateProfile({
         'name': _name.text.trim(),
@@ -48,19 +53,14 @@ class _ProfileSetupScreenState extends State<ProfileSetupScreen> {
         'city': _city.text.trim(),
         'gender': ?_gender,
       });
-      if (mounted) {
-        if (widget.editing) {
-          Navigator.pop(context);
-        } else {
-          // Flow: User Registration / Profile Setup -> Goal Selection Screen
-          await Navigator.push(
-            context,
-            MaterialPageRoute(builder: (_) => const GoalSelectionScreen()),
-          );
-        }
+      if (widget.editing) {
+        nav.pop();
+        if (mounted) toast(context, 'Profile updated');
+      } else {
+        nav.push(MaterialPageRoute(builder: (_) => const GoalSelectionScreen()));
       }
     } catch (e) {
-      if (mounted) showSnack(context, errorMessage(e), error: true);
+      if (mounted) toast(context, friendlyError(e), error: true);
     } finally {
       if (mounted) setState(() => _saving = false);
     }
@@ -77,6 +77,7 @@ class _ProfileSetupScreenState extends State<ProfileSetupScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      backgroundColor: AppColors.surface,
       appBar: AppBar(
         title: Text(widget.editing ? 'Edit profile' : ''),
         actions: [
@@ -84,81 +85,110 @@ class _ProfileSetupScreenState extends State<ProfileSetupScreen> {
             TextButton(onPressed: () => context.read<Session>().signOut(), child: const Text('Log out')),
         ],
       ),
-      body: SafeArea(
-        child: Form(
-          key: _form,
-          child: ListView(
-            padding: const EdgeInsets.symmetric(horizontal: 24),
-            children: [
-              if (!widget.editing) ...[
-                Text('Let\'s set up\nyour profile', style: Theme.of(context).textTheme.headlineMedium),
-                const SizedBox(height: 8),
-                const Text('This helps us show venues near you and match you with gym buddies.',
-                    style: TextStyle(color: FkColors.textSecondary)),
-                const SizedBox(height: 28),
-              ],
-              _label('Full name'),
-              TextFormField(
-                controller: _name,
-                textCapitalization: TextCapitalization.words,
-                decoration: const InputDecoration(hintText: 'e.g. Asha Kumar'),
-                validator: (v) => (v ?? '').trim().length < 2 ? 'Enter your name' : null,
-              ),
-              _label('Email'),
-              TextFormField(
-                controller: _email,
-                keyboardType: TextInputType.emailAddress,
-                decoration: const InputDecoration(hintText: 'you@example.com'),
-                validator: (v) {
-                  final value = (v ?? '').trim();
-                  if (value.isEmpty) return null;
-                  return RegExp(r'^[^@\s]+@[^@\s]+\.[^@\s]+$').hasMatch(value) ? null : 'Enter a valid email';
-                },
-              ),
-              _label('City'),
-              Autocomplete<String>(
-                initialValue: TextEditingValue(text: _city.text),
-                optionsBuilder: (v) =>
-                    _cities.where((c) => c.toLowerCase().contains(v.text.toLowerCase())),
-                onSelected: (c) => _city.text = c,
-                fieldViewBuilder: (context, controller, focusNode, onSubmit) => TextFormField(
-                  controller: controller,
-                  focusNode: focusNode,
-                  textCapitalization: TextCapitalization.words,
-                  decoration: const InputDecoration(hintText: 'e.g. Bengaluru', prefixIcon: Icon(Icons.location_city)),
-                  onChanged: (v) => _city.text = v,
-                  validator: (v) => (v ?? '').trim().length < 2 ? 'Enter your city' : null,
+      body: Form(
+        key: _form,
+        child: ListView(padding: const EdgeInsets.fromLTRB(20, 4, 20, 24), children: [
+          if (!widget.editing) ...[
+            const Text('Let\'s get to know you',
+                style: TextStyle(fontSize: 26, fontWeight: FontWeight.w800, letterSpacing: -0.7)),
+            const SizedBox(height: 6),
+            const Text('We use this to show venues in your city and match you with gym buddies.',
+                style: TextStyle(color: AppColors.text2, height: 1.4)),
+            const SizedBox(height: 24),
+          ],
+          Center(child: PersonAvatar(name: _name.text.trim().isEmpty ? '?' : _name.text, size: 84)),
+          const SizedBox(height: 24),
+          _label('Full name'),
+          TextFormField(
+            controller: _name,
+            textCapitalization: TextCapitalization.words,
+            textInputAction: TextInputAction.next,
+            decoration: const InputDecoration(hintText: 'e.g. Asha Kumar', prefixIcon: Icon(Icons.person_outline_rounded)),
+            validator: (v) => (v ?? '').trim().length < 2 ? 'Enter your name' : null,
+          ),
+          _label('Email (optional)'),
+          TextFormField(
+            controller: _email,
+            keyboardType: TextInputType.emailAddress,
+            textInputAction: TextInputAction.next,
+            decoration: const InputDecoration(hintText: 'you@example.com', prefixIcon: Icon(Icons.mail_outline_rounded)),
+            validator: (v) {
+              final value = (v ?? '').trim();
+              if (value.isEmpty) return null;
+              return RegExp(r'^[^@\s]+@[^@\s]+\.[^@\s]+$').hasMatch(value) ? null : 'Enter a valid email';
+            },
+          ),
+          _label('City'),
+          TextFormField(
+            controller: _city,
+            textCapitalization: TextCapitalization.words,
+            decoration: const InputDecoration(hintText: 'e.g. Bengaluru', prefixIcon: Icon(Icons.location_city_rounded)),
+            onChanged: (_) => setState(() {}),
+            validator: (v) => (v ?? '').trim().length < 2 ? 'Enter your city' : null,
+          ),
+          if (_cities.isNotEmpty) ...[
+            const SizedBox(height: 10),
+            Wrap(spacing: 8, runSpacing: 8, children: [
+              for (final c in _cities)
+                Tap(
+                  onTap: () => setState(() => _city.text = c),
+                  child: AnimatedContainer(
+                    duration: const Duration(milliseconds: 150),
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+                    decoration: BoxDecoration(
+                      color: _city.text.toLowerCase() == c.toLowerCase() ? AppColors.primarySoft : AppColors.surfaceAlt,
+                      borderRadius: BorderRadius.circular(10),
+                      border: Border.all(
+                          color: _city.text.toLowerCase() == c.toLowerCase() ? AppColors.primary : Colors.transparent),
+                    ),
+                    child: Text(c, style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13)),
+                  ),
+                ),
+            ]),
+          ],
+          _label('Gender'),
+          Row(children: [
+            for (final (id, label, icon) in const [
+              ('male', 'Male', Icons.male_rounded),
+              ('female', 'Female', Icons.female_rounded),
+              ('other', 'Other', Icons.transgender_rounded),
+            ]) ...[
+              Expanded(
+                child: Tap(
+                  onTap: () => setState(() => _gender = _gender == id ? null : id),
+                  child: AnimatedContainer(
+                    duration: const Duration(milliseconds: 150),
+                    height: 56,
+                    decoration: BoxDecoration(
+                      color: _gender == id ? AppColors.primarySoft : AppColors.surface,
+                      borderRadius: BorderRadius.circular(14),
+                      border: Border.all(color: _gender == id ? AppColors.primary : AppColors.line, width: 1.4),
+                    ),
+                    child: Row(mainAxisAlignment: MainAxisAlignment.center, children: [
+                      Icon(icon, size: 20, color: _gender == id ? AppColors.primary : AppColors.text2),
+                      const SizedBox(width: 6),
+                      Text(label, style: const TextStyle(fontWeight: FontWeight.w700)),
+                    ]),
+                  ),
                 ),
               ),
-              _label('Gender'),
-              SegmentedButton<String>(
-                emptySelectionAllowed: true,
-                showSelectedIcon: false,
-                segments: const [
-                  ButtonSegment(value: 'male', label: Text('Male')),
-                  ButtonSegment(value: 'female', label: Text('Female')),
-                  ButtonSegment(value: 'other', label: Text('Other')),
-                ],
-                selected: {?_gender},
-                onSelectionChanged: (s) => setState(() => _gender = s.isEmpty ? null : s.first),
-              ),
-              const SizedBox(height: 32),
-              FilledButton(
-                onPressed: _saving ? null : _save,
-                child: _saving
-                    ? const SizedBox(width: 22, height: 22, child: CircularProgressIndicator(strokeWidth: 2.5))
-                    : Text(widget.editing ? 'Save' : 'Start my journey'),
-              ),
-              const SizedBox(height: 24),
+              if (id != 'other') const SizedBox(width: 10),
             ],
+          ]),
+          const SizedBox(height: 32),
+          AppButton(
+            label: widget.editing ? 'Save changes' : 'Continue',
+            icon: widget.editing ? null : Icons.arrow_forward_rounded,
+            busy: _saving,
+            onPressed: _save,
           ),
-        ),
+        ]),
       ),
     );
   }
 
   Widget _label(String text) => Padding(
         padding: const EdgeInsets.only(top: 18, bottom: 8),
-        child: Text(text, style: const TextStyle(fontWeight: FontWeight.w600)),
+        child: Text(text, style: const TextStyle(fontWeight: FontWeight.w700, color: AppColors.text2, fontSize: 13.5)),
       );
 }

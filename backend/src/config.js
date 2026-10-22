@@ -24,5 +24,7 @@ export const config = {
   paymentsMode: process.env.PAYMENTS_MODE ?? 'mock',
   adminPhone: process.env.ADMIN_PHONE,
   openaiApiKey: process.env.OPENAI_API_KEY || '',
+  // Model used by Mansi and the meal / label scanner. gpt-4o-mini handles vision well at low cost.
+  openaiModel: process.env.OPENAI_MODEL || 'gpt-4o-mini',
   corsOrigins: (process.env.CORS_ORIGINS ?? '*').split(',').map((s) => s.trim()),
 };

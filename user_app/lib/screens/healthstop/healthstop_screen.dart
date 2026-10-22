@@ -1,12 +1,16 @@
+import 'package:fitkey_core/fitkey_core.dart' show formatPaise;
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:url_launcher/url_launcher.dart';
 
-import 'package:fitkey_core/fitkey_core.dart';
 import '../../data/models.dart';
 import '../../state/session.dart';
+import '../../ui/ui.dart';
 
-/// 7. Homepage Modules: HealthStop Near You (Clinics & Chemists)
+/// A directory result plus whether we had to widen the search beyond the member's city.
+typedef _Listing<T> = ({List<T> items, bool widened});
+
+/// HealthStop near you — nearby chemists and sports-medicine / family clinics.
 class HealthStopScreen extends StatefulWidget {
   const HealthStopScreen({super.key});
 
@@ -15,324 +19,576 @@ class HealthStopScreen extends StatefulWidget {
 }
 
 class _HealthStopScreenState extends State<HealthStopScreen> with SingleTickerProviderStateMixin {
-  late final TabController _tabController;
+  late final TabController _tabs = TabController(length: 2, vsync: this);
 
-  late Future<List<HealthChemist>> _chemistFuture;
-  late Future<List<HealthClinic>> _clinicFuture;
+  String? _userCity;
+  String? _city; // null = all cities
+
+  late Future<_Listing<HealthChemist>> _chemists;
+  late Future<_Listing<HealthClinic>> _clinics;
 
   @override
   void initState() {
     super.initState();
-    _tabController = TabController(length: 2, vsync: this);
-    _loadData();
-  }
-
-  void _loadData() {
-    final api = context.read<Session>().api;
-    _chemistFuture = api.healthChemists();
-    _clinicFuture = api.healthClinics();
-  }
-
-  Future<void> _makeCall(String phone) async {
-    final uri = Uri.parse('tel:$phone');
-    if (await canLaunchUrl(uri)) {
-      await launchUrl(uri);
-    } else {
-      if (mounted) showSnack(context, 'Unable to dial phone: $phone', error: true);
-    }
-  }
-
-  Future<void> _openGoogleMaps(String name, String address, double? lat, double? lng) async {
-    final Uri uri;
-    if (lat != null && lng != null) {
-      uri = Uri.parse('https://www.google.com/maps/search/?api=1&query=$lat,$lng');
-    } else {
-      uri = Uri.parse('https://www.google.com/maps/search/?api=1&query=${Uri.encodeComponent('$name $address')}');
-    }
-
-    if (await canLaunchUrl(uri)) {
-      await launchUrl(uri, mode: LaunchMode.externalApplication);
-    } else {
-      if (mounted) showSnack(context, 'Unable to launch Google Maps', error: true);
-    }
+    final c = context.read<Session>().user?.city?.trim();
+    _userCity = (c == null || c.isEmpty) ? null : c;
+    _city = _userCity;
+    _load();
   }
 
   @override
   void dispose() {
-    _tabController.dispose();
+    _tabs.dispose();
     super.dispose();
+  }
+
+  void _load() {
+    final api = context.read<Session>().api;
+    _chemists = _withFallback((city) => api.healthChemists(city: city));
+    _clinics = _withFallback((city) => api.healthClinics(city: city));
+  }
+
+  /// Queries the selected city; if nothing is listed there yet, shows every city instead.
+  Future<_Listing<T>> _withFallback<T>(Future<List<T>> Function(String? city) fetch) async {
+    final city = _city;
+    final items = await fetch(city);
+    if (items.isNotEmpty || city == null) return (items: items, widened: false);
+    return (items: await fetch(null), widened: true);
+  }
+
+  Future<void> _refresh() async {
+    setState(_load);
+    await Future.wait([_chemists, _clinics].map((f) => f.then((_) {}, onError: (_) {})));
+  }
+
+  void _setCity(String? city) {
+    if (city == _city) return;
+    _city = city;
+    setState(_load);
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('HealthStop Near You'),
-        bottom: TabBar(
-          controller: _tabController,
-          tabs: const [
-            Tab(icon: Icon(Icons.local_pharmacy), text: 'Chemist Directory'),
-            Tab(icon: Icon(Icons.local_hospital), text: 'Clinic Directory'),
-          ],
-        ),
-      ),
-      body: TabBarView(
-        controller: _tabController,
+      backgroundColor: AppColors.bg,
+      appBar: AppBar(title: const Text('HealthStop near you')),
+      body: Column(
         children: [
-          _buildChemistsTab(),
-          _buildClinicsTab(),
+          Container(
+            color: AppColors.surface,
+            padding: const EdgeInsets.fromLTRB(16, 4, 16, 14),
+            child: Column(
+              children: [
+                _Segmented(controller: _tabs),
+                if (_userCity != null) ...[
+                  const SizedBox(height: 12),
+                  ChoiceChips<String?>(
+                    padding: EdgeInsets.zero,
+                    options: [_userCity, null],
+                    selected: _city,
+                    label: (c) => c ?? 'All cities',
+                    icon: (c) => c == null ? Icons.public_rounded : Icons.location_on_rounded,
+                    onSelected: _setCity,
+                  ),
+                ],
+              ],
+            ),
+          ),
+          Expanded(
+            child: TabBarView(
+              controller: _tabs,
+              children: [
+                _DirectoryList<HealthChemist>(
+                  future: _chemists,
+                  city: _city,
+                  onRefresh: _refresh,
+                  banner: const PhotoBanner(
+                    image: AppImages.supplements,
+                    eyebrow: 'Chemists',
+                    title: 'Medicines from pharmacies near you',
+                    subtitle: 'Call ahead to check stock, or get directions.',
+                    height: 140,
+                  ),
+                  empty: const ('No chemists listed yet', Icons.local_pharmacy_rounded),
+                  itemBuilder: (c) => _ChemistCard(chemist: c),
+                ),
+                _DirectoryList<HealthClinic>(
+                  future: _clinics,
+                  city: _city,
+                  onRefresh: _refresh,
+                  banner: const PhotoBanner(
+                    image: AppImages.running,
+                    eyebrow: 'Clinics',
+                    title: 'Sports medicine & physio care',
+                    subtitle: 'Doctors, facilities and consultation fees at a glance.',
+                    height: 140,
+                  ),
+                  empty: const ('No clinics listed yet', Icons.local_hospital_rounded),
+                  itemBuilder: (c) => _ClinicCard(clinic: c),
+                ),
+              ],
+            ),
+          ),
         ],
       ),
     );
   }
+}
 
-  // ============================================================================
-  // Chemist Directory (Pharmacies)
-  // ============================================================================
-  Widget _buildChemistsTab() {
-    return FutureBuilder<List<HealthChemist>>(
-      future: _chemistFuture,
-      builder: (context, snap) {
-        if (snap.connectionState != ConnectionState.done) {
-          return const Center(child: CircularProgressIndicator());
-        }
-        if (snap.hasError) {
-          return ErrorState(message: errorMessage(snap.error!), onRetry: () => setState(_loadData));
-        }
+/// Pill-style segmented control bound to a [TabController].
+class _Segmented extends StatelessWidget {
+  const _Segmented({required this.controller});
+  final TabController controller;
 
-        final chemists = snap.data!;
-        if (chemists.isEmpty) {
-          return const EmptyState(
-            icon: Icons.local_pharmacy_outlined,
-            title: 'No pharmacies nearby',
-            message: 'No chemists listed in this area yet.',
-          );
-        }
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      height: 46,
+      padding: const EdgeInsets.all(4),
+      decoration: BoxDecoration(color: AppColors.surfaceAlt, borderRadius: BorderRadius.circular(14)),
+      child: TabBar(
+        controller: controller,
+        indicatorSize: TabBarIndicatorSize.tab,
+        dividerColor: Colors.transparent,
+        indicator: BoxDecoration(
+          color: AppColors.surface,
+          borderRadius: BorderRadius.circular(11),
+          boxShadow: AppShadows.soft,
+        ),
+        labelColor: AppColors.text,
+        unselectedLabelColor: AppColors.text2,
+        splashFactory: NoSplash.splashFactory,
+        overlayColor: WidgetStateProperty.all(Colors.transparent),
+        tabs: const [
+          Tab(
+            height: 38,
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(Icons.local_pharmacy_rounded, size: 18, color: AppColors.green),
+                SizedBox(width: 6),
+                Text('Chemists'),
+              ],
+            ),
+          ),
+          Tab(
+            height: 38,
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(Icons.local_hospital_rounded, size: 18, color: AppColors.red),
+                SizedBox(width: 6),
+                Text('Clinics'),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
 
-        return RefreshIndicator(
-          onRefresh: () async => setState(_loadData),
-          child: ListView.separated(
-            padding: const EdgeInsets.all(16),
-            itemCount: chemists.length,
-            separatorBuilder: (_, _) => const SizedBox(height: 12),
-            itemBuilder: (context, idx) {
-              final c = chemists[idx];
-              return Card(
-                child: Padding(
-                  padding: const EdgeInsets.all(16),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
+class _DirectoryList<T> extends StatelessWidget {
+  const _DirectoryList({
+    required this.future,
+    required this.city,
+    required this.onRefresh,
+    required this.banner,
+    required this.empty,
+    required this.itemBuilder,
+  });
+
+  final Future<_Listing<T>> future;
+  final String? city;
+  final Future<void> Function() onRefresh;
+  final Widget banner;
+  final (String, IconData) empty;
+  final Widget Function(T) itemBuilder;
+
+  @override
+  Widget build(BuildContext context) {
+    return RefreshIndicator(
+      color: AppColors.primary,
+      onRefresh: onRefresh,
+      child: FutureBuilder<_Listing<T>>(
+        future: future,
+        builder: (context, snap) {
+          if (snap.connectionState != ConnectionState.done) return const SkeletonList(itemHeight: 88);
+          if (snap.hasError) return _fill(ErrorView(error: snap.error!, onRetry: onRefresh));
+          final data = snap.data!;
+          if (data.items.isEmpty) {
+            return _fill(
+              EmptyView(
+                icon: empty.$2,
+                color: AppColors.teal,
+                title: empty.$1,
+                message: "We're onboarding partners in your area. Pull down to check again.",
+                action: SizedBox(
+                  width: 160,
+                  child: OutlinedButton.icon(
+                    onPressed: onRefresh,
+                    icon: const Icon(Icons.refresh_rounded),
+                    label: const Text('Refresh'),
+                  ),
+                ),
+              ),
+            );
+          }
+          return ListView(
+            physics: const AlwaysScrollableScrollPhysics(),
+            padding: const EdgeInsets.fromLTRB(16, 16, 16, 32),
+            children: [
+              banner,
+              if (data.widened && city != null) ...[
+                const SizedBox(height: 14),
+                Container(
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(color: AppColors.amberSoft, borderRadius: BorderRadius.circular(14)),
+                  child: Row(
                     children: [
-                      Row(children: [
-                        Expanded(
-                          child: Text(c.name, style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 16)),
+                      const Icon(Icons.info_outline_rounded, size: 18, color: AppColors.amber),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          'Nothing listed in $city yet — showing all cities.',
+                          style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: AppColors.text),
                         ),
-                        Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                          decoration: BoxDecoration(
-                            color: FkColors.sky.withValues(alpha: 0.15),
-                            borderRadius: BorderRadius.circular(8),
-                          ),
-                          child: Row(children: [
-                            const Icon(Icons.near_me, size: 12, color: FkColors.sky),
-                            const SizedBox(width: 4),
-                            Text('${c.distanceKm} km away',
-                                style: const TextStyle(color: FkColors.sky, fontSize: 11, fontWeight: FontWeight.bold)),
-                          ]),
-                        ),
-                      ]),
-                      const SizedBox(height: 6),
-                      Text(c.address, style: const TextStyle(color: FkColors.textSecondary, fontSize: 13)),
-                      const SizedBox(height: 10),
-                      Row(children: [
-                        const Icon(Icons.access_time, size: 14, color: FkColors.orange),
-                        const SizedBox(width: 6),
-                        Text(c.operationalHours,
-                            style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 12, color: FkColors.orange)),
-                        const Spacer(),
-                        Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-                          decoration: BoxDecoration(
-                            color: c.deliveryAvailable ? FkColors.lime.withValues(alpha: 0.15) : Colors.white10,
-                            borderRadius: BorderRadius.circular(6),
-                          ),
-                          child: Text(
-                            c.deliveryAvailable ? '✓ ${c.deliveryTimeEst}' : 'Store Pickup Only',
-                            style: TextStyle(
-                              color: c.deliveryAvailable ? FkColors.lime : FkColors.textSecondary,
-                              fontSize: 11,
-                              fontWeight: FontWeight.w700,
-                            ),
-                          ),
-                        ),
-                      ]),
-                      const Divider(height: 24),
-                      Row(children: [
-                        Expanded(
-                          child: OutlinedButton.icon(
-                            icon: const Icon(Icons.directions, color: FkColors.sky, size: 18),
-                            label: const Text('Directions', style: TextStyle(color: FkColors.sky)),
-                            onPressed: () => _openGoogleMaps(c.name, c.address, c.latitude, c.longitude),
-                          ),
-                        ),
-                        const SizedBox(width: 10),
-                        Expanded(
-                          child: FilledButton.icon(
-                            icon: const Icon(Icons.phone, size: 18),
-                            label: const Text('Emergency Call'),
-                            onPressed: () => _makeCall(c.phone),
-                          ),
-                        ),
-                      ]),
+                      ),
                     ],
                   ),
                 ),
-              );
-            },
-          ),
-        );
-      },
+              ],
+              SectionTitle(
+                '${data.items.length} near you',
+                subtitle: data.widened || city == null
+                    ? 'Across all cities · nearest first'
+                    : 'In $city · nearest first',
+                padding: const EdgeInsets.fromLTRB(0, 22, 0, 12),
+              ),
+              for (final item in data.items) ...[itemBuilder(item), const SizedBox(height: 12)],
+            ],
+          );
+        },
+      ),
     );
   }
 
-  // ============================================================================
-  // Clinic Directory (Medical Clinics)
-  // ============================================================================
-  Widget _buildClinicsTab() {
-    return FutureBuilder<List<HealthClinic>>(
-      future: _clinicFuture,
-      builder: (context, snap) {
-        if (snap.connectionState != ConnectionState.done) {
-          return const Center(child: CircularProgressIndicator());
-        }
-        if (snap.hasError) {
-          return ErrorState(message: errorMessage(snap.error!), onRetry: () => setState(_loadData));
-        }
+  Widget _fill(Widget child) => LayoutBuilder(
+    builder: (context, c) => SingleChildScrollView(
+      physics: const AlwaysScrollableScrollPhysics(),
+      child: ConstrainedBox(
+        constraints: BoxConstraints(minHeight: c.maxHeight),
+        child: child,
+      ),
+    ),
+  );
+}
 
-        final clinics = snap.data!;
-        if (clinics.isEmpty) {
-          return const EmptyState(
-            icon: Icons.local_hospital_outlined,
-            title: 'No clinics nearby',
-            message: 'No medical clinics listed in this area yet.',
-          );
-        }
+// ---------------------------------------------------------------------------
+// Actions — only things that really work: dial the number, open Google Maps.
+// ---------------------------------------------------------------------------
 
-        return RefreshIndicator(
-          onRefresh: () async => setState(_loadData),
-          child: ListView.separated(
-            padding: const EdgeInsets.all(16),
-            itemCount: clinics.length,
-            separatorBuilder: (_, _) => const SizedBox(height: 12),
-            itemBuilder: (context, idx) {
-              final cl = clinics[idx];
-              return Card(
-                child: Padding(
-                  padding: const EdgeInsets.all(16),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Row(children: [
-                        Expanded(
-                          child: Text(cl.name, style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 16)),
-                        ),
-                        Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                          decoration: BoxDecoration(
-                            color: FkColors.lime.withValues(alpha: 0.15),
-                            borderRadius: BorderRadius.circular(8),
-                          ),
-                          child: Text('${cl.distanceKm} km',
-                              style: const TextStyle(color: FkColors.lime, fontSize: 11, fontWeight: FontWeight.bold)),
-                        ),
-                      ]),
-                      const SizedBox(height: 4),
-                      Text(cl.address, style: const TextStyle(color: FkColors.textSecondary, fontSize: 13)),
-                      const SizedBox(height: 12),
+Future<void> _call(BuildContext context, String phone) async {
+  final number = phone.replaceAll(RegExp(r'[^\d+]'), '');
+  final ok = number.isNotEmpty && await _launch(Uri(scheme: 'tel', path: number));
+  if (!ok && context.mounted) toast(context, "Couldn't open the dialer. Call $phone", error: true);
+}
 
-                      // Doctors & Qualifications
-                      const Text('Listed Doctors & Qualifications',
-                          style: TextStyle(fontWeight: FontWeight.w700, fontSize: 13)),
-                      const SizedBox(height: 4),
-                      ...cl.doctors.map((doc) => Padding(
-                            padding: const EdgeInsets.symmetric(vertical: 2),
-                            child: Row(
+Future<void> _directions(BuildContext context, String name, String address, double? lat, double? lng) async {
+  final dest = (lat != null && lng != null) ? '$lat,$lng' : '$name, $address';
+  final uri = Uri.https('www.google.com', '/maps/dir/', {'api': '1', 'destination': dest});
+  final ok = await _launch(uri, external: true);
+  if (!ok && context.mounted) toast(context, "Couldn't open maps on this device", error: true);
+}
+
+/// Launches directly: `canLaunchUrl` reports false on Android 11+ unless the
+/// scheme is declared in the manifest's `<queries>`, even though launching works.
+Future<bool> _launch(Uri uri, {bool external = false}) async {
+  try {
+    return await launchUrl(uri, mode: external ? LaunchMode.externalApplication : LaunchMode.platformDefault);
+  } catch (_) {
+    return false;
+  }
+}
+
+class _ActionRow extends StatelessWidget {
+  const _ActionRow({required this.onCall, required this.onDirections});
+  final VoidCallback onCall;
+  final VoidCallback onDirections;
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      children: [
+        Expanded(
+          child: OutlinedButton.icon(
+            style: OutlinedButton.styleFrom(minimumSize: const Size.fromHeight(44)),
+            onPressed: onDirections,
+            icon: const Icon(Icons.directions_rounded, size: 19, color: AppColors.blue),
+            label: const Text('Directions'),
+          ),
+        ),
+        const SizedBox(width: 10),
+        Expanded(
+          child: FilledButton.icon(
+            style: FilledButton.styleFrom(
+              minimumSize: const Size.fromHeight(44),
+              backgroundColor: AppColors.green,
+              textStyle: const TextStyle(fontFamily: kFont, fontWeight: FontWeight.w800, fontSize: 15),
+            ),
+            onPressed: onCall,
+            icon: const Icon(Icons.call_rounded, size: 18),
+            label: const Text('Call'),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _Meta extends StatelessWidget {
+  const _Meta(this.icon, this.text);
+  final IconData icon;
+  final String text;
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Padding(
+          padding: const EdgeInsets.only(top: 1),
+          child: Icon(icon, size: 15, color: AppColors.text3),
+        ),
+        const SizedBox(width: 6),
+        Expanded(
+          child: Text(
+            text,
+            style: TextStyle(fontSize: 13, color: AppColors.text2, fontWeight: FontWeight.w600, height: 1.35),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+Widget _distanceTag(double km) =>
+    Tag('${km.toStringAsFixed(1)} km', color: AppColors.blue, icon: Icons.near_me_rounded, dense: true);
+
+// ---------------------------------------------------------------------------
+// Cards
+// ---------------------------------------------------------------------------
+
+class _ChemistCard extends StatelessWidget {
+  const _ChemistCard({required this.chemist});
+  final HealthChemist chemist;
+
+  @override
+  Widget build(BuildContext context) {
+    final c = chemist;
+    final allDay = c.operationalHours.toLowerCase().contains('24');
+    return AppCard(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const IconBubble(Icons.local_pharmacy_rounded, color: AppColors.green, size: 46),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      c.name,
+                      style: const TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.w800,
+                        letterSpacing: -0.3,
+                        height: 1.25,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      c.address,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(fontSize: 12.5, color: AppColors.text2, height: 1.35),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 8),
+              _distanceTag(c.distanceKm),
+            ],
+          ),
+          const SizedBox(height: 12),
+          Wrap(
+            spacing: 6,
+            runSpacing: 6,
+            children: [
+              if (allDay)
+                const Tag('OPEN 24×7', color: AppColors.green, icon: Icons.schedule_rounded, dense: true)
+              else
+                Tag(
+                  c.operationalHours,
+                  color: AppColors.text2,
+                  bg: AppColors.surfaceAlt,
+                  icon: Icons.schedule_rounded,
+                  dense: true,
+                ),
+              if (c.deliveryAvailable)
+                Tag(c.deliveryTimeEst, color: AppColors.primary, icon: Icons.delivery_dining_rounded, dense: true)
+              else
+                const Tag(
+                  'Store pickup only',
+                  color: AppColors.text2,
+                  bg: AppColors.surfaceAlt,
+                  icon: Icons.storefront_rounded,
+                  dense: true,
+                ),
+            ],
+          ),
+          const SizedBox(height: 14),
+          _ActionRow(
+            onCall: () => _call(context, c.phone),
+            onDirections: () => _directions(context, c.name, c.address, c.latitude, c.longitude),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _ClinicCard extends StatelessWidget {
+  const _ClinicCard({required this.clinic});
+  final HealthClinic clinic;
+
+  @override
+  Widget build(BuildContext context) {
+    final c = clinic;
+    return AppCard(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const IconBubble(Icons.local_hospital_rounded, color: AppColors.red, size: 46),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      c.name,
+                      style: const TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.w800,
+                        letterSpacing: -0.3,
+                        height: 1.25,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      c.address,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(fontSize: 12.5, color: AppColors.text2, height: 1.35),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 8),
+              _distanceTag(c.distanceKm),
+            ],
+          ),
+          if (c.doctors.isNotEmpty) ...[
+            const SizedBox(height: 14),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+              decoration: BoxDecoration(color: AppColors.surfaceAlt, borderRadius: BorderRadius.circular(14)),
+              child: Column(
+                children: [
+                  for (var i = 0; i < c.doctors.length; i++) ...[
+                    if (i > 0) const Divider(height: 1),
+                    Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 10),
+                      child: Row(
+                        children: [
+                          PersonAvatar(name: c.doctors[i].name, size: 38),
+                          const SizedBox(width: 10),
+                          Expanded(
+                            child: Column(
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
-                                const Icon(Icons.person, size: 16, color: FkColors.sky),
-                                const SizedBox(width: 6),
-                                Expanded(
-                                  child: Text(
-                                    '${doc.name} · ${doc.degree} (${doc.specialty})',
-                                    style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
-                                  ),
+                                Text(
+                                  c.doctors[i].name,
+                                  style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 14),
                                 ),
+                                if (c.doctors[i].specialty.isNotEmpty)
+                                  Text(
+                                    c.doctors[i].specialty,
+                                    style: const TextStyle(
+                                      fontSize: 12.5,
+                                      color: AppColors.primary,
+                                      fontWeight: FontWeight.w700,
+                                    ),
+                                  ),
+                                if (c.doctors[i].degree.isNotEmpty)
+                                  Text(
+                                    c.doctors[i].degree,
+                                    style: const TextStyle(
+                                      fontSize: 12,
+                                      color: AppColors.text2,
+                                      fontWeight: FontWeight.w500,
+                                    ),
+                                  ),
                               ],
                             ),
-                          )),
-                      const SizedBox(height: 10),
-
-                      // Available Facilities & Equipment
-                      const Text('Available Facilities & Specialized Equipment',
-                          style: TextStyle(fontWeight: FontWeight.w700, fontSize: 13)),
-                      const SizedBox(height: 6),
-                      Wrap(
-                        spacing: 6,
-                        runSpacing: 4,
-                        children: cl.facilities
-                            .map((f) => Container(
-                                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-                                  decoration: BoxDecoration(
-                                    color: const Color(0xFF252B35),
-                                    borderRadius: BorderRadius.circular(6),
-                                  ),
-                                  child: Text(f,
-                                      style: const TextStyle(
-                                          color: FkColors.textSecondary, fontSize: 11, fontWeight: FontWeight.bold)),
-                                ))
-                            .toList(),
+                          ),
+                        ],
                       ),
-                      const SizedBox(height: 12),
-
-                      // Slot Timings & Fee
-                      Row(children: [
-                        const Icon(Icons.schedule, size: 14, color: FkColors.orange),
-                        const SizedBox(width: 6),
-                        Expanded(
-                          child: Text(cl.slotTimings,
-                              style: const TextStyle(fontSize: 12, color: FkColors.orange, fontWeight: FontWeight.w600)),
-                        ),
-                        Text('Fee: ${formatInr(cl.consultationFeePaise)}',
-                            style: const TextStyle(fontWeight: FontWeight.w900, color: FkColors.lime, fontSize: 13)),
-                      ]),
-                      const Divider(height: 24),
-
-                      // Direct Call & Maps
-                      Row(children: [
-                        Expanded(
-                          child: OutlinedButton.icon(
-                            icon: const Icon(Icons.directions, color: FkColors.sky, size: 18),
-                            label: const Text('Directions', style: TextStyle(color: FkColors.sky)),
-                            onPressed: () => _openGoogleMaps(cl.name, cl.address, cl.latitude, cl.longitude),
-                          ),
-                        ),
-                        const SizedBox(width: 10),
-                        Expanded(
-                          child: FilledButton.icon(
-                            icon: const Icon(Icons.call, size: 18),
-                            label: const Text('Direct Call'),
-                            onPressed: () => _makeCall(cl.phone),
-                          ),
-                        ),
-                      ]),
-                    ],
-                  ),
-                ),
-              );
-            },
+                    ),
+                  ],
+                ],
+              ),
+            ),
+          ],
+          if (c.facilities.isNotEmpty) ...[
+            const SizedBox(height: 12),
+            Wrap(
+              spacing: 6,
+              runSpacing: 6,
+              children: [for (final f in c.facilities) Tag(f, color: AppColors.teal, dense: true)],
+            ),
+          ],
+          const SizedBox(height: 12),
+          _Meta(Icons.schedule_rounded, c.slotTimings),
+          const SizedBox(height: 12),
+          const Divider(height: 1),
+          const SizedBox(height: 12),
+          Row(
+            children: [
+              const Text(
+                'Consultation fee',
+                style: TextStyle(color: AppColors.text2, fontWeight: FontWeight.w600, fontSize: 13),
+              ),
+              const Spacer(),
+              Text(
+                formatPaise(c.consultationFeePaise),
+                style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 16),
+              ),
+            ],
           ),
-        );
-      },
+          const SizedBox(height: 14),
+          _ActionRow(
+            onCall: () => _call(context, c.phone),
+            onDirections: () => _directions(context, c.name, c.address, c.latitude, c.longitude),
+          ),
+        ],
+      ),
     );
   }
 }
