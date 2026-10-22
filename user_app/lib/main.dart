@@ -38,6 +38,41 @@ class FitKeyApp extends StatelessWidget {
       title: 'FITKEY',
       debugShowCheckedModeBanner: false,
       theme: buildAppTheme(),
+      builder: (context, child) {
+        if (child == null) return const SizedBox.shrink();
+        final media = MediaQuery.of(context);
+        if (media.size.width <= 520) {
+          return child;
+        }
+        return Container(
+          color: const Color(0xFF07090E),
+          child: Center(
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 480),
+              child: MediaQuery(
+                data: media.copyWith(
+                  size: Size(480, media.size.height),
+                ),
+                child: ClipRect(
+                  child: DecoratedBox(
+                    decoration: BoxDecoration(
+                      color: Theme.of(context).scaffoldBackgroundColor,
+                      boxShadow: [
+                        BoxShadow(
+                          color: Colors.black.withValues(alpha: 0.5),
+                          blurRadius: 30,
+                          spreadRadius: 2,
+                        ),
+                      ],
+                    ),
+                    child: child,
+                  ),
+                ),
+              ),
+            ),
+          ),
+        );
+      },
       home: const _SessionGate(),
     );
   }

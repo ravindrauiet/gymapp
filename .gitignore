@@ -3,6 +3,7 @@ demo/
 # Memory heap dumps
 *.hprof
 
-# Android build outputs & binaries
+# Build outputs & archive binaries
 *.apk
 *.aab
+*.zip
