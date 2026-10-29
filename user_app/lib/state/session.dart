@@ -26,7 +26,14 @@ class Session extends ChangeNotifier {
   bool get hasActivePlan => subscription != null;
 
   Future<void> restore() async {
-    final token = await _storage.read(key: _tokenKey);
+    String? token;
+    try {
+      token = await _storage.read(key: _tokenKey);
+    } catch (_) {
+      // The encrypted store can be unreadable after a reinstall / restore (its key isn't restored).
+      // Wipe it and start signed out instead of hanging on the splash screen.
+      await _storage.deleteAll().catchError((_) {});
+    }
     if (token == null) {
       _set(SessionStatus.signedOut);
       return;
@@ -37,8 +44,10 @@ class Session extends ChangeNotifier {
     } on ApiException catch (e) {
       // Offline etc.: keep the token but show sign-in only if it was rejected.
       if (e.statusCode == 401) await signOut();
-      if (status == SessionStatus.loading) _set(SessionStatus.signedOut);
+    } catch (_) {
+      // Any other failure (e.g. unexpected data) must never leave the app stuck on the splash screen.
     }
+    if (status == SessionStatus.loading) _set(SessionStatus.signedOut);
   }
 
   Future<void> refresh() async {

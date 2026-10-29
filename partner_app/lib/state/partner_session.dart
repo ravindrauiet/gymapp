@@ -23,7 +23,13 @@ class PartnerSession extends ChangeNotifier {
   PartnerUser? user;
 
   Future<void> restore() async {
-    final token = await _storage.read(key: _tokenKey);
+    String? token;
+    try {
+      token = await _storage.read(key: _tokenKey);
+    } catch (_) {
+      // The encrypted store can be unreadable after a reinstall / restore; wipe it and start signed out.
+      await _storage.deleteAll().catchError((_) {});
+    }
     if (token == null) return _set(SessionStatus.signedOut);
     _client.token = token;
     try {
