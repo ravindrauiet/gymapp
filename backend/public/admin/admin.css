@@ -72,6 +72,23 @@ th { color: var(--muted); font-weight: 600; font-size: 12px; text-transform: upp
   background: var(--surface-2); border: 1px solid var(--outline); padding: 10px 18px; border-radius: 12px;
 }
 #toast.error { border-color: var(--danger); color: var(--danger); }
+[hidden] { display: none !important; }
+.badge {
+  display: inline-block; min-width: 18px; padding: 0 6px; margin-left: 4px; border-radius: 10px;
+  background: var(--danger); color: #fff; font-size: 11px; line-height: 18px; text-align: center;
+}
+.pill.open, .pill.pending, .pill.upcoming { background: rgba(255, 107, 53, 0.15); color: var(--orange); }
+.pill.resolved, .pill.verified { background: rgba(200, 243, 29, 0.15); color: var(--lime); }
+.pill.removed { background: rgba(255, 84, 112, 0.15); color: var(--danger); }
+.stars { color: var(--orange); letter-spacing: 1px; font-size: 16px; }
+.idproof img { width: 320px; max-width: 100%; height: 200px; object-fit: contain; border-radius: 10px; background: var(--surface-2); }
+.thumb { width: 160px; height: 90px; object-fit: cover; border-radius: 10px; margin-top: 6px; background: var(--surface-2); }
+.checks { display: flex; flex-wrap: wrap; gap: 4px 16px; }
+.checks label { display: flex; gap: 8px; align-items: center; font-weight: 500; margin: 0; }
+.checks input { width: auto; margin: 0; }
+a.link { color: var(--sky); }
+.stat.clickable { cursor: pointer; }
+.stat.clickable:hover { border-color: var(--lime); }
 code { background: var(--surface-2); padding: 1px 6px; border-radius: 6px; }
 @media (max-width: 640px) {
   main { padding: 16px; }

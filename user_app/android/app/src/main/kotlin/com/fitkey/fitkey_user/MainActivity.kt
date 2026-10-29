@@ -1,5 +1,6 @@
 package com.fitkey.fitkey_user
 
-import io.flutter.embedding.android.FlutterActivity
+import io.flutter.embedding.android.FlutterFragmentActivity
 
-class MainActivity : FlutterActivity()
+// FragmentActivity is required by the Health Connect permission flow (health package).
+class MainActivity : FlutterFragmentActivity()

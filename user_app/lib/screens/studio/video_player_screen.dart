@@ -7,6 +7,7 @@ import 'package:provider/provider.dart';
 import 'package:video_player/video_player.dart';
 
 import '../../data/models.dart';
+import '../../data/studio_api.dart';
 import '../../state/session.dart';
 import '../../ui/ui.dart';
 import 'studio_screen.dart';
@@ -32,10 +33,9 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
   void initState() {
     super.initState();
     _init();
-    _related = context
-        .read<Session>()
-        .api
-        .videos(category: widget.video.category, limit: 12)
+    final api = context.read<Session>().api;
+    final group = widget.video.groupKey;
+    _related = (group != null ? api.studioVideos(group: group, limit: 12) : api.videos(category: widget.video.category, limit: 12))
         .then((list) => list.where((v) => v.id != widget.video.id).toList());
   }
 
@@ -180,7 +180,7 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
     final v = c?.value;
     final ready = !_failed && c != null && v != null && v.isInitialized;
     final ratio = ready && v.aspectRatio > 0 ? v.aspectRatio : 16 / 9;
-    final fallback = videoVisual(widget.video.category).image;
+    final fallback = studioVideoVisual(widget.video).image;
 
     Widget content;
     if (_failed) {
@@ -357,7 +357,7 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
 
   Widget _details() {
     final video = widget.video;
-    final visual = videoVisual(video.category);
+    final visual = studioVideoVisual(video);
     final duration = formatDuration(video.durationSeconds);
     final level = video.level.isEmpty ? '' : video.level[0].toUpperCase() + video.level.substring(1);
     return ListView(

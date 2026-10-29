@@ -2,7 +2,9 @@ import 'package:fitkey_core/fitkey_core.dart' show formatTimeOfDay;
 import 'package:flutter/material.dart';
 
 import '../data/models.dart';
+import '../data/ratings_api.dart' show isNewRating;
 import '../ui/ui.dart';
+import 'rating_widgets.dart';
 
 /// Whether a venue is open right now, from its "HH:MM:SS" opening hours.
 bool? isOpenNow(String? opensAt, String? closesAt, [DateTime? at]) {
@@ -81,10 +83,18 @@ class VenueCard extends StatelessWidget {
           Padding(
             padding: EdgeInsets.fromLTRB(14, 12, 14, compact ? 12 : 14),
             child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Text(venue.name,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(fontSize: compact ? 15.5 : 17, fontWeight: FontWeight.w800, letterSpacing: -0.3)),
+              Row(children: [
+                Expanded(
+                  child: Text(venue.name,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(fontSize: compact ? 15.5 : 17, fontWeight: FontWeight.w800, letterSpacing: -0.3)),
+                ),
+                if (venue.ratingCount != null) ...[
+                  const SizedBox(width: 8),
+                  RatingBadge(avg: venue.ratingAvg, count: venue.ratingCount, showCount: false),
+                ],
+              ]),
               const SizedBox(height: 4),
               Row(children: [
                 const Icon(Icons.location_on_rounded, size: 15, color: AppColors.text3),
@@ -106,7 +116,10 @@ class VenueCard extends StatelessWidget {
                   Text('${formatTimeOfDay(venue.opensAt)} – ${formatTimeOfDay(venue.closesAt)}',
                       style: const TextStyle(fontSize: 12.5, color: AppColors.text2, fontWeight: FontWeight.w600)),
                   const Spacer(),
-                  if (venue.amenities.isNotEmpty)
+                  if (venue.ratingCount != null && !isNewRating(venue.ratingCount))
+                    Text('${formatCount(venue.ratingCount!)} ratings',
+                        style: const TextStyle(fontSize: 12.5, color: AppColors.text2, fontWeight: FontWeight.w600))
+                  else if (venue.amenities.isNotEmpty)
                     Text('${venue.amenities.length} amenities',
                         style: const TextStyle(fontSize: 12.5, color: AppColors.text2, fontWeight: FontWeight.w600)),
                 ]),

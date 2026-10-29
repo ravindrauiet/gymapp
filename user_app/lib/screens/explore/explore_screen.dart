@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../../data/models.dart';
+import '../../data/ratings_api.dart';
 import '../../state/session.dart';
 import '../../ui/ui.dart';
 import '../../widgets/venue_card.dart';
@@ -28,7 +29,11 @@ class _ExploreScreenState extends State<ExploreScreen> {
   String? _category;
   String? _city;
   List<String> _cities = const [];
+  String _sort = 'relevance'; // relevance | rating
+  double? _minRating;
   late Future<List<VenueSummary>> _future;
+
+  static const _sortLabels = {'relevance': 'Relevance', 'rating': 'Top rated'};
 
   @override
   void initState() {
@@ -45,8 +50,43 @@ class _ExploreScreenState extends State<ExploreScreen> {
     }).catchError((_) {});
   }
 
-  Future<List<VenueSummary>> _load() =>
-      context.read<Session>().api.venues(category: _category, city: _city, q: _search.text.trim(), limit: 50);
+  Future<List<VenueSummary>> _load() => context.read<Session>().api.venuesRanked(
+        category: _category,
+        city: _city,
+        q: _search.text.trim(),
+        sort: _sort,
+        minRating: _minRating,
+        limit: 50,
+      );
+
+  Future<void> _pickSort() async {
+    final picked = await showAppSheet<String>(
+      context,
+      builder: (ctx) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+          child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+            const Text('Sort by', style: TextStyle(fontSize: 19, fontWeight: FontWeight.w800)),
+            const SizedBox(height: 8),
+            for (final e in _sortLabels.entries)
+              ListTile(
+                contentPadding: EdgeInsets.zero,
+                leading: IconBubble(e.key == 'rating' ? Icons.star_rounded : Icons.auto_awesome_rounded,
+                    color: e.key == _sort ? AppColors.primary : AppColors.text2, size: 40),
+                title: Text(e.value, style: TextStyle(fontWeight: e.key == _sort ? FontWeight.w800 : FontWeight.w600)),
+                subtitle: Text(e.key == 'rating' ? 'Highest-rated centres first' : 'Best match for your search, then rating'),
+                trailing: e.key == _sort ? const Icon(Icons.check_circle_rounded, color: AppColors.primary) : null,
+                onTap: () => Navigator.pop(ctx, e.key),
+              ),
+          ]),
+        ),
+      ),
+    );
+    if (picked != null && picked != _sort) {
+      _sort = picked;
+      _reload();
+    }
+  }
 
   void _reload() => setState(() => _future = _load());
 
@@ -144,6 +184,26 @@ class _ExploreScreenState extends State<ExploreScreen> {
                 _reload();
               },
             ),
+            const SizedBox(height: 10),
+            Row(children: [
+              _FilterPill(
+                icon: Icons.swap_vert_rounded,
+                label: 'Sort: ${_sortLabels[_sort]}',
+                on: _sort != 'relevance',
+                dropdown: true,
+                onTap: _pickSort,
+              ),
+              const SizedBox(width: 8),
+              _FilterPill(
+                icon: Icons.star_rounded,
+                label: 'Rated 4.0+',
+                on: _minRating != null,
+                onTap: () {
+                  _minRating = _minRating == null ? 4 : null;
+                  _reload();
+                },
+              ),
+            ]),
           ]),
         ),
         Expanded(
@@ -168,14 +228,18 @@ class _ExploreScreenState extends State<ExploreScreen> {
                       title: 'No venues found',
                       message: _search.text.isNotEmpty
                           ? 'Nothing matches "${_search.text}". Try a different name or area.'
-                          : 'No ${_category == null ? '' : '${venueVisual(_category!).label.toLowerCase()} '}venues ${_city == null ? 'yet' : 'in $_city yet'}. New partners join every week!',
-                      action: _category != null || _city != null || _search.text.isNotEmpty
+                          : _minRating != null
+                              ? 'No centres rated 4.0+ here yet — ratings appear after $kRatingsUntilAverage verified visits.'
+                              : 'No ${_category == null ? '' : '${venueVisual(_category!).label.toLowerCase()} '}venues ${_city == null ? 'yet' : 'in $_city yet'}. New partners join every week!',
+                      action: _category != null || _city != null || _search.text.isNotEmpty || _minRating != null
                           ? SizedBox(
                               width: 180,
                               child: OutlinedButton(
                                 onPressed: () {
                                   _search.clear();
                                   _category = null;
+                                  _minRating = null;
+                                  _sort = 'relevance';
                                   _setCity(null);
                                 },
                                 child: const Text('Clear filters'),
@@ -203,6 +267,43 @@ class _ExploreScreenState extends State<ExploreScreen> {
           ),
         ),
       ]),
+    );
+  }
+}
+
+class _FilterPill extends StatelessWidget {
+  const _FilterPill({required this.icon, required this.label, required this.on, required this.onTap, this.dropdown = false});
+  final IconData icon;
+  final String label;
+  final bool on;
+  final bool dropdown;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Tap(
+      onTap: onTap,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 180),
+        height: 34,
+        padding: const EdgeInsets.symmetric(horizontal: 12),
+        decoration: BoxDecoration(
+          color: on ? AppColors.primarySoft : AppColors.surface,
+          borderRadius: BorderRadius.circular(30),
+          border: Border.all(color: on ? AppColors.primary : AppColors.line),
+        ),
+        child: Row(mainAxisSize: MainAxisSize.min, children: [
+          Icon(icon, size: 15, color: on ? AppColors.primary : AppColors.amber),
+          const SizedBox(width: 5),
+          Text(label,
+              style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700, color: on ? AppColors.primary : AppColors.text)),
+          if (dropdown) Icon(Icons.keyboard_arrow_down_rounded, size: 17, color: on ? AppColors.primary : AppColors.text2),
+          if (on && !dropdown) ...[
+            const SizedBox(width: 3),
+            const Icon(Icons.close_rounded, size: 14, color: AppColors.primary),
+          ],
+        ]),
+      ),
     );
   }
 }

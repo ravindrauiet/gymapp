@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 
+import '../../data/wallet_api.dart';
 import '../../state/session.dart';
 import '../../ui/ui.dart';
 import '../goals/goal_selection_screen.dart';
@@ -20,6 +22,9 @@ class _ProfileSetupScreenState extends State<ProfileSetupScreen> {
   late final TextEditingController _name;
   late final TextEditingController _email;
   late final TextEditingController _city;
+  final _referral = TextEditingController();
+  String? _referralError;
+  String? _referralApplied; // confirmation message once the code is accepted
   String? _gender;
   bool _saving = false;
   List<String> _cities = const [];
@@ -37,12 +42,44 @@ class _ProfileSetupScreenState extends State<ProfileSetupScreen> {
     session.api.cities().then((c) {
       if (mounted) setState(() => _cities = c);
     }).catchError((_) {});
+    if (!widget.editing) {
+      // Pre-fill a friend's code from the Play Store install referrer (Android only).
+      installReferralCode().then((code) {
+        if (code != null && mounted && _referral.text.isEmpty) setState(() => _referral.text = code);
+      });
+    }
+  }
+
+  /// Validates and applies the optional referral code. Returns false (with an inline error) if it can't be used.
+  Future<bool> _applyReferral() async {
+    final code = _referral.text.trim();
+    if (widget.editing || code.isEmpty || _referralApplied != null) return true;
+    if (!RegExp(r'^[A-Za-z0-9]{4,12}$').hasMatch(code)) {
+      setState(() => _referralError = 'Enter the code exactly as your friend shared it, e.g. FK7QX2M9');
+      return false;
+    }
+    try {
+      final msg = await context.read<Session>().api.applyReferralCode(code);
+      if (mounted) setState(() => _referralApplied = msg);
+      return true;
+    } catch (e) {
+      if (mounted) setState(() => _referralError = friendlyError(e));
+      return false;
+    }
   }
 
   Future<void> _save() async {
     if (!_form.currentState!.validate()) return;
     FocusScope.of(context).unfocus();
-    setState(() => _saving = true);
+    setState(() {
+      _saving = true;
+      _referralError = null;
+    });
+    if (!await _applyReferral()) {
+      if (mounted) setState(() => _saving = false);
+      return;
+    }
+    if (!mounted) return;
     // Saving a first profile flips the session to signed-in, which replaces this screen;
     // grab the navigator first so the goal step can still be pushed on top of Home.
     final nav = Navigator.of(context);
@@ -71,6 +108,7 @@ class _ProfileSetupScreenState extends State<ProfileSetupScreen> {
     _name.dispose();
     _email.dispose();
     _city.dispose();
+    _referral.dispose();
     super.dispose();
   }
 
@@ -175,6 +213,38 @@ class _ProfileSetupScreenState extends State<ProfileSetupScreen> {
               if (id != 'other') const SizedBox(width: 10),
             ],
           ]),
+          if (!widget.editing) ...[
+            _label('Referral code (optional)'),
+            TextFormField(
+              controller: _referral,
+              enabled: _referralApplied == null,
+              textCapitalization: TextCapitalization.characters,
+              maxLength: 12,
+              inputFormatters: [FilteringTextInputFormatter.allow(RegExp(r'[A-Za-z0-9]'))],
+              onChanged: (_) {
+                if (_referralError != null) setState(() => _referralError = null);
+              },
+              decoration: InputDecoration(
+                hintText: "Friend's code, e.g. FK7QX2M9",
+                counterText: '',
+                prefixIcon: const Icon(Icons.card_giftcard_rounded),
+                suffixIcon: _referralApplied != null ? const Icon(Icons.check_circle_rounded, color: AppColors.green) : null,
+                errorText: _referralError,
+                errorMaxLines: 3,
+              ),
+            ),
+            const SizedBox(height: 6),
+            Text(
+              _referralApplied ??
+                  "Joined with a friend's invite? Add their code — they earn coins when you buy your first pass. "
+                      'You also get 100 welcome coins, unlocked with your first pass.',
+              style: TextStyle(
+                  fontSize: 12,
+                  height: 1.35,
+                  color: _referralApplied != null ? AppColors.green : AppColors.text3,
+                  fontWeight: _referralApplied != null ? FontWeight.w700 : FontWeight.w500),
+            ),
+          ],
           const SizedBox(height: 32),
           AppButton(
             label: widget.editing ? 'Save changes' : 'Continue',

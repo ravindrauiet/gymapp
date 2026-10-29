@@ -6,7 +6,9 @@ import { config } from '../config.js';
 import { query, queryOne, withTransaction } from '../db/index.js';
 import { requireAuth } from '../middleware/auth.js';
 import { HttpError, badRequest, conflict, notFound, validate } from '../utils/http.js';
+import { notify } from '../utils/notify.js';
 import { pagination, uuidSchema } from '../utils/schemas.js';
+import { markEventAttendance, registeredEventsToday } from './events.js';
 
 const router = Router();
 router.use(requireAuth('user'));
@@ -73,22 +75,43 @@ router.post('/', checkinLimiter, async (req, res) => {
       [req.user.id, venue.categories],
       client,
     );
-    if (!subscription) {
+    // Members registered for an on-ground event here today may check in for it even without a plan.
+    const eventsToday = await registeredEventsToday(req.user.id, venue.id, client);
+    if (!subscription && !eventsToday.length) {
       throw new HttpError(402, 'You need an active plan that covers this venue', { venueCategories: venue.categories });
     }
 
-    const row = await queryOne(
+    let row = await queryOne(
       `INSERT INTO checkins (user_id, venue_id, subscription_id, method, checkin_date)
        VALUES ($1, $2, $3, $4, (now() AT TIME ZONE $5)::date)
        ON CONFLICT (user_id, venue_id, checkin_date) DO NOTHING
        RETURNING id, checked_in_at, checkin_date, method`,
-      [req.user.id, venue.id, subscription.id, method, config.tz],
+      [req.user.id, venue.id, subscription?.id ?? null, method, config.tz],
       client,
     );
-    if (!row) throw conflict(`You have already checked in at ${venue.name} today`);
+    // On-ground events: a check-in at the event venue on the event day marks attendance.
+    const eventsAttended = await markEventAttendance(req.user.id, venue.id, client);
+    if (!row) {
+      if (!eventsAttended.length) throw conflict(`You have already checked in at ${venue.name} today`);
+      row = await queryOne(
+        `SELECT id, checked_in_at, checkin_date, method FROM checkins
+         WHERE user_id = $1 AND venue_id = $2 AND checkin_date = (now() AT TIME ZONE $3)::date`,
+        [req.user.id, venue.id, config.tz],
+        client,
+      );
+    }
 
-    return { ...row, venue, planName: subscription.planName };
+    return { ...row, venue, planName: subscription?.planName ?? null, eventsAttended };
   });
+
+  for (const e of checkin.eventsAttended) {
+    await notify(req.user.id, {
+      type: 'event_attended',
+      title: `Attendance marked: ${e.title}`,
+      body: `Checked in at ${checkin.venue.name}. Enjoy the event!`,
+      data: { contestId: e.id },
+    });
+  }
 
   res.status(201).json({ checkin });
 });

@@ -7,6 +7,7 @@ import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 
 import '../../data/models.dart';
+import '../../data/progress_api.dart';
 import '../../state/session.dart';
 import '../../ui/ui.dart';
 import '../ai/ai_coach_screen.dart';
@@ -109,6 +110,8 @@ class _FuelLogScreenState extends State<FuelLogScreen> {
   bool _loading = true;
   int _req = 0;
   final Set<String> _removed = {};
+  int? _water;
+  bool _waterBusy = false;
 
   bool get _isToday => _date == _day(DateTime.now());
 
@@ -132,6 +135,7 @@ class _FuelLogScreenState extends State<FuelLogScreen> {
       if (!mounted || id != _req) return;
       setState(() {
         _data = d;
+        _water = null;
         _removed.clear();
         _loading = false;
         _error = null;
@@ -239,6 +243,29 @@ class _FuelLogScreenState extends State<FuelLogScreen> {
     }
   }
 
+  Future<void> _addWater(int delta) async {
+    final d = _data;
+    if (d == null || _waterBusy) return;
+    final current = _water ?? d.waterGlasses;
+    if (current + delta < 0) return;
+    setState(() {
+      _waterBusy = true;
+      _water = current + delta;
+    });
+    try {
+      final w = await context.read<Session>().api.addWater(delta, date: _isToday ? null : apiDate(_date));
+      if (!mounted) return;
+      HapticFeedback.selectionClick();
+      setState(() => _water = w.glasses);
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _water = current);
+      toast(context, friendlyError(e), error: true);
+    } finally {
+      if (mounted) setState(() => _waterBusy = false);
+    }
+  }
+
   void _onDeleted(MealLog m) {
     setState(() => _removed.add(m.id));
     toast(context, 'Removed ${m.foodName}', icon: Icons.delete_outline_rounded);
@@ -307,7 +334,21 @@ class _FuelLogScreenState extends State<FuelLogScreen> {
       physics: const AlwaysScrollableScrollPhysics(),
       padding: const EdgeInsets.fromLTRB(16, 16, 16, 32),
       children: [
-        _CalorieHero(data: d, isToday: _isToday, date: _date, hasGoal: _goal != null, onEditGoal: _openGoal),
+        _CalorieHero(
+          data: d,
+          isToday: _isToday,
+          date: _date,
+          hasGoal: _goal != null || d.targetsSource != 'default',
+          onEditGoal: _openGoal,
+        ),
+        const SizedBox(height: 14),
+        _WaterCard(
+          glasses: _water ?? d.waterGlasses,
+          target: d.waterTarget,
+          busy: _waterBusy,
+          onAdd: () => _addWater(1),
+          onRemove: (_water ?? d.waterGlasses) > 0 ? () => _addWater(-1) : null,
+        ),
         if (_goalKnown && _goal == null) ...[
           const SizedBox(height: 14),
           PhotoBanner(
@@ -444,8 +485,9 @@ class _CalorieHero extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final target = data.calorieTarget;
+    final hasTarget = target > 0;
     final eaten = data.totalCalories;
-    final remaining = target - eaten;
+    final remaining = hasTarget ? target - eaten : 0;
     final progress = target > 0 ? eaten / target : 0.0;
     final over = remaining < 0;
 
@@ -481,13 +523,13 @@ class _CalorieHero extends StatelessWidget {
                 painter: _RingPainter(progress: v, over: over),
                 child: Center(
                   child: Column(mainAxisSize: MainAxisSize.min, children: [
-                    Text(formatNumber(remaining.abs()),
+                    Text(hasTarget ? formatNumber(remaining.abs()) : formatNumber(eaten),
                         style: TextStyle(
                             fontSize: 30,
                             fontWeight: FontWeight.w800,
                             letterSpacing: -1,
                             color: over ? AppColors.red : AppColors.text)),
-                    Text(over ? 'kcal over' : 'kcal left',
+                    Text(!hasTarget ? 'kcal eaten' : over ? 'kcal over' : 'kcal left',
                         style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: AppColors.text2)),
                   ]),
                 ),
@@ -499,8 +541,14 @@ class _CalorieHero extends StatelessWidget {
             child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
               _stat(Icons.restaurant_rounded, AppColors.primary, 'Eaten', '$eaten kcal'),
               const SizedBox(height: 14),
-              _stat(Icons.flag_rounded, AppColors.green, 'Daily target', '$target kcal'),
-              if (data.calorieBalance.isNotEmpty) ...[
+              _stat(Icons.flag_rounded, AppColors.green,
+                  data.targetsSource == 'custom'
+                      ? 'Custom target'
+                      : data.targetsSource == 'default'
+                          ? 'Default target'
+                          : 'Daily target',
+                  hasTarget ? '$target kcal' : '--'),
+              if (data.calorieBalance.isNotEmpty && !data.calorieBalance.contains('NaN')) ...[
                 const SizedBox(height: 14),
                 Tag(data.calorieBalance,
                     color: over ? AppColors.red : AppColors.green,
@@ -533,6 +581,81 @@ class _CalorieHero extends StatelessWidget {
           ]),
         ),
       ]);
+}
+
+class _WaterCard extends StatelessWidget {
+  const _WaterCard({
+    required this.glasses,
+    required this.target,
+    required this.busy,
+    required this.onAdd,
+    required this.onRemove,
+  });
+  final int glasses;
+  final int target;
+  final bool busy;
+  final VoidCallback onAdd;
+  final VoidCallback? onRemove;
+
+  @override
+  Widget build(BuildContext context) {
+    final shown = math.max(1, math.min(target, 12));
+    final filled = target > 0 ? ((glasses / target).clamp(0.0, 1.0) * shown).round() : 0;
+    final done = target > 0 && glasses >= target;
+    Widget btn(IconData icon, VoidCallback? onTap, {bool primary = false}) => Tap(
+          onTap: busy ? null : onTap,
+          child: Container(
+            width: 40,
+            height: 40,
+            decoration: BoxDecoration(
+              color: primary && onTap != null ? AppColors.blue : AppColors.surfaceAlt,
+              borderRadius: BorderRadius.circular(13),
+            ),
+            child: Icon(icon,
+                size: 20,
+                color: primary && onTap != null ? Colors.white : (onTap == null ? AppColors.text3 : AppColors.text)),
+          ),
+        );
+    return AppCard(
+      padding: const EdgeInsets.fromLTRB(16, 14, 14, 14),
+      child: Row(children: [
+        IconBubble(Icons.water_drop_rounded, color: AppColors.blue, size: 42),
+        const SizedBox(width: 12),
+        Expanded(
+          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Text.rich(TextSpan(children: [
+              TextSpan(text: '$glasses', style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w800)),
+              TextSpan(
+                  text: ' / $target glasses',
+                  style: const TextStyle(fontSize: 12.5, color: AppColors.text3, fontWeight: FontWeight.w700)),
+            ])),
+            const SizedBox(height: 6),
+            Row(children: [
+              for (var i = 0; i < shown; i++)
+                Expanded(
+                  child: Container(
+                    height: 6,
+                    margin: const EdgeInsets.only(right: 3),
+                    decoration: BoxDecoration(
+                      color: i < filled ? AppColors.blue : AppColors.blueSoft,
+                      borderRadius: BorderRadius.circular(3),
+                    ),
+                  ),
+                ),
+            ]),
+            const SizedBox(height: 4),
+            Text(done ? 'Water goal done' : 'Tap + after each glass (~250 ml)',
+                style: TextStyle(
+                    fontSize: 11.5, fontWeight: FontWeight.w600, color: done ? AppColors.green : AppColors.text3)),
+          ]),
+        ),
+        const SizedBox(width: 10),
+        btn(Icons.remove_rounded, onRemove),
+        const SizedBox(width: 8),
+        btn(Icons.add_rounded, onAdd, primary: true),
+      ]),
+    );
+  }
 }
 
 class _RingPainter extends CustomPainter {

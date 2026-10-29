@@ -4,6 +4,8 @@ import 'package:intl/intl.dart' show DateFormat;
 import 'package:provider/provider.dart';
 
 import '../../data/models.dart';
+import '../../data/ratings_api.dart' show isNewRating;
+import '../../widgets/rating_widgets.dart';
 import '../../state/session.dart';
 import '../../ui/ui.dart';
 import 'trainers_screen.dart' show TrainerMode, sessionStart;
@@ -143,6 +145,17 @@ class _TrainerDetailScreenState extends State<TrainerDetailScreen> {
                       const SectionTitle('About', padding: EdgeInsets.fromLTRB(0, 24, 0, 10)),
                       Text(t.bio, style: const TextStyle(color: AppColors.text2, height: 1.55, fontSize: 14.5)),
                     ],
+                    if (t.trainerTypeLabels.isNotEmpty) ...[
+                      const SectionTitle('Trains you in', padding: EdgeInsets.fromLTRB(0, 24, 0, 12)),
+                      Wrap(
+                        spacing: 8,
+                        runSpacing: 8,
+                        children: [
+                          for (final s in t.trainerTypeLabels)
+                            Tag(s, color: AppColors.purple, icon: Icons.category_rounded),
+                        ],
+                      ),
+                    ],
                     if (t.specializations.isNotEmpty) ...[
                       const SectionTitle('Specializations', padding: EdgeInsets.fromLTRB(0, 24, 0, 12)),
                       Wrap(
@@ -185,6 +198,18 @@ class _TrainerDetailScreenState extends State<TrainerDetailScreen> {
                         ),
                       ),
                     ],
+                    const SectionTitle(
+                      'Ratings',
+                      subtitle: 'From members who finished a session',
+                      padding: EdgeInsets.fromLTRB(0, 24, 0, 12),
+                    ),
+                    RatingSummaryCard(
+                      targetType: 'trainer',
+                      targetId: t.id,
+                      name: t.name,
+                      photoUrl: t.photoUrl,
+                      fallbackImage: AppImages.homeWorkout,
+                    ),
                     const SectionTitle('Session type', padding: EdgeInsets.fromLTRB(0, 28, 0, 12)),
                     Row(
                       children: [
@@ -338,9 +363,9 @@ class _Header extends StatelessWidget {
                           ),
                         ),
                         const SizedBox(height: 6),
-                        if (t.specializations.isNotEmpty)
+                        if (t.trainerTypeLabels.isNotEmpty || t.specializations.isNotEmpty)
                           Text(
-                            t.specializations.join(' · '),
+                            (t.trainerTypeLabels.isNotEmpty ? t.trainerTypeLabels : t.specializations).join(' · '),
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
                             style: TextStyle(
@@ -393,9 +418,12 @@ class _StatsRow extends StatelessWidget {
       padding: const EdgeInsets.symmetric(vertical: 14),
       child: Row(
         children: [
-          cell(Icons.star_rounded, AppColors.amber, trainer.rating.toStringAsFixed(1), 'Rating'),
+          if (trainer.rating == null || isNewRating(trainer.reviewCount))
+            cell(Icons.auto_awesome_rounded, AppColors.blue, 'New', 'Rating')
+          else
+            cell(Icons.star_rounded, AppColors.amber, trainer.rating!.toStringAsFixed(1), 'Rating'),
           sep(),
-          cell(Icons.reviews_rounded, AppColors.blue, '${trainer.reviewCount}', 'Reviews'),
+          cell(Icons.verified_rounded, AppColors.green, '${trainer.reviewCount}', 'Verified ratings'),
           sep(),
           cell(Icons.timer_rounded, AppColors.primary, '60', 'Min / session'),
         ],

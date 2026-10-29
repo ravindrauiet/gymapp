@@ -28,7 +28,8 @@ android {
         applicationId = "com.fitkey.fitkey_user"
         // You can update the following values to match your application needs.
         // For more information, see: https://flutter.dev/to/review-gradle-config.
-        minSdk = flutter.minSdkVersion
+        // Health Connect (health package) needs API 26+.
+        minSdk = 26
         targetSdk = 36
         versionCode = flutter.versionCode
         versionName = flutter.versionName

@@ -3,11 +3,21 @@ import { Router } from 'express';
 import rateLimit from 'express-rate-limit';
 import { z } from 'zod';
 import { config } from '../config.js';
-import { query, queryOne } from '../db/index.js';
+import { query, queryOne, withTransaction } from '../db/index.js';
 import { signAccessToken } from '../middleware/auth.js';
 import { HttpError, forbidden, unauthorized, validate } from '../utils/http.js';
 import { phoneSchema } from '../utils/schemas.js';
 import { sendOtpSms } from '../utils/sms.js';
+import { notify } from '../utils/notify.js';
+import {
+  WELCOME_BONUS,
+  applyReferral,
+  deviceIdSchema,
+  grantWelcomeBonus,
+  notifyReferralSignup,
+  recordDevice,
+  referralCodeSchema,
+} from './wallet.js';
 
 const router = Router();
 
@@ -63,10 +73,20 @@ router.post('/otp/request', otpLimiter, async (req, res) => {
   });
 });
 
-/** POST /auth/otp/verify { phone, otp, role? } → { token, user, isNewUser } */
+/**
+ * POST /auth/otp/verify { phone, otp, role?, referralCode?, deviceId? } → { token, user, isNewUser, referral? }
+ * New members get the locked welcome coins. referralCode / deviceId are optional (the app can also apply a code
+ * later via POST /wallet/referral/apply); a bad referral code never blocks login — it is reported in `referral`.
+ */
 router.post('/otp/verify', otpLimiter, async (req, res) => {
-  const { phone, otp, role } = validate(
-    z.object({ phone: phoneSchema, otp: z.string().regex(/^\d{6}$/, 'OTP must be 6 digits'), role: roleSchema }),
+  const { phone, otp, role, referralCode, deviceId } = validate(
+    z.object({
+      phone: phoneSchema,
+      otp: z.string().regex(/^\d{6}$/, 'OTP must be 6 digits'),
+      role: roleSchema,
+      referralCode: referralCodeSchema.nullish().catch(null),
+      deviceId: deviceIdSchema.nullish().catch(null),
+    }),
     req.body,
   );
 
@@ -90,11 +110,35 @@ router.post('/otp/verify', otpLimiter, async (req, res) => {
   const user = await queryOne(
     `INSERT INTO users (phone, role) VALUES ($1, $2)
      ON CONFLICT (phone, role) DO UPDATE SET updated_at = now()
-     RETURNING id, phone, email, name, role, city, gender, birth_date, avatar_url, created_at`,
+     RETURNING id, phone, email, name, role, city, gender, birth_date, avatar_url, created_at, (xmax = 0) AS inserted`,
     [phone, role],
   );
+  const { inserted, ...publicUser } = user;
 
-  res.json({ token: signAccessToken(user), user, isNewUser: !user.name });
+  let referral;
+  if (role === 'user') {
+    await recordDevice(user.id, deviceId);
+    const granted = await grantWelcomeBonus(user.id);
+    if (granted && inserted) {
+      await notify(user.id, {
+        type: 'coins_welcome',
+        title: `Welcome to FITKEY! ${WELCOME_BONUS} coins added 🎁`,
+        body: 'Your welcome coins unlock with your first FitKey Pass. Invite friends to earn more.',
+      });
+    }
+    if (referralCode) {
+      try {
+        const r = await withTransaction((client) => applyReferral(client, user.id, { code: referralCode, deviceId }));
+        await notifyReferralSignup(r, user.name);
+        referral = { applied: true, referrerName: r.referrerName };
+      } catch (err) {
+        if (!(err instanceof HttpError)) throw err;
+        referral = { applied: false, error: err.message };
+      }
+    }
+  }
+
+  res.json({ token: signAccessToken(publicUser), user: publicUser, isNewUser: !user.name, ...(referral ? { referral } : {}) });
 });
 
 export default router;

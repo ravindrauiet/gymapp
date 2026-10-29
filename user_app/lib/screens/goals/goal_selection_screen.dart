@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 
 import '../../data/models.dart';
+import '../../data/progress_api.dart';
 import '../../state/session.dart';
 import '../../ui/ui.dart';
 
@@ -66,6 +67,9 @@ class _GoalSelectionScreenState extends State<GoalSelectionScreen> {
   double _weight = 72;
   double _target = 68;
   String _activity = 'moderate';
+  int _workoutDays = 4;
+  int _stepsGoal = 8000;
+  int _waterGoal = 8;
 
   bool _loading = true;
   bool _saving = false;
@@ -93,6 +97,9 @@ class _GoalSelectionScreenState extends State<GoalSelectionScreen> {
           _weight = (goal.currentWeightKg.clamp(30, 200) * 2).round() / 2;
           _target = (goal.targetWeightKg.clamp(30, 200) * 2).round() / 2;
           if (_activities.any((a) => a.id == goal.activityLevel)) _activity = goal.activityLevel;
+          _workoutDays = goal.workoutDaysPerWeek.clamp(1, 7);
+          _stepsGoal = goal.dailyStepsTarget.clamp(1000, 50000);
+          _waterGoal = goal.waterGlassesTarget.clamp(1, 30);
         });
       }
     } catch (_) {
@@ -141,6 +148,9 @@ class _GoalSelectionScreenState extends State<GoalSelectionScreen> {
         'currentWeightKg': _weight,
         'targetWeightKg': _target,
         'activityLevel': _activity,
+        'workoutDaysPerWeek': _workoutDays,
+        'dailyStepsTarget': _stepsGoal,
+        'waterGlassesTarget': _waterGoal,
       });
       if (!mounted) return;
       HapticFeedback.mediumImpact();
@@ -153,6 +163,16 @@ class _GoalSelectionScreenState extends State<GoalSelectionScreen> {
       if (!mounted) return;
       setState(() => _saving = false);
       toast(context, friendlyError(e), error: true);
+    }
+  }
+
+  Future<void> _editTargets() async {
+    final g = _saved;
+    if (g == null) return;
+    final updated = await showAppSheet<UserGoal>(context, builder: (_) => _TargetsSheet(goal: g));
+    if (updated != null && mounted) {
+      setState(() => _saved = updated);
+      toast(context, updated.customTargets ? 'Custom targets saved' : 'Back to auto-calculated targets');
     }
   }
 
@@ -427,6 +447,48 @@ class _GoalSelectionScreenState extends State<GoalSelectionScreen> {
           ],
           const SizedBox(height: 8),
           AppCard(
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              const Text('Your weekly habits', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 15)),
+              const SizedBox(height: 2),
+              const Text('Progress shows how you do against these.',
+                  style: TextStyle(fontSize: 12.5, color: AppColors.text2)),
+              const SizedBox(height: 14),
+              _HabitRow(
+                emoji: '🏋️',
+                label: 'Workout days',
+                unit: 'per week',
+                value: _workoutDays,
+                min: 1,
+                max: 7,
+                step: 1,
+                onChanged: (v) => setState(() => _workoutDays = v),
+              ),
+              const Divider(height: 24),
+              _HabitRow(
+                emoji: '👟',
+                label: 'Daily steps',
+                unit: 'steps a day',
+                value: _stepsGoal,
+                min: 1000,
+                max: 30000,
+                step: 500,
+                onChanged: (v) => setState(() => _stepsGoal = v),
+              ),
+              const Divider(height: 24),
+              _HabitRow(
+                emoji: '💧',
+                label: 'Water',
+                unit: 'glasses a day',
+                value: _waterGoal,
+                min: 1,
+                max: 20,
+                step: 1,
+                onChanged: (v) => setState(() => _waterGoal = v),
+              ),
+            ]),
+          ),
+          const SizedBox(height: 14),
+          AppCard(
             color: AppColors.ink,
             child: Row(children: [
               const Text('⚡', style: TextStyle(fontSize: 26)),
@@ -481,13 +543,55 @@ class _GoalSelectionScreenState extends State<GoalSelectionScreen> {
             ]),
           ),
         ),
-        const SectionTitle('Your daily macros', subtitle: 'Calculated for your body and activity level'),
+        SectionTitle(
+          'Your daily targets',
+          subtitle: g.customTargets ? 'Custom targets set by you' : 'Calculated for your body and activity level',
+          action: 'Customise',
+          onAction: _editTargets,
+        ),
+        Row(children: [
+          Expanded(
+            child: MetricTile(
+                label: g.customTargets ? 'Calories (custom)' : 'Calories',
+                value: '${g.dailyCalorieTarget}',
+                unit: 'kcal',
+                icon: Icons.local_fire_department_rounded,
+                color: AppColors.primary),
+          ),
+        ]),
+        const SizedBox(height: 10),
         Row(children: [
           Expanded(child: MetricTile(label: 'Protein', value: '${g.dailyProteinG}', unit: 'g', icon: Icons.egg_alt_rounded, color: AppColors.blue)),
           const SizedBox(width: 10),
           Expanded(child: MetricTile(label: 'Carbs', value: '${g.dailyCarbsG}', unit: 'g', icon: Icons.rice_bowl_rounded, color: AppColors.amber)),
           const SizedBox(width: 10),
           Expanded(child: MetricTile(label: 'Fat', value: '${g.dailyFatG}', unit: 'g', icon: Icons.water_drop_rounded, color: AppColors.pink)),
+        ]),
+        const SectionTitle('Your habits', subtitle: 'Tracked in Progress every week'),
+        Row(children: [
+          Expanded(
+              child: MetricTile(
+                  label: 'Workout days',
+                  value: '${g.workoutDaysPerWeek}',
+                  unit: '/ wk',
+                  icon: Icons.fitness_center_rounded,
+                  color: AppColors.primary)),
+          const SizedBox(width: 10),
+          Expanded(
+              child: MetricTile(
+                  label: 'Steps',
+                  value: _fmtK(g.dailyStepsTarget),
+                  unit: '/ day',
+                  icon: Icons.directions_walk_rounded,
+                  color: AppColors.amber)),
+          const SizedBox(width: 10),
+          Expanded(
+              child: MetricTile(
+                  label: 'Water',
+                  value: '${g.waterGlassesTarget}',
+                  unit: 'glasses',
+                  icon: Icons.local_drink_rounded,
+                  color: AppColors.blue)),
         ]),
         const SizedBox(height: 16),
         AppCard(
@@ -509,6 +613,188 @@ class _GoalSelectionScreenState extends State<GoalSelectionScreen> {
   }
 
   static String _fmt(double v) => v % 1 == 0 ? v.toInt().toString() : v.toStringAsFixed(1);
+  static String _fmtK(int v) => v >= 1000 ? '${_fmt(v / 1000)}k' : '$v';
+}
+
+// ---------------------------------------------------------------------------
+// Habit goals & custom targets
+// ---------------------------------------------------------------------------
+
+class _HabitRow extends StatelessWidget {
+  const _HabitRow({
+    required this.emoji,
+    required this.label,
+    required this.unit,
+    required this.value,
+    required this.min,
+    required this.max,
+    required this.step,
+    required this.onChanged,
+  });
+  final String emoji;
+  final String label;
+  final String unit;
+  final int value;
+  final int min;
+  final int max;
+  final int step;
+  final ValueChanged<int> onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    Widget btn(IconData i, int? next) => Tap(
+          onTap: next == null ? null : () => onChanged(next),
+          child: Container(
+            width: 36,
+            height: 36,
+            decoration: BoxDecoration(
+              color: next == null ? AppColors.surfaceAlt : AppColors.primarySoft,
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: Icon(i, color: next == null ? AppColors.text3 : AppColors.primary, size: 18),
+          ),
+        );
+    return Row(children: [
+      Text(emoji, style: const TextStyle(fontSize: 22)),
+      const SizedBox(width: 10),
+      Expanded(
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Text(label, style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 14.5)),
+          Text(unit, style: const TextStyle(fontSize: 12, color: AppColors.text3, fontWeight: FontWeight.w600)),
+        ]),
+      ),
+      btn(Icons.remove_rounded, value - step >= min ? value - step : null),
+      SizedBox(
+        width: 64,
+        child: Text('$value',
+            textAlign: TextAlign.center, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w800)),
+      ),
+      btn(Icons.add_rounded, value + step <= max ? value + step : null),
+    ]);
+  }
+}
+
+/// Lets the member override the auto-calculated calorie & macro targets (or reset them). Pops with the saved goal.
+class _TargetsSheet extends StatefulWidget {
+  const _TargetsSheet({required this.goal});
+  final UserGoal goal;
+
+  @override
+  State<_TargetsSheet> createState() => _TargetsSheetState();
+}
+
+class _TargetsSheetState extends State<_TargetsSheet> {
+  late final _cal = TextEditingController(text: '${widget.goal.dailyCalorieTarget}');
+  late final _protein = TextEditingController(text: '${widget.goal.dailyProteinG}');
+  late final _carbs = TextEditingController(text: '${widget.goal.dailyCarbsG}');
+  late final _fat = TextEditingController(text: '${widget.goal.dailyFatG}');
+  bool _busy = false;
+  String? _error;
+
+  @override
+  void dispose() {
+    _cal.dispose();
+    _protein.dispose();
+    _carbs.dispose();
+    _fat.dispose();
+    super.dispose();
+  }
+
+  Future<void> _submit({bool reset = false}) async {
+    final g = widget.goal;
+    final cal = int.tryParse(_cal.text);
+    final p = int.tryParse(_protein.text);
+    final c = int.tryParse(_carbs.text);
+    final f = int.tryParse(_fat.text);
+    if (!reset) {
+      String? err;
+      if (cal == null || cal < 800 || cal > 8000) {
+        err = 'Calories should be between 800 and 8,000 kcal';
+      } else if (p == null || p > 500 || c == null || c > 1000 || f == null || f > 400) {
+        err = 'Enter protein, carbs and fat in grams';
+      }
+      if (err != null) {
+        setState(() => _error = err);
+        return;
+      }
+    }
+    setState(() {
+      _busy = true;
+      _error = null;
+    });
+    try {
+      // A value equal to the auto-calculated one is stored as "auto" (null) so it keeps updating with the goal.
+      final updated = await context.read<Session>().api.updateGoal(reset
+          ? {'resetTargets': true}
+          : {
+              'calorieTarget': cal == g.autoCalorieTarget ? null : cal,
+              'proteinG': p == g.autoProteinG ? null : p,
+              'carbsG': c == g.autoCarbsG ? null : c,
+              'fatG': f == g.autoFatG ? null : f,
+            });
+      if (!mounted) return;
+      HapticFeedback.mediumImpact();
+      Navigator.pop(context, updated);
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _busy = false;
+        _error = friendlyError(e);
+      });
+    }
+  }
+
+  Widget _field(TextEditingController c, String label, String unit, int auto) => Expanded(
+        child: TextField(
+          controller: c,
+          keyboardType: TextInputType.number,
+          inputFormatters: [FilteringTextInputFormatter.digitsOnly, LengthLimitingTextInputFormatter(4)],
+          onChanged: (_) => setState(() => _error = null),
+          style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 17),
+          decoration: InputDecoration(labelText: label, suffixText: unit, helperText: 'Auto: $auto'),
+        ),
+      );
+
+  @override
+  Widget build(BuildContext context) {
+    final g = widget.goal;
+    return SafeArea(
+      top: false,
+      child: SingleChildScrollView(
+        padding: EdgeInsets.fromLTRB(20, 4, 20, 20 + MediaQuery.viewInsetsOf(context).bottom),
+        child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+          const Text('Customise targets', style: TextStyle(fontSize: 20, fontWeight: FontWeight.w800)),
+          const SizedBox(height: 4),
+          const Text('We calculated these from your height, weight, age, gender and goal (Mifflin-St Jeor). '
+              'Change any value — your Fuel Log and Progress will use it.',
+              style: TextStyle(color: AppColors.text2, fontSize: 13, height: 1.4)),
+          const SizedBox(height: 18),
+          Row(children: [_field(_cal, 'Calories', 'kcal', g.autoCalorieTarget)]),
+          const SizedBox(height: 12),
+          Row(children: [
+            _field(_protein, 'Protein', 'g', g.autoProteinG),
+            const SizedBox(width: 10),
+            _field(_carbs, 'Carbs', 'g', g.autoCarbsG),
+            const SizedBox(width: 10),
+            _field(_fat, 'Fat', 'g', g.autoFatG),
+          ]),
+          if (_error != null) ...[
+            const SizedBox(height: 12),
+            Text(_error!, style: const TextStyle(color: AppColors.red, fontWeight: FontWeight.w600)),
+          ],
+          const SizedBox(height: 18),
+          AppButton(label: 'Save targets', icon: Icons.check_rounded, busy: _busy, onPressed: () => _submit()),
+          if (g.customTargets) ...[
+            const SizedBox(height: 8),
+            TextButton(
+              onPressed: _busy ? null : () => _submit(reset: true),
+              child: const Text('Reset to auto-calculated'),
+            ),
+          ],
+        ]),
+      ),
+    );
+  }
 }
 
 // ---------------------------------------------------------------------------

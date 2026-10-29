@@ -1,6 +1,10 @@
 import { createApp } from './app.js';
 import { config } from './config.js';
 import { pool } from './db/index.js';
+import { runMigrations } from './db/runMigrations.js';
+
+// Schema changes are idempotent, so applying them on boot keeps every deploy (e.g. Render) in sync.
+await runMigrations({ log: () => {} });
 
 const app = createApp();
 const server = app.listen(config.port, () => {

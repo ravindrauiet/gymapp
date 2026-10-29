@@ -3,8 +3,9 @@ import { z } from 'zod';
 import { config } from '../config.js';
 import { query, queryOne } from '../db/index.js';
 import { requireAuth } from '../middleware/auth.js';
-import { notFound, validate } from '../utils/http.js';
+import { badRequest, notFound, validate } from '../utils/http.js';
 import { dateSchema } from '../utils/schemas.js';
+import { effectiveTargets } from './goals.js';
 
 const router = Router();
 
@@ -256,80 +257,90 @@ router.post('/meals', async (req, res) => {
   res.status(201).json({ meal: entry });
 });
 
-router.get('/meals', async (req, res) => {
-  const { date } = req.query;
-  const targetDateQuery = date ? '$2::date' : '(now() AT TIME ZONE $2)::date';
-  const targetDateParam = date || config.tz;
+/** Current hour (0-23) in the app time zone. */
+function hourInTz() {
+  return +new Intl.DateTimeFormat('en-GB', { hour: '2-digit', hourCycle: 'h23', timeZone: config.tz }).format(new Date());
+}
 
-  const [meals, goal] = await Promise.all([
+router.get('/meals', async (req, res) => {
+  const { date } = validate(z.object({ date: dateSchema.optional() }), req.query);
+
+  const [meals, goal, day] = await Promise.all([
     query(
-      `SELECT * FROM meal_logs WHERE user_id = $1 AND logged_on = ${targetDateQuery} ORDER BY logged_at ASC`,
-      [req.user.id, targetDateParam],
+      `SELECT * FROM meal_logs WHERE user_id = $1 AND logged_on = COALESCE($2::date, (now() AT TIME ZONE $3)::date)
+       ORDER BY logged_at ASC`,
+      [req.user.id, date ?? null, config.tz],
     ),
     queryOne(`SELECT * FROM user_goals WHERE user_id = $1`, [req.user.id]),
+    queryOne(
+      `SELECT d::text AS date, d = (now() AT TIME ZONE $2)::date AS is_today,
+              (SELECT glasses FROM water_logs WHERE user_id = $3 AND log_date = d) AS glasses
+         FROM (SELECT COALESCE($1::date, (now() AT TIME ZONE $2)::date) AS d) x`,
+      [date ?? null, config.tz, req.user.id],
+    ),
   ]);
 
-  // Group by meal category
-  const categories = {
-    breakfast: [],
-    lunch: [],
-    dinner: [],
-    snacks: [],
-  };
-
+  // Group by meal category (rows come back camelCase from the db helper).
+  const categories = { breakfast: [], lunch: [], dinner: [], snacks: [] };
   let totalCalories = 0;
   let totalProteinG = 0;
   let totalCarbsG = 0;
   let totalFatG = 0;
-
   for (const m of meals) {
-    if (categories[m.meal_type]) {
-      categories[m.meal_type].push(m);
-    }
-    totalCalories += m.calories;
-    totalProteinG += +m.protein_g;
-    totalCarbsG += +m.carbs_g;
-    totalFatG += +m.fat_g;
+    categories[m.mealType]?.push(m);
+    totalCalories += +m.calories || 0;
+    totalProteinG += +m.proteinG || 0;
+    totalCarbsG += +m.carbsG || 0;
+    totalFatG += +m.fatG || 0;
   }
 
-  // Target comparison
-  const targets = {
-    calories: goal ? goal.daily_calorie_target : 2000,
-    proteinG: goal ? goal.daily_protein_g : 120,
-    carbsG: goal ? goal.daily_carbs_g : 220,
-    fatG: goal ? goal.daily_fat_g : 55,
-  };
+  // Targets: goal (auto Mifflin-St Jeor or member override) or defaults — never 0 / NaN.
+  const t = effectiveTargets(goal);
+  const targets = { calories: t.calories, proteinG: t.proteinG, carbsG: t.carbsG, fatG: t.fatG, source: t.source };
 
-  // Push nudges
-  const nudges = [];
-  const remCalories = targets.calories - totalCalories;
+  const remCalories = Math.round(targets.calories - totalCalories);
   const remProtein = Math.round(targets.proteinG - totalProteinG);
 
-  if (categories.breakfast.length === 0) {
-    nudges.push('Kickstart your metabolism: Don\'t forget to log your breakfast!');
+  const nudges = [];
+  if (day.isToday) {
+    const hour = hourInTz();
+    if (categories.breakfast.length === 0 && hour < 12) {
+      nudges.push("Kickstart your metabolism: Don't forget to log your breakfast!");
+    }
+    if (categories.lunch.length === 0 && hour >= 14) {
+      nudges.push("Lunch hasn't been logged yet. Keep your nutrition on track!");
+    }
+    if (categories.dinner.length === 0 && hour >= 20) {
+      nudges.push("Log your dinner to complete today's intake diary.");
+    }
   }
-  if (categories.lunch.length === 0 && new Date().getHours() >= 14) {
-    nudges.push('Lunch hasn\'t been logged yet. Keep your nutrition on track!');
+  if (meals.length > 0) {
+    if (remProtein > 20) {
+      nudges.push(`You still need ${remProtein}g more protein ${day.isToday ? 'today' : 'that day'} to hit your target.`);
+    } else if (remProtein <= 0) {
+      nudges.push("Great job! You've achieved your daily protein goal.");
+    }
   }
-  if (categories.dinner.length === 0 && new Date().getHours() >= 20) {
-    nudges.push('Log your dinner to complete today\'s intake diary.');
-  }
-  if (remProtein > 20) {
-    nudges.push(`You still need ${remProtein}g more protein today to hit your muscle target.`);
-  } else if (remProtein <= 0) {
-    nudges.push('Great job! You\'ve achieved your daily protein goal today.');
+
+  let calorieBalance = '';
+  if (meals.length > 0) {
+    calorieBalance =
+      remCalories > 0 ? `${remCalories} kcal under target` : remCalories < 0 ? `${Math.abs(remCalories)} kcal over target` : 'Right on target';
   }
 
   res.json({
-    date: date || 'today',
+    date: day.date,
+    isToday: day.isToday,
     summary: {
       totalCalories,
       totalProteinG: Math.round(totalProteinG * 10) / 10,
       totalCarbsG: Math.round(totalCarbsG * 10) / 10,
       totalFatG: Math.round(totalFatG * 10) / 10,
       targets,
-      calorieBalance: remCalories >= 0 ? `Deficit of ${remCalories} kcal` : `Surplus of ${Math.abs(remCalories)} kcal`,
+      remainingCalories: remCalories,
+      calorieBalance,
     },
+    water: { glasses: day.glasses ?? 0, target: t.waterGlassesTarget },
     categories,
     nudges,
   });
@@ -342,6 +353,54 @@ router.delete('/meals/:id', async (req, res) => {
   );
   if (!deleted) throw notFound('Meal log not found');
   res.status(204).end();
+});
+
+// ============================================================================
+// Water intake (glasses per day) — shown in the Fuel Log and the Progress → Nutrition tab
+// ============================================================================
+router.use('/water', requireAuth('user'));
+
+router.get('/water', async (req, res) => {
+  const { date } = validate(z.object({ date: dateSchema.optional() }), req.query);
+  const [row, goal] = await Promise.all([
+    queryOne(
+      `SELECT d::text AS date, (SELECT glasses FROM water_logs WHERE user_id = $1 AND log_date = d) AS glasses
+         FROM (SELECT COALESCE($2::date, (now() AT TIME ZONE $3)::date) AS d) x`,
+      [req.user.id, date ?? null, config.tz],
+    ),
+    queryOne(`SELECT water_glasses_target FROM user_goals WHERE user_id = $1`, [req.user.id]),
+  ]);
+  res.json({ water: { date: row.date, glasses: row.glasses ?? 0, target: goal?.waterGlassesTarget ?? 8 } });
+});
+
+/** POST /nutrition/water { delta: +1 | -1 } or { glasses: n }, optional date (not in the future). */
+router.post('/water', async (req, res) => {
+  const body = validate(
+    z
+      .object({
+        delta: z.number().int().min(-10).max(10).optional(),
+        glasses: z.number().int().min(0).max(40).optional(),
+        date: dateSchema.optional(),
+      })
+      .refine((b) => (b.delta === undefined) !== (b.glasses === undefined), 'Send either delta or glasses'),
+    req.body,
+  );
+  const day = await queryOne(
+    `SELECT COALESCE($1::date, (now() AT TIME ZONE $2)::date) AS d, COALESCE($1::date, (now() AT TIME ZONE $2)::date) > (now() AT TIME ZONE $2)::date AS future`,
+    [body.date ?? null, config.tz],
+  );
+  if (day.future) throw badRequest("You can't log water for a future day");
+  const row = await queryOne(
+    `INSERT INTO water_logs (user_id, log_date, glasses, updated_at)
+     VALUES ($1, $2::date, LEAST(40, GREATEST(0, $3::int)), now())
+     ON CONFLICT (user_id, log_date) DO UPDATE SET
+       glasses = LEAST(40, GREATEST(0, CASE WHEN $4::boolean THEN water_logs.glasses + $3::int ELSE $3::int END)),
+       updated_at = now()
+     RETURNING log_date::text AS date, glasses`,
+    [req.user.id, day.d, body.delta ?? body.glasses, body.delta !== undefined],
+  );
+  const goal = await queryOne(`SELECT water_glasses_target FROM user_goals WHERE user_id = $1`, [req.user.id]);
+  res.status(201).json({ water: { ...row, target: goal?.waterGlassesTarget ?? 8 } });
 });
 
 export default router;

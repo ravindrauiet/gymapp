@@ -7,12 +7,15 @@ import 'package:provider/provider.dart';
 import '../../data/models.dart';
 import '../../state/session.dart';
 import '../../ui/ui.dart';
+import '../../widgets/rating_prompt.dart';
 import '../../widgets/venue_card.dart';
 import '../ai/ai_coach_screen.dart';
 import '../auth/profile_setup_screen.dart';
 import '../community/buddy_screens.dart';
 import '../community/contest_detail_screen.dart';
 import '../explore/explore_screen.dart';
+import '../feed/feed_screen.dart';
+import '../notifications/notifications_screen.dart';
 import '../explore/venue_detail_screen.dart';
 import '../health/health_report_screen.dart';
 import '../healthstop/healthstop_screen.dart';
@@ -40,6 +43,10 @@ class _HomeScreenState extends State<HomeScreen> {
   void initState() {
     super.initState();
     _future = _load();
+    // After the feed loads, ask about recent visits / sessions the member hasn't rated yet.
+    _future.then((_) {
+      if (mounted) promptPendingRatings(context);
+    }).catchError((_) {});
   }
 
   Future<_HomeData> _load() async {
@@ -163,6 +170,8 @@ class _Header extends StatelessWidget {
                   ),
                 ),
               ),
+              const NotificationBell(),
+              const SizedBox(width: 10),
               Tap(
                 onTap: () => push(context, const ProfileScreen()),
                 child: Container(
@@ -410,50 +419,16 @@ class _ServiceGrid extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // Order per BRD §2 (left → right, top → bottom). Mansi lives in the card below the grid.
     final items = <(String, String, IconData, Color, Color, Widget)>[
-      (
-        'Ask Mansi',
-        'AI coach',
-        Icons.auto_awesome_rounded,
-        AppColors.purple,
-        AppColors.purpleSoft,
-        const AiCoachScreen(),
-      ),
-      (
-        'Meal Scan',
-        'Snap & log',
-        Icons.document_scanner_rounded,
-        AppColors.green,
-        AppColors.greenSoft,
-        const AiFoodScannerScreen(),
-      ),
+      ('Gym Buddy', 'Find a partner', Icons.people_alt_rounded, AppColors.teal, AppColors.tealSoft, const BuddyHubScreen()),
       ('Fuel Log', 'Calories', Icons.restaurant_rounded, AppColors.amber, AppColors.amberSoft, const FuelLogScreen()),
-      ('Trainers', 'Book 1:1', Icons.sports_rounded, AppColors.blue, AppColors.blueSoft, const TrainersScreen()),
+      ('Meal Scan', 'Snap & log', Icons.document_scanner_rounded, AppColors.green, AppColors.greenSoft, const AiFoodScannerScreen()),
+      ('Progress', 'Your report', Icons.insights_rounded, AppColors.blue, AppColors.blueSoft, const HealthReportScreen()),
       ('Store', 'Gear & whey', Icons.shopping_bag_rounded, AppColors.pink, AppColors.pinkSoft, const StoreScreen()),
-      (
-        'HealthStop',
-        'Clinics',
-        Icons.local_hospital_rounded,
-        AppColors.red,
-        AppColors.redSoft,
-        const HealthStopScreen(),
-      ),
-      (
-        'Gym Buddy',
-        'Find a partner',
-        Icons.people_alt_rounded,
-        AppColors.teal,
-        AppColors.tealSoft,
-        const CreateBuddyPostScreen(),
-      ),
-      (
-        'Progress',
-        'Your report',
-        Icons.insights_rounded,
-        AppColors.primary,
-        AppColors.primarySoft,
-        const HealthReportScreen(),
-      ),
+      ('HealthStop', 'Clinics', Icons.local_hospital_rounded, AppColors.red, AppColors.redSoft, const HealthStopScreen()),
+      ('Trainers', 'Book 1:1', Icons.sports_rounded, AppColors.purple, AppColors.purpleSoft, const TrainersScreen()),
+      ('FitFeed', 'Stories & tips', Icons.dynamic_feed_rounded, AppColors.primary, AppColors.primarySoft, const FitFeedScreen()),
     ];
     return GridView.builder(
       shrinkWrap: true,

@@ -1,4 +1,7 @@
+import 'package:dio/dio.dart' show FormData, MultipartFile, DioMediaType;
 import 'package:fitkey_core/fitkey_core.dart';
+import 'package:image_picker/image_picker.dart' show XFile;
+
 import 'models.dart';
 
 /// All member-facing endpoints of the FITKEY API.
@@ -6,6 +9,30 @@ class FitkeyApi {
   FitkeyApi(this._client);
 
   final ApiClient _client;
+
+  /// Raw client for feature APIs written as extensions (see lib/data/*_api.dart).
+  ApiClient get client => _client;
+
+  /// Uploads a photo (≤ 3 MB) or MP4 clip (≤ 12 MB) and returns its server-relative URL.
+  /// Reads bytes rather than a path so it also works on Flutter web.
+  Future<String> upload(XFile file) async {
+    final bytes = await file.readAsBytes();
+    final name = file.name.toLowerCase();
+    final type = name.endsWith('.mp4')
+        ? DioMediaType('video', 'mp4')
+        : name.endsWith('.m4a') || name.endsWith('.aac')
+            ? DioMediaType('audio', 'mp4')
+            : name.endsWith('.png')
+                ? DioMediaType('image', 'png')
+                : name.endsWith('.webp')
+                    ? DioMediaType('image', 'webp')
+                    : DioMediaType('image', 'jpeg');
+    final r = await _client.post(
+      '/uploads',
+      FormData.fromMap({'file': MultipartFile.fromBytes(bytes, filename: file.name, contentType: type)}),
+    );
+    return r['url'] as String;
+  }
 
   // ---- Auth & profile -------------------------------------------------------
   Future<({String? devOtp})> requestOtp(String phone) async {

@@ -5,8 +5,11 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../../data/models.dart';
+import '../../data/ratings_api.dart';
 import '../../state/session.dart';
 import '../../ui/ui.dart';
+import '../../widgets/rating_prompt.dart';
+import '../../widgets/rating_widgets.dart';
 import 'trainer_detail_screen.dart';
 
 /// How a backend training mode (`online` | `home` | `gym`) is shown.
@@ -56,8 +59,18 @@ class _TrainersScreenState extends State<TrainersScreen> with SingleTickerProvid
   Timer? _debounce;
 
   String? _mode; // null = any mode
-  String? _category; // null = all specializations
-  final Set<String> _specs = {};
+  String? _group; // null = all groups (BRD §6 categories)
+  String? _type; // sub-type inside [_group]
+  String _sort = 'relevance'; // relevance | rating | price_low | price_high
+  double? _minRating;
+  List<TrainerCategoryGroup> _groups = const [];
+
+  static const _sortLabels = {
+    'relevance': 'Relevance',
+    'rating': 'Top rated',
+    'price_low': 'Price: low to high',
+    'price_high': 'Price: high to low',
+  };
 
   late Future<List<Trainer>> _future;
   late Future<List<TrainerBooking>> _bookings;
@@ -67,6 +80,70 @@ class _TrainersScreenState extends State<TrainersScreen> with SingleTickerProvid
     super.initState();
     _future = _loadTrainers();
     _bookings = context.read<Session>().api.myTrainerBookings();
+    _loadGroups();
+  }
+
+  Future<void> _loadGroups() async {
+    try {
+      final g = await context.read<Session>().api.trainerCategories();
+      if (!mounted) return;
+      setState(() => _groups = g);
+    } catch (_) {
+      // Category chips are optional; the list still works without them.
+    }
+  }
+
+  TrainerCategoryGroup? get _selectedGroup {
+    for (final g in _groups) {
+      if (g.key == _group) return g;
+    }
+    return null;
+  }
+
+  Future<void> _pickSort() async {
+    final picked = await showAppSheet<String>(
+      context,
+      builder: (ctx) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+          child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+            const Text('Sort trainers by', style: TextStyle(fontSize: 19, fontWeight: FontWeight.w800)),
+            const SizedBox(height: 8),
+            for (final e in _sortLabels.entries)
+              ListTile(
+                contentPadding: EdgeInsets.zero,
+                title: Text(e.value, style: TextStyle(fontWeight: e.key == _sort ? FontWeight.w800 : FontWeight.w600)),
+                trailing: e.key == _sort ? const Icon(Icons.check_circle_rounded, color: AppColors.primary) : null,
+                onTap: () => Navigator.pop(ctx, e.key),
+              ),
+          ]),
+        ),
+      ),
+    );
+    if (picked != null && picked != _sort && mounted) {
+      _sort = picked;
+      _reloadTrainers();
+    }
+  }
+
+  Future<void> _rateBooking(TrainerBooking b) async {
+    final api = context.read<Session>().api;
+    MyRating? mine;
+    try {
+      mine = (await api.ratingSummary('trainer', b.trainerId)).myRating;
+    } catch (_) {}
+    if (!mounted) return;
+    final res = await showRatingSheet(
+      context,
+      targetType: 'trainer',
+      targetId: b.trainerId,
+      name: b.trainerName,
+      subtitle: '${TrainerMode.of(b.mode).label} session · ${b.slotTime}',
+      photoUrl: b.photoUrl,
+      fallbackImage: AppImages.homeWorkout,
+      initial: mine,
+    );
+    if (res != null && mounted) _reloadTrainers();
   }
 
   @override
@@ -79,14 +156,14 @@ class _TrainersScreenState extends State<TrainersScreen> with SingleTickerProvid
 
   Future<List<Trainer>> _loadTrainers() async {
     final q = _search.text.trim();
-    final list = await context.read<Session>().api.trainers(modes: _mode, category: _category, q: q.isEmpty ? null : q);
-    // Specialization chips are derived from what trainers actually offer.
-    final before = _specs.length;
-    for (final t in list) {
-      _specs.addAll(t.specializations.where((s) => s.trim().isNotEmpty));
-    }
-    if (_specs.length != before && mounted) setState(() {});
-    return list;
+    return context.read<Session>().api.trainersFiltered(
+      modes: _mode,
+      group: _group,
+      type: _type,
+      q: q.isEmpty ? null : q,
+      sort: _sort,
+      minRating: _minRating,
+    );
   }
 
   Future<void> _reloadTrainers() async {
@@ -135,17 +212,25 @@ class _TrainersScreenState extends State<TrainersScreen> with SingleTickerProvid
         controller: _tabs,
         children: [
           _buildFind(),
-          _MyBookings(future: _bookings, onRefresh: _reloadBookings, onFind: () => _tabs.animateTo(0)),
+          _MyBookings(
+            future: _bookings,
+            onRefresh: _reloadBookings,
+            onFind: () => _tabs.animateTo(0),
+            onRate: _rateBooking,
+          ),
         ],
       ),
     );
   }
 
   Widget _buildFind() {
-    final specs = _specs.toList()..sort();
+    final group = _selectedGroup;
     return RefreshIndicator(
       color: AppColors.primary,
-      onRefresh: _reloadTrainers,
+      onRefresh: () async {
+        _loadGroups();
+        await _reloadTrainers();
+      },
       child: CustomScrollView(
         physics: const AlwaysScrollableScrollPhysics(),
         slivers: [
@@ -174,7 +259,34 @@ class _TrainersScreenState extends State<TrainersScreen> with SingleTickerProvid
                       },
                     ),
                   ),
-                  const SizedBox(height: 14),
+                  if (_groups.isNotEmpty) ...[
+                    const SizedBox(height: 14),
+                    ChoiceChips<String?>(
+                      options: [null, ..._groups.map((g) => g.key)],
+                      selected: _group,
+                      label: (g) => g == null ? 'All trainers' : _groups.firstWhere((x) => x.key == g).label,
+                      icon: (g) => g == null ? Icons.apps_rounded : trainerGroupIcon(g),
+                      onSelected: (g) {
+                        if (g == _group) return;
+                        _group = g;
+                        _type = null;
+                        _reloadTrainers();
+                      },
+                    ),
+                  ],
+                  if (group != null && group.types.length > 1) ...[
+                    const SizedBox(height: 10),
+                    _SpecChips(
+                      specs: group.types.map((t) => t.key).toList(),
+                      labelOf: (k) => group.types.firstWhere((t) => t.key == k).label,
+                      selected: _type,
+                      onSelected: (k) {
+                        _type = k == _type ? null : k;
+                        _reloadTrainers();
+                      },
+                    ),
+                  ],
+                  const SizedBox(height: 10),
                   ChoiceChips<String?>(
                     options: [null, ...TrainerMode.all.map((m) => m.id)],
                     selected: _mode,
@@ -186,17 +298,31 @@ class _TrainersScreenState extends State<TrainersScreen> with SingleTickerProvid
                       _reloadTrainers();
                     },
                   ),
-                  if (specs.isNotEmpty) ...[
-                    const SizedBox(height: 10),
-                    _SpecChips(
-                      specs: specs,
-                      selected: _category,
-                      onSelected: (s) {
-                        _category = s == _category ? null : s;
-                        _reloadTrainers();
-                      },
+                  const SizedBox(height: 10),
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 16),
+                    child: Row(
+                      children: [
+                        _FilterPill(
+                          icon: Icons.swap_vert_rounded,
+                          label: 'Sort: ${_sortLabels[_sort]}',
+                          on: _sort != 'relevance',
+                          dropdown: true,
+                          onTap: _pickSort,
+                        ),
+                        const SizedBox(width: 8),
+                        _FilterPill(
+                          icon: Icons.star_rounded,
+                          label: 'Rated 4.0+',
+                          on: _minRating != null,
+                          onTap: () {
+                            _minRating = _minRating == null ? 4 : null;
+                            _reloadTrainers();
+                          },
+                        ),
+                      ],
                     ),
-                  ],
+                  ),
                 ],
               ),
             ),
@@ -215,7 +341,8 @@ class _TrainersScreenState extends State<TrainersScreen> with SingleTickerProvid
               }
               final list = snap.data!;
               if (list.isEmpty) {
-                final filtered = _mode != null || _category != null || _search.text.trim().isNotEmpty;
+                final filtered =
+                    _mode != null || _group != null || _minRating != null || _search.text.trim().isNotEmpty;
                 return SliverFillRemaining(
                   hasScrollBody: false,
                   child: EmptyView(
@@ -223,7 +350,9 @@ class _TrainersScreenState extends State<TrainersScreen> with SingleTickerProvid
                     color: AppColors.blue,
                     title: 'No trainers found',
                     message: filtered
-                        ? 'Try a different search or clear your filters.'
+                        ? (_minRating != null
+                              ? 'No trainers rated 4.0+ yet — averages appear after $kRatingsUntilAverage rated sessions.'
+                              : 'Try a different search or clear your filters.')
                         : 'Certified trainers will show up here as they join.',
                     action: filtered
                         ? SizedBox(
@@ -232,7 +361,10 @@ class _TrainersScreenState extends State<TrainersScreen> with SingleTickerProvid
                               onPressed: () {
                                 _search.clear();
                                 _mode = null;
-                                _category = null;
+                                _group = null;
+                                _type = null;
+                                _minRating = null;
+                                _sort = 'relevance';
                                 _reloadTrainers();
                               },
                               child: const Text('Clear filters'),
@@ -267,8 +399,9 @@ class _TrainersScreenState extends State<TrainersScreen> with SingleTickerProvid
 }
 
 class _SpecChips extends StatelessWidget {
-  const _SpecChips({required this.specs, required this.selected, required this.onSelected});
+  const _SpecChips({required this.specs, required this.labelOf, required this.selected, required this.onSelected});
   final List<String> specs;
+  final String Function(String) labelOf;
   final String? selected;
   final ValueChanged<String> onSelected;
 
@@ -298,7 +431,7 @@ class _SpecChips extends StatelessWidget {
               child: Row(
                 children: [
                   Text(
-                    s,
+                    labelOf(s),
                     style: TextStyle(
                       fontSize: 12.5,
                       fontWeight: FontWeight.w700,
@@ -364,9 +497,9 @@ class _TrainerCard extends StatelessWidget {
                     const SizedBox(height: 6),
                     _RatingRow(rating: t.rating, reviews: t.reviewCount),
                     const SizedBox(height: 8),
-                    if (t.specializations.isNotEmpty)
+                    if (t.trainerTypeLabels.isNotEmpty || t.specializations.isNotEmpty)
                       Text(
-                        t.specializations.join(' · '),
+                        (t.trainerTypeLabels.isNotEmpty ? t.trainerTypeLabels : t.specializations).join(' · '),
                         maxLines: 2,
                         overflow: TextOverflow.ellipsis,
                         style: const TextStyle(
@@ -434,16 +567,32 @@ class _TrainerCard extends StatelessWidget {
 
 class _RatingRow extends StatelessWidget {
   const _RatingRow({required this.rating, required this.reviews});
-  final double rating;
+  final double? rating;
   final int reviews;
 
   @override
   Widget build(BuildContext context) {
+    final rating = this.rating;
+    if (rating == null || isNewRating(reviews)) {
+      return Row(
+        children: [
+          const Tag('NEW', color: AppColors.blue, bg: AppColors.blueSoft, icon: Icons.auto_awesome_rounded, dense: true),
+          const SizedBox(width: 6),
+          Flexible(
+            child: Text(
+              reviews == 0 ? 'No ratings yet' : '$reviews rating${reviews == 1 ? '' : 's'}',
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(fontSize: 12.5, color: AppColors.text2, fontWeight: FontWeight.w600),
+            ),
+          ),
+        ],
+      );
+    }
     return Row(
       children: [
         Container(
           padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2.5),
-          decoration: BoxDecoration(color: AppColors.green, borderRadius: BorderRadius.circular(6)),
+          decoration: BoxDecoration(color: ratingColor(rating), borderRadius: BorderRadius.circular(6)),
           child: Row(
             mainAxisSize: MainAxisSize.min,
             children: [
@@ -459,7 +608,7 @@ class _RatingRow extends StatelessWidget {
         const SizedBox(width: 6),
         Flexible(
           child: Text(
-            '$reviews review${reviews == 1 ? '' : 's'}',
+            '${formatCount(reviews)} verified rating${reviews == 1 ? '' : 's'}',
             overflow: TextOverflow.ellipsis,
             style: const TextStyle(fontSize: 12.5, color: AppColors.text2, fontWeight: FontWeight.w600),
           ),
@@ -536,10 +685,11 @@ class _TrainerSkeleton extends StatelessWidget {
 // ---------------------------------------------------------------------------
 
 class _MyBookings extends StatelessWidget {
-  const _MyBookings({required this.future, required this.onRefresh, required this.onFind});
+  const _MyBookings({required this.future, required this.onRefresh, required this.onFind, required this.onRate});
   final Future<List<TrainerBooking>> future;
   final Future<void> Function() onRefresh;
   final VoidCallback onFind;
+  final ValueChanged<TrainerBooking> onRate;
 
   @override
   Widget build(BuildContext context) {
@@ -585,7 +735,20 @@ class _MyBookings extends StatelessWidget {
               ],
               if (past.isNotEmpty) ...[
                 const SectionTitle('Past & other', padding: EdgeInsets.fromLTRB(0, 20, 0, 12)),
-                for (final b in past) ...[_BookingCard(booking: b, upcoming: false), const SizedBox(height: 12)],
+                for (final b in past) ...[
+                  _BookingCard(
+                    booking: b,
+                    upcoming: false,
+                    // Verified: the session has ended and wasn't cancelled.
+                    onRate:
+                        b.status != 'cancelled' &&
+                            (sessionStart(b.sessionDate, b.slotTime)?.add(const Duration(minutes: 60)).isBefore(now) ??
+                                false)
+                        ? () => onRate(b)
+                        : null,
+                  ),
+                  const SizedBox(height: 12),
+                ],
               ],
             ],
           );
@@ -606,9 +769,10 @@ class _MyBookings extends StatelessWidget {
 }
 
 class _BookingCard extends StatelessWidget {
-  const _BookingCard({required this.booking, required this.upcoming});
+  const _BookingCard({required this.booking, required this.upcoming, this.onRate});
   final TrainerBooking booking;
   final bool upcoming;
+  final VoidCallback? onRate;
 
   @override
   Widget build(BuildContext context) {
@@ -682,7 +846,73 @@ class _BookingCard extends StatelessWidget {
               ],
             ),
           ),
+          if (onRate != null) ...[
+            const SizedBox(height: 10),
+            SizedBox(
+              width: double.infinity,
+              child: OutlinedButton.icon(
+                onPressed: onRate,
+                icon: const Icon(Icons.star_rounded, size: 18, color: AppColors.amber),
+                label: const Text('Rate this session'),
+              ),
+            ),
+          ],
         ],
+      ),
+    );
+  }
+}
+
+/// Icon for a BRD §6 trainer group key.
+IconData trainerGroupIcon(String key) => switch (key) {
+  'gym_strength' => Icons.fitness_center_rounded,
+  'yoga_mind' => Icons.self_improvement_rounded,
+  'dance_group' => Icons.music_note_rounded,
+  'martial_arts' => Icons.sports_mma_rounded,
+  'sports' => Icons.sports_tennis_rounded,
+  'health_recovery' => Icons.healing_rounded,
+  'nutrition' => Icons.restaurant_rounded,
+  'special' => Icons.diversity_3_rounded,
+  _ => Icons.bolt_rounded,
+};
+
+class _FilterPill extends StatelessWidget {
+  const _FilterPill({required this.icon, required this.label, required this.on, required this.onTap, this.dropdown = false});
+  final IconData icon;
+  final String label;
+  final bool on;
+  final bool dropdown;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Tap(
+      onTap: onTap,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 180),
+        height: 34,
+        padding: const EdgeInsets.symmetric(horizontal: 12),
+        decoration: BoxDecoration(
+          color: on ? AppColors.primarySoft : AppColors.surface,
+          borderRadius: BorderRadius.circular(30),
+          border: Border.all(color: on ? AppColors.primary : AppColors.line),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(icon, size: 15, color: on ? AppColors.primary : AppColors.amber),
+            const SizedBox(width: 5),
+            Text(
+              label,
+              style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700, color: on ? AppColors.primary : AppColors.text),
+            ),
+            if (dropdown) Icon(Icons.keyboard_arrow_down_rounded, size: 17, color: on ? AppColors.primary : AppColors.text2),
+            if (on && !dropdown) ...[
+              const SizedBox(width: 3),
+              const Icon(Icons.close_rounded, size: 14, color: AppColors.primary),
+            ],
+          ],
+        ),
       ),
     );
   }

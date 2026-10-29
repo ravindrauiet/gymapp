@@ -7,6 +7,7 @@ import 'package:url_launcher/url_launcher.dart';
 import '../../data/models.dart';
 import '../../state/session.dart';
 import '../../ui/ui.dart';
+import '../../widgets/rating_widgets.dart';
 import '../../widgets/venue_card.dart' show isOpenNow;
 import '../checkin/checkin_screen.dart';
 import '../community/buddy_screens.dart';
@@ -216,6 +217,10 @@ class _Body extends StatelessWidget {
         Text(venue.name, style: const TextStyle(fontSize: 26, fontWeight: FontWeight.w800, letterSpacing: -0.7, height: 1.15)),
         const SizedBox(height: 6),
         Text(location, style: const TextStyle(color: AppColors.text2, fontSize: 14, height: 1.4)),
+        if (venue.ratingCount != null) ...[
+          const SizedBox(height: 8),
+          Align(alignment: Alignment.centerLeft, child: RatingBadge(avg: venue.ratingAvg, count: venue.ratingCount)),
+        ],
         const SizedBox(height: 10),
         Row(children: [
           if (open != null) ...[
@@ -270,6 +275,14 @@ class _Body extends StatelessWidget {
           const SectionTitle('About'),
           Text(venue.description!, style: const TextStyle(height: 1.55, color: AppColors.text2, fontSize: 14.5)),
         ],
+        const SectionTitle('Ratings', subtitle: 'From members who checked in here'),
+        RatingSummaryCard(
+          targetType: 'venue',
+          targetId: venue.id,
+          name: venue.name,
+          photoUrl: venue.photos.isEmpty ? null : venue.photos.first,
+          fallbackImage: venueVisual(venue.categories.isEmpty ? '' : venue.categories.first).image,
+        ),
         const SectionTitle('Timings'),
         AppCard(
           child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [

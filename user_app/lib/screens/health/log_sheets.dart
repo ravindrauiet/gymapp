@@ -252,7 +252,7 @@ class _ActivitySheetState extends State<_ActivitySheet> {
               ],
             ]),
             const SizedBox(height: 10),
-            _BigNumberField(controller: _calories, label: 'Calories burned (optional)', unit: 'kcal', hint: '300'),
+            _BigNumberField(controller: _calories, label: 'Calories (optional — auto-estimated)', unit: 'kcal', hint: '300'),
             const SizedBox(height: 12),
             TextField(
               controller: _title,

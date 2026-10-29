@@ -100,8 +100,12 @@ router.patch('/plans/:id', async (req, res) => {
   res.json({ plan });
 });
 
+const VIDEO_EQUIPMENT = ['none', 'dumbbells', 'gym'];
+/** Legacy `category` (old clients) derived from the Studio group when the admin doesn't pick one. */
+const GROUP_TO_CATEGORY = { yoga_mind: 'yoga', dance_cardio: 'dance', martial_arts: 'martial_arts' };
+
 const videoSchema = z.object({
-  category: z.enum(VIDEO_CATEGORY_IDS),
+  category: z.enum(VIDEO_CATEGORY_IDS).optional(),
   title: z.string().trim().min(2).max(200),
   description: z.string().trim().max(2000).optional(),
   trainerName: z.string().trim().max(120).optional(),
@@ -109,6 +113,32 @@ const videoSchema = z.object({
   videoUrl: z.string().url(),
   thumbnailUrl: z.string().url().optional(),
   durationSeconds: z.number().int().positive().optional(),
+  groupKey: z.string().trim().max(30).optional(),
+  types: z.array(z.string().trim().max(40)).max(12).optional(),
+  equipment: z.enum(VIDEO_EQUIPMENT).optional(),
+});
+
+/** Checks group/type keys against the Studio taxonomy; returns the resolved primary group. */
+async function checkTaxonomy(groupKey, types) {
+  if (groupKey && !(await queryOne(`SELECT 1 FROM video_groups WHERE key = $1`, [groupKey]))) {
+    throw badRequest(`Unknown Studio group "${groupKey}"`);
+  }
+  if (types?.length) {
+    const found = await query(`SELECT key, group_key FROM video_types WHERE key = ANY($1)`, [types]);
+    const missing = types.filter((t) => !found.some((f) => f.key === t));
+    if (missing.length) throw badRequest(`Unknown video type(s): ${missing.join(', ')}`);
+    return groupKey ?? found.find((f) => f.key === types[0])?.groupKey ?? null;
+  }
+  return groupKey ?? null;
+}
+
+/** GET /admin/video-taxonomy — every Studio group with its video types (for the admin form). */
+router.get('/video-taxonomy', async (_req, res) => {
+  const [groups, types] = await Promise.all([
+    query(`SELECT key, label FROM video_groups ORDER BY sort_order, label`),
+    query(`SELECT key, group_key, label FROM video_types ORDER BY sort_order, label`),
+  ]);
+  res.json({ groups: groups.map((g) => ({ ...g, types: types.filter((t) => t.groupKey === g.key) })) });
 });
 
 router.get('/videos', async (_req, res) => {
@@ -117,12 +147,40 @@ router.get('/videos', async (_req, res) => {
 
 router.post('/videos', async (req, res) => {
   const v = validate(videoSchema, req.body);
+  if (!v.category && !v.groupKey && !v.types?.length) throw badRequest('Pick a Studio group or a category');
+  const groupKey = await checkTaxonomy(v.groupKey, v.types);
+  const category = v.category ?? GROUP_TO_CATEGORY[groupKey] ?? 'gym';
   const video = await queryOne(
-    `INSERT INTO videos (category, title, description, trainer_name, level, video_url, thumbnail_url, duration_seconds)
-     VALUES ($1, $2, $3, $4, COALESCE($5, 'beginner'), $6, $7, $8) RETURNING *`,
-    [v.category, v.title, v.description ?? null, v.trainerName ?? null, v.level ?? null, v.videoUrl, v.thumbnailUrl ?? null, v.durationSeconds ?? null],
+    `INSERT INTO videos (category, title, description, trainer_name, level, video_url, thumbnail_url, duration_seconds,
+       group_key, types, equipment)
+     VALUES ($1, $2, $3, $4, COALESCE($5, 'beginner'), $6, $7, $8, $9, $10, $11) RETURNING *`,
+    [category, v.title, v.description ?? null, v.trainerName ?? null, v.level ?? null, v.videoUrl, v.thumbnailUrl ?? null,
+      v.durationSeconds ?? null, groupKey, v.types ?? [], v.equipment ?? null],
   );
   res.status(201).json({ video });
+});
+
+/** PATCH /admin/videos/:id — edit a video (e.g. re-tag its Studio group / types / equipment). */
+router.patch('/videos/:id', async (req, res) => {
+  if (!z.string().uuid().safeParse(req.params.id).success) throw notFound('Video not found');
+  const v = validate(videoSchema.partial(), req.body);
+  const current = await queryOne(`SELECT group_key, types FROM videos WHERE id = $1`, [req.params.id]);
+  if (!current) throw notFound('Video not found');
+  const groupKey = v.groupKey !== undefined || v.types !== undefined
+    ? await checkTaxonomy(v.groupKey ?? current.groupKey ?? undefined, v.types ?? current.types)
+    : undefined;
+  const video = await queryOne(
+    `UPDATE videos SET category = COALESCE($2, category), title = COALESCE($3, title),
+       description = COALESCE($4, description), trainer_name = COALESCE($5, trainer_name), level = COALESCE($6, level),
+       video_url = COALESCE($7, video_url), thumbnail_url = COALESCE($8, thumbnail_url),
+       duration_seconds = COALESCE($9, duration_seconds), group_key = COALESCE($10, group_key),
+       types = COALESCE($11, types), equipment = COALESCE($12, equipment)
+     WHERE id = $1 RETURNING *`,
+    [req.params.id, v.category ?? null, v.title ?? null, v.description ?? null, v.trainerName ?? null, v.level ?? null,
+      v.videoUrl ?? null, v.thumbnailUrl ?? null, v.durationSeconds ?? null, groupKey ?? null, v.types ?? null,
+      v.equipment ?? null],
+  );
+  res.json({ video });
 });
 
 router.delete('/videos/:id', async (req, res) => {

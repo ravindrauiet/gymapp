@@ -4,11 +4,13 @@ import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 
 import '../../data/models.dart';
+import '../../data/wallet_api.dart';
 import '../../state/session.dart';
 import '../../ui/ui.dart';
 import '../../widgets/venue_card.dart';
 import '../checkin/checkin_screen.dart';
 import '../explore/venue_detail_screen.dart';
+import '../wallet/coins.dart';
 
 /// Price per 30 days, for comparing plans of different lengths.
 int _monthlyPaise(Plan p) => p.durationDays <= 0 ? p.pricePaise : (p.pricePaise * 30 / p.durationDays).round();
@@ -584,6 +586,7 @@ class _PurchaseSuccess extends StatelessWidget {
                 textAlign: TextAlign.center,
                 style: TextStyle(color: Colors.white.withValues(alpha: 0.75), height: 1.45),
               ),
+              const _CoinsEarned(),
               const SizedBox(height: 24),
               AppButton(
                 label: 'Check in now',
@@ -606,6 +609,58 @@ class _PurchaseSuccess extends StatelessWidget {
           ),
         ),
       ),
+    );
+  }
+}
+
+/// "You earned N coins" on the purchase success card — read back from the wallet (1 coin per ₹1 paid).
+class _CoinsEarned extends StatefulWidget {
+  const _CoinsEarned();
+
+  @override
+  State<_CoinsEarned> createState() => _CoinsEarnedState();
+}
+
+class _CoinsEarnedState extends State<_CoinsEarned> {
+  ({int earned, int balance})? _coins;
+
+  @override
+  void initState() {
+    super.initState();
+    context.read<Session>().api.wallet().then((r) {
+      final purchase = r.ledger.where((e) => e.kind == 'plan_purchase').firstOrNull;
+      if (purchase != null && mounted) setState(() => _coins = (earned: purchase.amount, balance: r.wallet.available));
+    }).catchError((_) {});
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final c = _coins;
+    return AnimatedSize(
+      duration: const Duration(milliseconds: 250),
+      child: c == null
+          ? const SizedBox(width: double.infinity)
+          : Container(
+              margin: const EdgeInsets.only(top: 16),
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+              decoration: BoxDecoration(
+                color: Colors.white.withValues(alpha: 0.08),
+                borderRadius: BorderRadius.circular(14),
+                border: Border.all(color: AppColors.amber.withValues(alpha: 0.4)),
+              ),
+              child: Row(children: [
+                const CoinIcon(size: 30),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                    Text('You earned ${formatCoins(c.earned)} FitKey Coins',
+                        style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w800, fontSize: 14)),
+                    Text('Wallet balance: ${formatCoins(c.balance)} coins',
+                        style: TextStyle(color: Colors.white.withValues(alpha: 0.65), fontSize: 12)),
+                  ]),
+                ),
+              ]),
+            ),
     );
   }
 }

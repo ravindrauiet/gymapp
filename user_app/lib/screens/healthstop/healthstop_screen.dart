@@ -4,8 +4,12 @@ import 'package:provider/provider.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../../data/models.dart';
+import '../../data/studio_api.dart';
 import '../../state/session.dart';
 import '../../ui/ui.dart';
+import '../studio/search_widgets.dart';
+
+const _recentStore = RecentSearches('fitkey_recent_healthstop_search');
 
 /// A directory result plus whether we had to widen the search beyond the member's city.
 typedef _Listing<T> = ({List<T> items, bool widened});
@@ -27,6 +31,16 @@ class _HealthStopScreenState extends State<HealthStopScreen> with SingleTickerPr
   late Future<_Listing<HealthChemist>> _chemists;
   late Future<_Listing<HealthClinic>> _clinics;
 
+  // Search (BRD §5): server-side, debounced; recent searches kept on the device.
+  final _search = TextEditingController();
+  final _debounce = Debouncer();
+  String _query = '';
+  List<String> _recents = const [];
+
+  /// Areas / specialities from the unfiltered listing — offered as suggestions when a search finds nothing.
+  List<String> _chemistHints = const [];
+  List<String> _clinicHints = const [];
+
   @override
   void initState() {
     super.initState();
@@ -34,18 +48,102 @@ class _HealthStopScreenState extends State<HealthStopScreen> with SingleTickerPr
     _userCity = (c == null || c.isEmpty) ? null : c;
     _city = _userCity;
     _load();
+    _recentStore.load().then((r) {
+      if (mounted) setState(() => _recents = r);
+    });
   }
 
   @override
   void dispose() {
+    _debounce.cancel();
+    _search.dispose();
     _tabs.dispose();
     super.dispose();
   }
 
   void _load() {
     final api = context.read<Session>().api;
-    _chemists = _withFallback((city) => api.healthChemists(city: city));
-    _clinics = _withFallback((city) => api.healthClinics(city: city));
+    final q = _query.isEmpty ? null : _query;
+    _chemists = _withFallback((city) => api.searchHealthChemists(city: city, q: q));
+    _clinics = _withFallback((city) => api.searchHealthClinics(city: city, q: q));
+    if (q == null) {
+      _chemists.then((l) {
+        if (mounted) _chemistHints = _hints(l.items.map((c) => (c.address, c.city, const <String>[])));
+      }, onError: (_) {});
+      _clinics.then((l) {
+        if (mounted) {
+          _clinicHints = _hints(l.items.map((c) => (
+                c.address,
+                c.city,
+                [...c.doctors.map((d) => d.specialty), ...c.facilities],
+              )));
+        }
+      }, onError: (_) {});
+    }
+  }
+
+  /// Area = the address part just before the city ("5th Block, Koramangala, Bengaluru" → Koramangala).
+  static List<String> _hints(Iterable<(String, String, List<String>)> items) {
+    final areas = <String>{};
+    final extra = <String>{};
+    for (final (address, city, more) in items) {
+      final parts = address.split(',').map((s) => s.trim()).where((s) => s.isNotEmpty).toList();
+      if (parts.isNotEmpty && parts.last.toLowerCase() == city.toLowerCase()) parts.removeLast();
+      if (parts.isNotEmpty) areas.add(parts.last);
+      for (final m in more) {
+        if (m.trim().isNotEmpty && m.length <= 28) extra.add(m.trim());
+      }
+    }
+    return [...areas.take(4), ...extra.take(4)];
+  }
+
+  void _onChanged(String text) {
+    final q = text.trim();
+    setState(() {}); // hide recent searches while typing
+    if (q.isEmpty) {
+      _debounce.cancel();
+      _applyQuery('');
+      return;
+    }
+    _debounce(() {
+      if (mounted) _applyQuery(q);
+    });
+  }
+
+  void _applyQuery(String q) {
+    if (q == _query) return;
+    _query = q;
+    setState(_load);
+  }
+
+  Future<void> _remember(String q) async {
+    final next = await _recentStore.add(q);
+    if (mounted) setState(() => _recents = next);
+  }
+
+  void _onSubmitted(String text) {
+    final q = text.trim();
+    if (q.isEmpty) return;
+    _debounce.cancel();
+    _applyQuery(q);
+    _remember(q);
+  }
+
+  void _useSearch(String q) {
+    _search.text = q;
+    _search.selection = TextSelection.collapsed(offset: q.length);
+    FocusScope.of(context).unfocus();
+    _onSubmitted(q);
+  }
+
+  void _clearSearch() {
+    _search.clear();
+    _onChanged('');
+  }
+
+  Future<void> _clearRecents() async {
+    await _recentStore.clear();
+    if (mounted) setState(() => _recents = const []);
   }
 
   /// Queries the selected city; if nothing is listed there yet, shows every city instead.
@@ -76,9 +174,24 @@ class _HealthStopScreenState extends State<HealthStopScreen> with SingleTickerPr
         children: [
           Container(
             color: AppColors.surface,
-            padding: const EdgeInsets.fromLTRB(16, 4, 16, 14),
+            padding: const EdgeInsets.fromLTRB(16, 8, 16, 14),
             child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
+                RotatingSearchBar(
+                  hints: const ['clinics by name', 'physiotherapy', 'chemists in your area', 'orthopedic', 'Koramangala'],
+                  controller: _search,
+                  onChanged: _onChanged,
+                  onSubmitted: _onSubmitted,
+                ),
+                if (_search.text.trim().isEmpty)
+                  RecentSearchRow(
+                    recents: _recents,
+                    onTap: _useSearch,
+                    onClear: _clearRecents,
+                    padding: const EdgeInsets.only(top: 10),
+                  ),
+                const SizedBox(height: 12),
                 _Segmented(controller: _tabs),
                 if (_userCity != null) ...[
                   const SizedBox(height: 12),
@@ -101,6 +214,11 @@ class _HealthStopScreenState extends State<HealthStopScreen> with SingleTickerPr
                 _DirectoryList<HealthChemist>(
                   future: _chemists,
                   city: _city,
+                  query: _query,
+                  hints: _chemistHints,
+                  onHint: _useSearch,
+                  onClearSearch: _clearSearch,
+                  onEngage: () => _remember(_query),
                   onRefresh: _refresh,
                   banner: const PhotoBanner(
                     image: AppImages.supplements,
@@ -115,6 +233,11 @@ class _HealthStopScreenState extends State<HealthStopScreen> with SingleTickerPr
                 _DirectoryList<HealthClinic>(
                   future: _clinics,
                   city: _city,
+                  query: _query,
+                  hints: _clinicHints,
+                  onHint: _useSearch,
+                  onClearSearch: _clearSearch,
+                  onEngage: () => _remember(_query),
                   onRefresh: _refresh,
                   banner: const PhotoBanner(
                     image: AppImages.running,
@@ -192,6 +315,11 @@ class _DirectoryList<T> extends StatelessWidget {
   const _DirectoryList({
     required this.future,
     required this.city,
+    required this.query,
+    required this.hints,
+    required this.onHint,
+    required this.onClearSearch,
+    required this.onEngage,
     required this.onRefresh,
     required this.banner,
     required this.empty,
@@ -200,6 +328,17 @@ class _DirectoryList<T> extends StatelessWidget {
 
   final Future<_Listing<T>> future;
   final String? city;
+
+  /// Current search ('' = none).
+  final String query;
+
+  /// Suggested searches for the "No results" state.
+  final List<String> hints;
+  final ValueChanged<String> onHint;
+  final VoidCallback onClearSearch;
+
+  /// Called when the member interacts with a search result (to remember the search).
+  final VoidCallback onEngage;
   final Future<void> Function() onRefresh;
   final Widget banner;
   final (String, IconData) empty;
@@ -216,6 +355,25 @@ class _DirectoryList<T> extends StatelessWidget {
           if (snap.connectionState != ConnectionState.done) return const SkeletonList(itemHeight: 88);
           if (snap.hasError) return _fill(ErrorView(error: snap.error!, onRetry: onRefresh));
           final data = snap.data!;
+          if (data.items.isEmpty && query.isNotEmpty) {
+            return _fill(
+              EmptyView(
+                icon: Icons.search_off_rounded,
+                color: AppColors.teal,
+                title: 'No results',
+                message: hints.isEmpty
+                    ? 'Nothing matches "$query". Try a name, speciality or area.'
+                    : 'Nothing matches "$query". Try one of these:',
+                action: Column(mainAxisSize: MainAxisSize.min, children: [
+                  if (hints.isNotEmpty) ...[
+                    SuggestionChips(items: hints, onTap: onHint, icon: (_) => Icons.search_rounded),
+                    const SizedBox(height: 14),
+                  ],
+                  TextButton(onPressed: onClearSearch, child: const Text('Clear search')),
+                ]),
+              ),
+            );
+          }
           if (data.items.isEmpty) {
             return _fill(
               EmptyView(
@@ -250,7 +408,9 @@ class _DirectoryList<T> extends StatelessWidget {
                       const SizedBox(width: 8),
                       Expanded(
                         child: Text(
-                          'Nothing listed in $city yet — showing all cities.',
+                          query.isEmpty
+                              ? 'Nothing listed in $city yet — showing all cities.'
+                              : 'No match for "$query" in $city — showing all cities.',
                           style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: AppColors.text),
                         ),
                       ),
@@ -259,13 +419,18 @@ class _DirectoryList<T> extends StatelessWidget {
                 ),
               ],
               SectionTitle(
-                '${data.items.length} near you',
+                query.isEmpty
+                    ? '${data.items.length} near you'
+                    : '${data.items.length} result${data.items.length == 1 ? '' : 's'} for "$query"',
                 subtitle: data.widened || city == null
                     ? 'Across all cities · nearest first'
                     : 'In $city · nearest first',
                 padding: const EdgeInsets.fromLTRB(0, 22, 0, 12),
               ),
-              for (final item in data.items) ...[itemBuilder(item), const SizedBox(height: 12)],
+              for (final item in data.items) ...[
+                query.isEmpty ? itemBuilder(item) : Listener(onPointerDown: (_) => onEngage(), child: itemBuilder(item)),
+                const SizedBox(height: 12),
+              ],
             ],
           );
         },

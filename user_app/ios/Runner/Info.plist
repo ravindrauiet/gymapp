@@ -2,6 +2,14 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
+	<key>NSHealthShareUsageDescription</key>
+	<string>FITKEY reads your steps, distance and active calories to show your progress.</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>FITKEY records AI Arena proof clips and Circle voice notes.</string>
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>FITKEY uses your location to show fitness Circles near you.</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>Choose photos for your FitFeed posts and meal scans.</string>
 	<key>NSCameraUsageDescription</key>
 	<string>FITKEY uses the camera to scan the venue check-in QR code.</string>
 	<key>NSAppTransportSecurity</key>

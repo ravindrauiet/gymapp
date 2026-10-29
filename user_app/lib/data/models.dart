@@ -100,7 +100,9 @@ class VenueSummary {
         trainerAvailable = j['trainerAvailable'] ?? false,
         amenities = _strings(j['amenities']),
         coverPhoto = j['coverPhoto'],
-        distanceKm = _double(j['distanceKm']);
+        distanceKm = _double(j['distanceKm']),
+        ratingAvg = _double(j['ratingAvg']),
+        ratingCount = (j['ratingCount'] as num?)?.toInt();
 
   final String id;
   final String name;
@@ -113,6 +115,12 @@ class VenueSummary {
   final List<String> amenities;
   final String? coverPhoto;
   final double? distanceKm;
+
+  /// Average stars (1–5); null until rated. Shown as "New" until [ratingCount] ≥ 5.
+  final double? ratingAvg;
+
+  /// Null when the endpoint does not include ratings.
+  final int? ratingCount;
 
   String get location => [area, city].whereType<String>().join(', ');
 }
@@ -135,7 +143,9 @@ class Venue {
         trainerAvailable = j['trainerAvailable'] ?? false,
         equipment = _strings(j['equipment']),
         amenities = _strings(j['amenities']),
-        photos = _strings(j['photos']);
+        photos = _strings(j['photos']),
+        ratingAvg = _double(j['ratingAvg']),
+        ratingCount = (j['ratingCount'] as num?)?.toInt();
 
   final String id;
   final String name;
@@ -154,6 +164,8 @@ class Venue {
   final List<String> equipment;
   final List<String> amenities;
   final List<String> photos;
+  final double? ratingAvg;
+  final int? ratingCount;
 }
 
 class PlanRef {
@@ -207,7 +219,12 @@ class Video {
         level = j['level'] ?? 'beginner',
         videoUrl = j['videoUrl'],
         thumbnailUrl = j['thumbnailUrl'],
-        durationSeconds = j['durationSeconds'];
+        durationSeconds = j['durationSeconds'],
+        groupKey = j['groupKey'],
+        groupLabel = j['groupLabel'],
+        types = ((j['types'] as List?) ?? const []).cast<String>(),
+        groups = ((j['groups'] as List?) ?? const []).cast<String>(),
+        equipment = j['equipment'];
 
   final String id;
   final String category;
@@ -218,6 +235,19 @@ class Video {
   final String videoUrl;
   final String? thumbnailUrl;
   final int? durationSeconds;
+
+  /// Studio group (BRD §7), e.g. 'gym', 'yoga_mind'; null from older servers.
+  final String? groupKey;
+  final String? groupLabel;
+
+  /// Studio video type keys, e.g. ['gym_chest', 'body_upper'].
+  final List<String> types;
+
+  /// Every Studio group this video is listed in (its primary group + the groups of its types).
+  final List<String> groups;
+
+  /// none | dumbbells | gym (null when not tagged).
+  final String? equipment;
 }
 
 class BuddyPost {
@@ -501,7 +531,19 @@ class UserGoal {
         dailyCalorieTarget = _int(j['daily_calorie_target'] ?? j['dailyCalorieTarget']),
         dailyProteinG = _int(j['daily_protein_g'] ?? j['dailyProteinG']),
         dailyCarbsG = _int(j['daily_carbs_g'] ?? j['dailyCarbsG']),
-        dailyFatG = _int(j['daily_fat_g'] ?? j['dailyFatG']);
+        dailyFatG = _int(j['daily_fat_g'] ?? j['dailyFatG']),
+        workoutDaysPerWeek = j['workoutDaysPerWeek'] == null ? 4 : _int(j['workoutDaysPerWeek']),
+        dailyStepsTarget = j['dailyStepsTarget'] == null ? 8000 : _int(j['dailyStepsTarget']),
+        waterGlassesTarget = j['waterGlassesTarget'] == null ? 8 : _int(j['waterGlassesTarget']),
+        calorieOverride = (j['calorieTargetOverride'] as num?)?.toInt(),
+        proteinOverride = (j['proteinGOverride'] as num?)?.toInt(),
+        carbsOverride = (j['carbsGOverride'] as num?)?.toInt(),
+        fatOverride = (j['fatGOverride'] as num?)?.toInt(),
+        customTargets = j['customTargets'] == true,
+        autoCalorieTarget = _int(j['autoTargets']?['dailyCalorieTarget'] ?? j['daily_calorie_target'] ?? j['dailyCalorieTarget']),
+        autoProteinG = _int(j['autoTargets']?['dailyProteinG'] ?? j['daily_protein_g'] ?? j['dailyProteinG']),
+        autoCarbsG = _int(j['autoTargets']?['dailyCarbsG'] ?? j['daily_carbs_g'] ?? j['dailyCarbsG']),
+        autoFatG = _int(j['autoTargets']?['dailyFatG'] ?? j['daily_fat_g'] ?? j['dailyFatG']);
 
   final String goalType; // weight_loss | muscle_gain | maintenance
   final int age;
@@ -514,6 +556,24 @@ class UserGoal {
   final int dailyProteinG;
   final int dailyCarbsG;
   final int dailyFatG;
+
+  /// Habit goals (BRD §4): workout days per week, daily steps, glasses of water.
+  final int workoutDaysPerWeek;
+  final int dailyStepsTarget;
+  final int waterGlassesTarget;
+
+  /// Member overrides of the auto-calculated nutrition targets (null = auto).
+  final int? calorieOverride;
+  final int? proteinOverride;
+  final int? carbsOverride;
+  final int? fatOverride;
+  final bool customTargets;
+
+  /// Mifflin-St Jeor targets calculated from body stats (before overrides).
+  final int autoCalorieTarget;
+  final int autoProteinG;
+  final int autoCarbsG;
+  final int autoFatG;
 
   String get goalLabel => switch (goalType) {
         'weight_loss' => 'Weight Loss (Patla hona hai)',
@@ -668,7 +728,10 @@ class MealDailySummary {
         breakfast = (j['categories']?['breakfast'] as List? ?? const []).map((m) => MealLog.fromJson(m)).toList(),
         lunch = (j['categories']?['lunch'] as List? ?? const []).map((m) => MealLog.fromJson(m)).toList(),
         dinner = (j['categories']?['dinner'] as List? ?? const []).map((m) => MealLog.fromJson(m)).toList(),
-        snacks = (j['categories']?['snacks'] as List? ?? const []).map((m) => MealLog.fromJson(m)).toList();
+        snacks = (j['categories']?['snacks'] as List? ?? const []).map((m) => MealLog.fromJson(m)).toList(),
+        targetsSource = j['summary']?['targets']?['source'] ?? 'goal',
+        waterGlasses = _int(j['water']?['glasses']),
+        waterTarget = j['water']?['target'] == null ? 8 : _int(j['water']?['target']);
 
   final String date;
   final int totalCalories;
@@ -685,6 +748,11 @@ class MealDailySummary {
   final List<MealLog> lunch;
   final List<MealLog> dinner;
   final List<MealLog> snacks;
+
+  /// 'goal' (auto-calculated), 'custom' (member override) or 'default' (no goal set yet).
+  final String targetsSource;
+  final int waterGlasses;
+  final int waterTarget;
 }
 
 // ---- FitPro On-Demand (Trainers) --------------------------------------------
@@ -694,8 +762,10 @@ class Trainer {
         name = j['name'],
         photoUrl = j['photo_url'] ?? j['photoUrl'],
         bio = j['bio'],
-        rating = _double(j['rating']) ?? 4.9,
-        reviewCount = _int(j['review_count'] ?? j['reviewCount']),
+        rating = _double(j['ratingAvg'] ?? j['rating']),
+        reviewCount = _int(j['ratingCount'] ?? j['review_count'] ?? j['reviewCount']),
+        trainerTypes = _strings(j['trainerTypes']),
+        trainerTypeLabels = _strings(j['trainerTypeLabels']),
         certifications = _strings(j['certifications']),
         specializations = _strings(j['specializations']),
         trainingModes = _strings(j['training_modes'] ?? j['trainingModes']),
@@ -706,8 +776,15 @@ class Trainer {
   final String name;
   final String? photoUrl;
   final String bio;
-  final double rating;
+  /// Real average stars from member ratings; null until rated. Shown as "New" until [reviewCount] ≥ 5.
+  final double? rating;
   final int reviewCount;
+
+  /// BRD §6 trainer type keys, e.g. personal_trainer, zumba, physiotherapist.
+  final List<String> trainerTypes;
+
+  /// Display labels for [trainerTypes], e.g. "Zumba", "Physiotherapist".
+  final List<String> trainerTypeLabels;
   final List<String> certifications;
   final List<String> specializations;
   final List<String> trainingModes;

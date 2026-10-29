@@ -1,0 +1,96 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>FITKEY for Business</title>
+  <meta name="description" content="FITKEY Corporate Dashboard — wellness passes, events and usage analytics for your people." />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" />
+  <link rel="stylesheet" href="app.css" />
+</head>
+<body>
+  <!-- Sign in -->
+  <section id="login-view" class="login" hidden>
+    <div class="login-card">
+      <div class="brand big"><span class="logo">F</span><span>FITKEY <b>for Business</b></span></div>
+      <h1>Sign in to your HR dashboard</h1>
+      <p class="muted">Use the phone number your FITKEY account manager registered as an HR admin. We'll send a one-time code.</p>
+      <form id="login-phone" class="stack">
+        <label class="field"><span>Phone number</span><input name="phone" inputmode="tel" autocomplete="tel" placeholder="+91 98765 43210" required /></label>
+        <button class="btn primary block" type="submit">Send code</button>
+      </form>
+      <form id="login-otp" class="stack" hidden>
+        <label class="field"><span>6-digit code</span><input name="otp" inputmode="numeric" maxlength="6" pattern="\d{6}" autocomplete="one-time-code" required /></label>
+        <p id="dev-otp" class="hint"></p>
+        <button class="btn primary block" type="submit">Verify &amp; sign in</button>
+        <button class="btn ghost block" type="button" id="login-back">Use a different number</button>
+      </form>
+      <p class="fine">Your company isn't on FITKEY yet? Ask your FITKEY account manager to set up your organisation.</p>
+    </div>
+  </section>
+
+  <!-- No org access -->
+  <section id="noaccess-view" class="login" hidden>
+    <div class="login-card">
+      <div class="brand big"><span class="logo">F</span><span>FITKEY <b>for Business</b></span></div>
+      <h1>No organisation linked</h1>
+      <p class="muted">This phone number isn't an HR admin of any organisation. Ask an owner on your team to add you in <b>Settings → HR admins</b>, or contact your FITKEY account manager.</p>
+      <button class="btn ghost block" data-action="logout">Sign out</button>
+    </div>
+  </section>
+
+  <!-- App -->
+  <div id="app-view" class="shell" hidden>
+    <aside class="sidebar" id="sidebar">
+      <div class="brand"><span class="logo">F</span><span>FITKEY <b>for Business</b></span></div>
+      <div class="org-switch">
+        <div class="org-avatar" id="org-avatar"></div>
+        <div class="org-meta">
+          <select id="org-select" aria-label="Organisation"></select>
+          <small id="org-role"></small>
+        </div>
+      </div>
+      <nav id="nav">
+        <a href="#overview" data-page="overview"><i>◧</i>Overview</a>
+        <a href="#members" data-page="members"><i>☺</i>Members</a>
+        <a href="#passes" data-page="passes"><i>▤</i>Passes</a>
+        <a href="#events" data-page="events"><i>⚑</i>Events <span class="pill-count" id="nav-battles" hidden></span></a>
+        <a href="#analytics" data-page="analytics"><i>▥</i>Analytics</a>
+        <a href="#billing" data-page="billing"><i>₹</i>Billing <span class="pill-count" id="nav-renewals" hidden></span></a>
+        <a href="#settings" data-page="settings"><i>⚙</i>Settings</a>
+      </nav>
+      <div class="privacy-note">
+        <b>Privacy by design</b>
+        You see usage and event participation only — never an employee's weight, nutrition or health data.
+      </div>
+      <div class="me">
+        <div class="me-avatar" id="me-avatar"></div>
+        <div class="me-meta"><b id="me-name"></b><small id="me-phone"></small></div>
+        <button class="icon-btn" data-action="logout" title="Sign out" aria-label="Sign out">⏻</button>
+      </div>
+    </aside>
+    <div class="scrim" id="scrim"></div>
+    <main class="main">
+      <header class="topbar">
+        <button class="icon-btn menu" id="menu-btn" aria-label="Menu">☰</button>
+        <div>
+          <h1 id="page-title">Overview</h1>
+          <p id="page-sub" class="muted"></p>
+        </div>
+        <div class="topbar-actions" id="page-actions"></div>
+      </header>
+      <div id="mock-banner" class="banner" hidden>
+        Payments are in <b>mock mode</b>: orders and invoices are recorded, but no money is collected.
+      </div>
+      <div id="page" class="page"></div>
+    </main>
+  </div>
+
+  <div id="modal-root"></div>
+  <div id="toast" role="status" aria-live="polite" hidden></div>
+  <div id="tooltip" class="tooltip" hidden></div>
+  <script src="app.js"></script>
+</body>
+</html>

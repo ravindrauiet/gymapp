@@ -5,6 +5,7 @@ import { query, queryOne, withTransaction } from '../db/index.js';
 import { requireAuth } from '../middleware/auth.js';
 import { HttpError, notFound, validate } from '../utils/http.js';
 import { uuidSchema } from '../utils/schemas.js';
+import { creditPlanPurchase, notifyPlanCoins } from './wallet.js';
 
 export const plansRouter = Router();
 export const subscriptionsRouter = Router();
@@ -28,7 +29,7 @@ plansRouter.get('/:id', async (req, res) => {
 plansRouter.get('/:id/venues', async (req, res) => {
   const { city } = validate(z.object({ city: z.string().optional() }), req.query);
   const venues = await query(
-    `SELECT v.id, v.name, v.area, v.city, v.categories, v.photos[1] AS cover_photo
+    `SELECT v.id, v.name, v.area, v.city, v.categories, v.photos[1] AS cover_photo, v.rating_avg, v.rating_count
      FROM venues v JOIN plans p ON p.id = $1
      WHERE v.status = 'live' AND v.categories && p.categories AND ($2::text IS NULL OR v.city ILIKE $2)
      ORDER BY v.city, v.name LIMIT 200`,
@@ -58,6 +59,8 @@ subscriptionsRouter.get('/me', async (req, res) => {
 /**
  * POST /subscriptions { planId } — buys a plan. Renewing the same plan stacks after the current one.
  * PAYMENTS_MODE=mock activates instantly; replace with a Razorpay order + webhook before launch.
+ * Also earns FitKey Coins (1 per ₹1 paid), unlocks the welcome coins, and rewards the referrer on a first pass —
+ * in the same transaction. When a real gateway lands, move this into the payment-confirmed webhook.
  */
 subscriptionsRouter.post('/', async (req, res) => {
   const { planId } = validate(z.object({ planId: uuidSchema }), req.body);
@@ -65,12 +68,12 @@ subscriptionsRouter.post('/', async (req, res) => {
     throw new HttpError(501, 'Payment gateway not configured');
   }
 
-  const subscription = await withTransaction(async (client) => {
+  const { subscription, coins, planName, buyerName } = await withTransaction(async (client) => {
     const plan = await queryOne(`SELECT * FROM plans WHERE id = $1 AND is_active`, [planId], client);
     if (!plan) throw notFound('Plan not found');
 
     // Serialise concurrent purchases for this user so stacking is computed correctly.
-    await client.query(`SELECT id FROM users WHERE id = $1 FOR UPDATE`, [req.user.id]);
+    const buyer = await queryOne(`SELECT id, name FROM users WHERE id = $1 FOR UPDATE`, [req.user.id], client);
     const latest = await queryOne(
       `SELECT MAX(ends_at) AS ends_at FROM subscriptions
        WHERE user_id = $1 AND plan_id = $2 AND status = 'active' AND ends_at > now()`,
@@ -79,14 +82,18 @@ subscriptionsRouter.post('/', async (req, res) => {
     );
     const startsAt = latest?.endsAt ?? new Date();
 
-    return queryOne(
+    const sub = await queryOne(
       `INSERT INTO subscriptions (user_id, plan_id, status, starts_at, ends_at, amount_paise, payment_ref)
        VALUES ($1, $2, 'active', $3, $3::timestamptz + make_interval(days => $4), $5, $6)
        RETURNING *`,
       [req.user.id, planId, startsAt, plan.durationDays, plan.pricePaise, `MOCK-${Date.now()}`],
       client,
     );
+    const credit = await creditPlanPurchase(client, req.user.id, sub);
+    return { subscription: sub, coins: credit, planName: plan.name, buyerName: buyer?.name };
   });
 
-  res.status(201).json({ subscription });
+  await notifyPlanCoins(req.user.id, coins, { planName, buyerName });
+  const { referral, ...coinSummary } = coins;
+  res.status(201).json({ subscription, coins: { ...coinSummary, referralRewarded: Boolean(referral) } });
 });

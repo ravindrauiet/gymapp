@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:url_launcher/url_launcher.dart';
 
+import '../../data/wallet_api.dart';
 import '../../state/session.dart';
 import '../../ui/ui.dart';
 import '../../widgets/brand.dart';
@@ -17,6 +18,8 @@ import '../nutrition/fuel_log_screen.dart';
 import '../plans/plans_screen.dart';
 import '../store/store_screen.dart';
 import '../trainers/trainers_screen.dart';
+import '../wallet/coins.dart';
+import '../wallet/refer_earn_screen.dart';
 
 class ProfileScreen extends StatelessWidget {
   const ProfileScreen({super.key});
@@ -97,6 +100,9 @@ class ProfileScreen extends StatelessWidget {
             ]),
           ),
         ),
+        const SizedBox(height: 12),
+        // Re-created (and reloaded) whenever the active pass changes, so coins earned on purchase show up.
+        _ReferEarnCard(key: ValueKey('coins-${sub?.planId}-${sub?.endsAt}')),
         _Group(title: 'AI & nutrition', items: [
           _Item(Icons.auto_awesome_rounded, 'Chat with Mansi', 'Your AI fitness & diet coach', AppColors.purple,
               () => push(context, const AiCoachScreen())),
@@ -138,6 +144,134 @@ class ProfileScreen extends StatelessWidget {
         const SizedBox(height: 6),
         const Center(
           child: Text('Your key to fitness, everywhere', style: TextStyle(color: AppColors.text3, fontSize: 12)),
+        ),
+      ]),
+    );
+  }
+}
+
+/// BRD §9 — Refer & Earn entry with the member's coin balance (available / locked), right below the pass card.
+class _ReferEarnCard extends StatefulWidget {
+  const _ReferEarnCard({super.key});
+
+  @override
+  State<_ReferEarnCard> createState() => _ReferEarnCardState();
+}
+
+class _ReferEarnCardState extends State<_ReferEarnCard> {
+  static bool _deviceRegistered = false;
+  CoinWallet? _wallet;
+  bool _loading = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+    if (!_deviceRegistered) {
+      _deviceRegistered = true;
+      context.read<Session>().api.registerDevice().catchError((_) {});
+    }
+  }
+
+  Future<void> _load() async {
+    if (!_loading) setState(() => _loading = true);
+    try {
+      final r = await context.read<Session>().api.wallet();
+      if (mounted) setState(() => _wallet = r.wallet);
+    } catch (_) {
+      // Shown as a retry row below; the Refer & Earn link still works.
+    } finally {
+      if (mounted) setState(() => _loading = false);
+    }
+  }
+
+  Future<void> _open() async {
+    await push(context, const ReferEarnScreen());
+    if (mounted) _load();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final w = _wallet;
+    return AppCard(
+      onTap: _open,
+      padding: EdgeInsets.zero,
+      child: Column(children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 14, 14, 12),
+          child: Row(children: [
+            const CoinIcon(size: 42),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                const Text('FitKey Coins',
+                    style: TextStyle(fontSize: 12, color: AppColors.text2, fontWeight: FontWeight.w700)),
+                const SizedBox(height: 2),
+                if (_loading && w == null)
+                  const Shimmer(child: SkeletonBox(height: 22, width: 110))
+                else if (w == null)
+                  Tap(
+                    onTap: _load,
+                    child: const Row(children: [
+                      Text("Couldn't load balance", style: TextStyle(fontWeight: FontWeight.w700, color: AppColors.text2)),
+                      SizedBox(width: 4),
+                      Icon(Icons.refresh_rounded, size: 18, color: AppColors.primary),
+                    ]),
+                  )
+                else
+                  Text.rich(TextSpan(children: [
+                    TextSpan(
+                        text: formatCoins(w.available),
+                        style: const TextStyle(fontSize: 22, fontWeight: FontWeight.w800, letterSpacing: -0.5)),
+                    const TextSpan(
+                        text: '  available',
+                        style: TextStyle(fontSize: 12.5, color: AppColors.text2, fontWeight: FontWeight.w600)),
+                  ])),
+              ]),
+            ),
+            if (w != null && w.locked > 0)
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 6),
+                decoration: BoxDecoration(color: AppColors.amberSoft, borderRadius: BorderRadius.circular(10)),
+                child: Row(mainAxisSize: MainAxisSize.min, children: [
+                  const Icon(Icons.lock_rounded, size: 13, color: AppColors.amber),
+                  const SizedBox(width: 4),
+                  Text('${formatCoins(w.locked)} locked',
+                      style: const TextStyle(color: Color(0xFFB86E00), fontWeight: FontWeight.w800, fontSize: 12)),
+                ]),
+              ),
+          ]),
+        ),
+        if (w != null && w.locked > 0)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+            child: Row(children: [
+              const Icon(Icons.info_outline_rounded, size: 14, color: AppColors.text3),
+              const SizedBox(width: 6),
+              Expanded(
+                child: Text('${formatCoins(w.locked)} coins unlock with your first pass',
+                    style: const TextStyle(fontSize: 12, color: AppColors.text2, fontWeight: FontWeight.w600)),
+              ),
+            ]),
+          ),
+        Container(
+          padding: const EdgeInsets.fromLTRB(16, 12, 14, 12),
+          decoration: const BoxDecoration(
+            gradient: AppColors.primaryGradient,
+            borderRadius: BorderRadius.vertical(bottom: Radius.circular(20)),
+          ),
+          child: const Row(children: [
+            Icon(Icons.card_giftcard_rounded, color: Colors.white, size: 22),
+            SizedBox(width: 10),
+            Expanded(
+              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                Text('Refer & Earn', style: TextStyle(color: Colors.white, fontWeight: FontWeight.w800, fontSize: 15)),
+                Text('Get 100 coins for every friend who buys a pass',
+                    style: TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.w500)),
+              ]),
+            ),
+            Icon(Icons.chevron_right_rounded, color: Colors.white),
+          ]),
         ),
       ]),
     );

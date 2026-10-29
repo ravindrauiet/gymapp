@@ -25,6 +25,15 @@ import nutritionRouter from './routes/nutrition.js';
 import { trainersRouter, partnerTrainerRouter } from './routes/trainers.js';
 import healthstopRouter from './routes/healthstop.js';
 import aiRouter from './routes/ai.js';
+import notificationsRouter from './routes/notifications.js';
+import feedRouter from './routes/feed.js';
+import eventsRouter from './routes/events.js';
+import arenaRouter from './routes/arena.js';
+import circlesRouter from './routes/circles.js';
+import pointsRouter from './routes/points.js';
+import ratingsRouter from './routes/ratings.js';
+import walletRouter from './routes/wallet.js';
+import corporateRouter from './routes/corporate.js';
 
 export function createApp() {
   const app = express();
@@ -73,18 +82,30 @@ export function createApp() {
   api.use('/trainers', trainersRouter);
   api.use('/healthstop', healthstopRouter);
   api.use('/ai', aiRouter);
+  api.use('/notifications', notificationsRouter);
+  api.use('/feed', feedRouter); // FitFeed
+  api.use('/events', eventsRouter); // Events (org verification, filters) — contests stay at /contests
+  api.use('/arena', arenaRouter); // AI Arena
+  api.use('/circles', circlesRouter); // Circles
+  api.use('/points', pointsRouter); // Trophy: overall points board
+  api.use('/ratings', ratingsRouter); // Venue & trainer ratings
+  api.use('/wallet', walletRouter); // Coins & Refer-and-Earn
   // Venue owner & vendor/trainer (Partner app)
   api.use('/partner', partnerRouter);
   api.use('/partner/vendor', partnerVendorRouter);
   api.use('/partner/trainer', partnerTrainerRouter);
   // FITKEY team
   api.use('/admin', adminRouter);
+  // Corporate Dashboard (company / college HR)
+  api.use('/corporate', corporateRouter);
 
   app.use('/api/v1', api);
 
   // FITKEY team web panel (venue verification, plans, videos, contests)
   const adminPanel = fileURLToPath(new URL('../public/admin', import.meta.url));
   app.use('/admin', express.static(adminPanel));
+  // Corporate Dashboard web app for company / college HR
+  app.use('/corporate', express.static(fileURLToPath(new URL('../public/corporate', import.meta.url))));
   app.get('/', (_req, res) => res.redirect('/admin/'));
   app.use(notFoundHandler);
   app.use(errorHandler);

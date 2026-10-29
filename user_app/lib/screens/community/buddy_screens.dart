@@ -1682,3 +1682,11 @@ class _ReportDialogState extends State<_ReportDialog> {
     );
   }
 }
+
+/// Full Gym Buddy hub (sessions, requests, chats) as its own screen — opened from the Home grid.
+class BuddyHubScreen extends StatelessWidget {
+  const BuddyHubScreen({super.key});
+
+  @override
+  Widget build(BuildContext context) => Scaffold(appBar: AppBar(title: const Text('Gym Buddy')), body: const BuddyTab());
+}

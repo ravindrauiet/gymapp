@@ -3,11 +3,14 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../../data/models.dart';
+import '../../data/studio_api.dart';
 import '../../state/session.dart';
 import '../../ui/ui.dart';
+import 'search_widgets.dart';
+import 'studio_group_screen.dart';
 import 'video_player_screen.dart';
 
-String _levelLabel(String level) => level.isEmpty ? level : level[0].toUpperCase() + level.substring(1);
+String _levelLabel(String level) => studioLevelLabel(level);
 
 Color _levelColor(String level) => switch (level) {
       'beginner' => AppColors.green,
@@ -16,9 +19,11 @@ Color _levelColor(String level) => switch (level) {
       _ => AppColors.blue,
     };
 
-typedef _StudioData = (List<VideoCategoryCount>, List<Video>);
+typedef _StudioData = (List<StudioGroup>, List<Video>);
 
-/// U5 — FitKey Studio: trainer videos by category. A bottom-nav tab inside HomeShell.
+const _recentStore = RecentSearches('fitkey_recent_studio_search');
+
+/// U5 — FitKey Studio: search + category groups (BRD §5, §7). A bottom-nav tab inside HomeShell.
 class StudioScreen extends StatefulWidget {
   const StudioScreen({super.key});
 
@@ -28,26 +33,102 @@ class StudioScreen extends StatefulWidget {
 
 class _StudioScreenState extends State<StudioScreen> {
   late Future<_StudioData> _future;
+  final _search = TextEditingController();
+  final _debounce = Debouncer();
+  List<StudioGroup> _groups = const [];
+  List<String> _recents = const [];
+
+  /// The query the current results are for ('' = not searching).
+  String _query = '';
+  Future<List<Video>>? _results;
 
   @override
   void initState() {
     super.initState();
     _future = _load();
+    _recentStore.load().then((r) {
+      if (mounted) setState(() => _recents = r);
+    });
+  }
+
+  @override
+  void dispose() {
+    _debounce.cancel();
+    _search.dispose();
+    super.dispose();
   }
 
   Future<_StudioData> _load() async {
     final api = context.read<Session>().api;
-    final r = await Future.wait([api.videoCategories(), api.videos(limit: 30)]);
-    return (r[0] as List<VideoCategoryCount>, r[1] as List<Video>);
+    final r = await Future.wait([api.studioGroups(), api.videos(limit: 30)]);
+    final groups = r[0] as List<StudioGroup>;
+    if (mounted) _groups = groups;
+    return (groups, r[1] as List<Video>);
   }
 
   Future<void> _reload() async {
+    if (_query.isNotEmpty) {
+      _runSearch(_query);
+      try {
+        await _results;
+      } catch (_) {/* shown by the FutureBuilder */}
+      return;
+    }
     final f = _load();
     setState(() => _future = f);
     try {
       await f;
     } catch (_) {/* shown by the FutureBuilder */}
   }
+
+  void _onChanged(String text) {
+    final q = text.trim();
+    if (q.isEmpty) {
+      _debounce.cancel();
+      setState(() {
+        _query = '';
+        _results = null;
+      });
+      return;
+    }
+    setState(() {}); // hide recent searches while typing
+    _debounce(() {
+      if (mounted && q != _query) _runSearch(q);
+    });
+  }
+
+  void _runSearch(String q) {
+    setState(() {
+      _query = q;
+      _results = context.read<Session>().api.studioVideos(q: q, limit: 40);
+    });
+  }
+
+  Future<void> _remember(String q) async {
+    final next = await _recentStore.add(q);
+    if (mounted) setState(() => _recents = next);
+  }
+
+  void _onSubmitted(String text) {
+    final q = text.trim();
+    if (q.isEmpty) return;
+    _debounce.cancel();
+    _runSearch(q);
+    _remember(q);
+  }
+
+  void _useRecent(String q) {
+    _search.text = q;
+    _search.selection = TextSelection.collapsed(offset: q.length);
+    _onSubmitted(q);
+  }
+
+  Future<void> _clearRecents() async {
+    await _recentStore.clear();
+    if (mounted) setState(() => _recents = const []);
+  }
+
+  void _openGroup(StudioGroup g) => push(context, StudioGroupScreen(group: g));
 
   @override
   Widget build(BuildContext context) {
@@ -58,25 +139,46 @@ class _StudioScreenState extends State<StudioScreen> {
         onRefresh: _reload,
         child: ListView(
           physics: const AlwaysScrollableScrollPhysics(),
+          keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
           padding: EdgeInsets.zero,
           children: [
-            const _Header(),
-            FutureBuilder<_StudioData>(
-              future: _future,
-              builder: (context, snap) {
-                if (snap.connectionState != ConnectionState.done) return const _StudioSkeleton();
-                if (snap.hasError) return ErrorView(error: snap.error!, onRetry: _reload);
-                final (categories, videos) = snap.data!;
-                if (categories.isEmpty && videos.isEmpty) {
-                  return const EmptyView(
-                    icon: Icons.video_library_rounded,
-                    title: 'No videos yet',
-                    message: 'FITKEY coaches add new classes every week. Pull down to refresh.',
-                  );
-                }
-                return _Feed(categories: categories, videos: videos);
-              },
+            _Header(
+              controller: _search,
+              onChanged: _onChanged,
+              onSubmitted: _onSubmitted,
+              recents: _search.text.trim().isEmpty ? _recents : const [],
+              onRecent: _useRecent,
+              onClearRecents: _clearRecents,
             ),
+            if (_query.isNotEmpty && _results != null)
+              _SearchResults(
+                query: _query,
+                future: _results!,
+                groups: _groups,
+                onRetry: () => _runSearch(_query),
+                onOpenVideo: (v) {
+                  _remember(_query);
+                  push(context, VideoPlayerScreen(video: v));
+                },
+                onOpenGroup: _openGroup,
+              )
+            else
+              FutureBuilder<_StudioData>(
+                future: _future,
+                builder: (context, snap) {
+                  if (snap.connectionState != ConnectionState.done) return const _StudioSkeleton();
+                  if (snap.hasError) return ErrorView(error: snap.error!, onRetry: _reload);
+                  final (groups, videos) = snap.data!;
+                  if (groups.isEmpty && videos.isEmpty) {
+                    return const EmptyView(
+                      icon: Icons.video_library_rounded,
+                      title: 'No videos yet',
+                      message: 'FITKEY coaches add new classes every week. Pull down to refresh.',
+                    );
+                  }
+                  return _Feed(groups: groups, videos: videos, onOpenGroup: _openGroup);
+                },
+              ),
           ],
         ),
       ),
@@ -85,49 +187,195 @@ class _StudioScreenState extends State<StudioScreen> {
 }
 
 class _Header extends StatelessWidget {
-  const _Header();
+  const _Header({
+    required this.controller,
+    required this.onChanged,
+    required this.onSubmitted,
+    required this.recents,
+    required this.onRecent,
+    required this.onClearRecents,
+  });
+
+  final TextEditingController controller;
+  final ValueChanged<String> onChanged;
+  final ValueChanged<String> onSubmitted;
+  final List<String> recents;
+  final ValueChanged<String> onRecent;
+  final VoidCallback onClearRecents;
 
   @override
   Widget build(BuildContext context) {
     return Container(
       color: AppColors.surface,
       padding: EdgeInsets.fromLTRB(16, MediaQuery.paddingOf(context).top + 14, 16, 16),
-      child: const Row(children: [
-        Expanded(
-          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Text('Studio', style: TextStyle(fontSize: 28, fontWeight: FontWeight.w800, letterSpacing: -0.9, height: 1.1)),
-            SizedBox(height: 4),
-            Text('Train with FITKEY coaches, anywhere',
-                style: TextStyle(fontSize: 13, color: AppColors.text2, fontWeight: FontWeight.w500)),
-          ]),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+        const Row(children: [
+          Expanded(
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Text('Studio', style: TextStyle(fontSize: 28, fontWeight: FontWeight.w800, letterSpacing: -0.9, height: 1.1)),
+              SizedBox(height: 4),
+              Text('Train with FITKEY coaches, anywhere',
+                  style: TextStyle(fontSize: 13, color: AppColors.text2, fontWeight: FontWeight.w500)),
+            ]),
+          ),
+          SizedBox(width: 12),
+          IconBubble(Icons.play_circle_fill_rounded, color: AppColors.primary, size: 46),
+        ]),
+        const SizedBox(height: 14),
+        RotatingSearchBar(
+          hints: const ['yoga classes', 'HIIT workouts', 'Zumba', 'abs & core', 'boxing basics', 'by trainer name'],
+          controller: controller,
+          onChanged: onChanged,
+          onSubmitted: onSubmitted,
         ),
-        SizedBox(width: 12),
-        IconBubble(Icons.play_circle_fill_rounded, color: AppColors.primary, size: 46),
+        RecentSearchRow(recents: recents, onTap: onRecent, onClear: onClearRecents),
       ]),
     );
   }
 }
 
+// ---------------------------------------------------------------------------
+// Search results
+// ---------------------------------------------------------------------------
+
+class _SearchResults extends StatelessWidget {
+  const _SearchResults({
+    required this.query,
+    required this.future,
+    required this.groups,
+    required this.onRetry,
+    required this.onOpenVideo,
+    required this.onOpenGroup,
+  });
+
+  final String query;
+  final Future<List<Video>> future;
+  final List<StudioGroup> groups;
+  final VoidCallback onRetry;
+  final ValueChanged<Video> onOpenVideo;
+  final ValueChanged<StudioGroup> onOpenGroup;
+
+  @override
+  Widget build(BuildContext context) {
+    return FutureBuilder<List<Video>>(
+      future: future,
+      builder: (context, snap) {
+        if (snap.connectionState != ConnectionState.done) {
+          return const SkeletonList(count: 4, itemHeight: 84);
+        }
+        if (snap.hasError) return ErrorView(error: snap.error!, onRetry: onRetry);
+        final videos = snap.data!;
+        if (videos.isEmpty) {
+          return EmptyView(
+            icon: Icons.search_off_rounded,
+            title: 'No results',
+            message: groups.isEmpty
+                ? 'Nothing matches "$query". Try a different word or a trainer\'s name.'
+                : 'Nothing matches "$query". Try one of these categories:',
+            action: groups.isEmpty
+                ? null
+                : SuggestionChips(
+                    items: [for (final g in groups) g.key],
+                    label: (k) => groups.firstWhere((g) => g.key == k).label,
+                    icon: (k) => studioGroupVisual(k).icon,
+                    onTap: (k) => onOpenGroup(groups.firstWhere((g) => g.key == k)),
+                  ),
+          );
+        }
+        return Padding(
+          padding: const EdgeInsets.fromLTRB(16, 4, 16, 32),
+          child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+            SectionTitle('${videos.length} result${videos.length == 1 ? '' : 's'}', subtitle: 'for "$query"'),
+            for (final v in videos)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 12),
+                child: _VideoRow(video: v, onTap: () => onOpenVideo(v)),
+              ),
+          ]),
+        );
+      },
+    );
+  }
+}
+
+/// Compact search-result row: thumbnail + title + trainer · group · duration.
+class _VideoRow extends StatelessWidget {
+  const _VideoRow({required this.video, required this.onTap});
+  final Video video;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final v = video;
+    final visual = studioVideoVisual(v);
+    final duration = formatDuration(v.durationSeconds);
+    return Tap(
+      onTap: onTap,
+      child: AppCard(
+        padding: const EdgeInsets.all(10),
+        child: Row(children: [
+          SizedBox(
+            width: 116,
+            child: AspectRatio(
+              aspectRatio: 16 / 10,
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(12),
+                child: Stack(fit: StackFit.expand, children: [
+                  NetImage(v.thumbnailUrl, fallback: visual.image),
+                  const PhotoScrim(strength: 0.4),
+                  const Center(child: Icon(Icons.play_circle_fill_rounded, color: Colors.white, size: 30)),
+                ]),
+              ),
+            ),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Text(v.title,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 14.5, height: 1.25)),
+              const SizedBox(height: 4),
+              Text(v.trainerName ?? 'FITKEY Coach',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(fontSize: 12.5, color: AppColors.text2, fontWeight: FontWeight.w600)),
+              const SizedBox(height: 6),
+              Wrap(spacing: 6, runSpacing: 4, children: [
+                Tag(v.groupLabel ?? visual.label, color: visual.color, dense: true),
+                Tag(_levelLabel(v.level), color: _levelColor(v.level), dense: true),
+                if (duration.isNotEmpty) Tag(duration, color: AppColors.text2, bg: AppColors.surfaceAlt, dense: true),
+              ]),
+            ]),
+          ),
+        ]),
+      ),
+    );
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Home feed
+// ---------------------------------------------------------------------------
+
 class _Feed extends StatelessWidget {
-  const _Feed({required this.categories, required this.videos});
-  final List<VideoCategoryCount> categories;
+  const _Feed({required this.groups, required this.videos, required this.onOpenGroup});
+  final List<StudioGroup> groups;
   final List<Video> videos;
+  final ValueChanged<StudioGroup> onOpenGroup;
 
   @override
   Widget build(BuildContext context) {
     final hero = videos.isEmpty ? null : videos.first;
-    final byCategory = <String, List<Video>>{};
-    for (final v in videos) {
-      byCategory.putIfAbsent(v.category, () => []).add(v);
-    }
+    final heroVisual = hero == null ? null : studioVideoVisual(hero);
 
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 16, 16, 32),
       child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
         if (hero != null)
           PhotoBanner(
-            image: videoVisual(hero.category).image,
-            eyebrow: 'New in studio · ${videoVisual(hero.category).label}',
+            image: heroVisual!.image,
+            eyebrow: 'New in studio · ${hero.groupLabel ?? heroVisual.label}',
             // PhotoBanner does not clamp lines, so keep very long titles to ~2 lines.
             title: hero.title.length > 52 ? '${hero.title.substring(0, 50).trimRight()}…' : hero.title,
             subtitle: [hero.trainerName, formatDuration(hero.durationSeconds), _levelLabel(hero.level)]
@@ -146,7 +394,7 @@ class _Feed extends StatelessWidget {
             subtitle: 'Yoga, strength, dance & more from FITKEY trainers.',
             height: 180,
           ),
-        if (categories.isNotEmpty) ...[
+        if (groups.isNotEmpty) ...[
           const SectionTitle('Browse by category', subtitle: 'Pick your vibe for today'),
           SizedBox(
             height: 150,
@@ -155,9 +403,9 @@ class _Feed extends StatelessWidget {
               child: ListView.separated(
                 scrollDirection: Axis.horizontal,
                 padding: const EdgeInsets.symmetric(horizontal: 16),
-                itemCount: categories.length,
+                itemCount: groups.length,
                 separatorBuilder: (_, _) => const SizedBox(width: 12),
-                itemBuilder: (_, i) => _CategoryCard(category: categories[i]),
+                itemBuilder: (_, i) => _GroupCard(group: groups[i], onTap: () => onOpenGroup(groups[i])),
               ),
             ),
           ),
@@ -166,15 +414,15 @@ class _Feed extends StatelessWidget {
           const SectionTitle('Latest classes', subtitle: 'Fresh from FITKEY coaches'),
           _VideoRail(videos: videos.take(8).toList()),
         ],
-        for (final c in categories)
-          if ((byCategory[c.id] ?? const []).isNotEmpty) ...[
+        for (final g in groups)
+          if (videos.where((v) => v.groups.contains(g.key)).toList() case final inGroup when inGroup.isNotEmpty) ...[
             SectionTitle(
-              c.label,
-              subtitle: '${c.count} video${c.count == 1 ? '' : 's'}',
+              g.label,
+              subtitle: '${g.count} video${g.count == 1 ? '' : 's'}',
               action: 'See all',
-              onAction: () => push(context, VideoListScreen(category: c)),
+              onAction: () => onOpenGroup(g),
             ),
-            _VideoRail(videos: byCategory[c.id]!),
+            _VideoRail(videos: inGroup),
           ],
       ]),
     );
@@ -203,15 +451,16 @@ class _VideoRail extends StatelessWidget {
   }
 }
 
-class _CategoryCard extends StatelessWidget {
-  const _CategoryCard({required this.category});
-  final VideoCategoryCount category;
+class _GroupCard extends StatelessWidget {
+  const _GroupCard({required this.group, required this.onTap});
+  final StudioGroup group;
+  final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) {
-    final v = videoVisual(category.id);
+    final v = group.visual;
     return Tap(
-      onTap: () => push(context, VideoListScreen(category: category)),
+      onTap: onTap,
       child: Container(
         width: 124,
         decoration: BoxDecoration(borderRadius: BorderRadius.circular(20), boxShadow: AppShadows.soft),
@@ -229,12 +478,12 @@ class _CategoryCard extends StatelessWidget {
                 child: Icon(v.icon, color: Colors.white, size: 18),
               ),
               const Spacer(),
-              Text(category.label,
+              Text(group.label,
                   maxLines: 2,
                   overflow: TextOverflow.ellipsis,
                   style: const TextStyle(color: Colors.white, fontSize: 15, fontWeight: FontWeight.w800, height: 1.15)),
               const SizedBox(height: 2),
-              Text('${category.count} video${category.count == 1 ? '' : 's'}',
+              Text('${group.count} video${group.count == 1 ? '' : 's'}',
                   style: TextStyle(color: Colors.white.withValues(alpha: 0.8), fontSize: 12, fontWeight: FontWeight.w600)),
             ]),
           ),
@@ -427,7 +676,7 @@ class VideoTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final v = video;
-    final visual = videoVisual(v.category);
+    final visual = studioVideoVisual(v);
     final duration = formatDuration(v.durationSeconds);
     return Tap(
       onTap: () => push(context, VideoPlayerScreen(video: v)),
@@ -490,7 +739,7 @@ class VideoTile extends StatelessWidget {
                 overflow: TextOverflow.ellipsis,
                 style: const TextStyle(fontSize: 12.5, color: AppColors.text2, fontWeight: FontWeight.w600)),
           ),
-          Text('  ·  ${visual.label}',
+          Text('  ·  ${v.groupLabel ?? visual.label}',
               maxLines: 1, style: TextStyle(fontSize: 12.5, color: visual.color, fontWeight: FontWeight.w700)),
         ]),
       ]),

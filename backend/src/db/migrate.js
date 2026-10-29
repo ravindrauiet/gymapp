@@ -1,12 +1,8 @@
-import { readFile } from 'node:fs/promises';
-import { fileURLToPath } from 'node:url';
 import { pool } from './index.js';
-
-const schemaPath = fileURLToPath(new URL('./schema.sql', import.meta.url));
+import { runMigrations } from './runMigrations.js';
 
 try {
-  const sql = await readFile(schemaPath, 'utf8');
-  await pool.query(sql);
+  await runMigrations();
   console.log('✔ Schema applied');
 } catch (err) {
   console.error('✖ Migration failed:', err.message);
