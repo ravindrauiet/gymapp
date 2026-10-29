@@ -185,6 +185,131 @@ router.patch('/admin/alerts/:id', requireAuth('admin'), async (req, res) => {
 });
 
 // ============================================================================
+// Partners — ratings dashboard for the venues I own (venues.owner_id) and my trainer profile (trainers.partner_id).
+// Members stay anonymous: the feed shows at most a masked first name, never names / phones / ids.
+// ============================================================================
+
+const partner = Router();
+partner.use(requireAuth('partner'));
+router.use('/partner', partner);
+
+const TREND_MONTHS = 6;
+
+/** The venue (by id) or trainer profile this partner owns; 404 when it isn't theirs. */
+async function ownedTarget(type, partnerId, venueId) {
+  const row =
+    type === 'venue'
+      ? await queryOne(
+          `SELECT id, name, area, city, categories, photos[1] AS photo_url, status FROM venues WHERE id = $1 AND owner_id = $2`,
+          [venueId, partnerId],
+        )
+      : await queryOne(`SELECT id, name, photo_url FROM trainers WHERE partner_id = $1`, [partnerId]);
+  if (!row) throw notFound(type === 'venue' ? 'Centre not found' : 'You have no trainer profile yet');
+  return row;
+}
+
+/** Average / count per month for the last TREND_MONTHS months (empty months included, avg null). */
+async function monthlyTrend(type, targetId) {
+  const { table, col } = T[type];
+  return query(
+    `WITH months AS (
+       SELECT generate_series(date_trunc('month', now() AT TIME ZONE $2) - make_interval(months => $3 - 1),
+                              date_trunc('month', now() AT TIME ZONE $2), interval '1 month')::date AS m
+     )
+     SELECT to_char(months.m, 'YYYY-MM') AS month, ROUND(AVG(r.stars)::numeric, 2) AS avg, COUNT(r.stars)::int AS count
+     FROM months
+     LEFT JOIN ${table} r ON r.${col} = $1 AND date_trunc('month', r.updated_at AT TIME ZONE $2)::date = months.m
+     GROUP BY months.m ORDER BY months.m`,
+    [targetId, config.tz, TREND_MONTHS],
+  );
+}
+
+async function partnerSummary(type, target) {
+  const { table, col } = T[type];
+  const s = await summary(type, target.id, null);
+  const recent = await queryOne(
+    `SELECT ROUND(AVG(stars)::numeric, 2) AS avg, COUNT(*)::int AS count,
+            ROUND(AVG(stars) FILTER (WHERE updated_at < now() - interval '30 days')::numeric, 2) AS before_avg
+     FROM ${table} WHERE ${col} = $1 AND updated_at >= now() - interval '60 days'`,
+    [target.id],
+  );
+  const last30 = await queryOne(
+    `SELECT ROUND(AVG(stars)::numeric, 2) AS avg, COUNT(*)::int AS count FROM ${table}
+     WHERE ${col} = $1 AND updated_at >= now() - interval '30 days'`,
+    [target.id],
+  );
+  const { myRating: _m, canRate: _c, ...rest } = s;
+  return {
+    ...rest,
+    newUntil: NEW_UNTIL,
+    target: { ...target, type },
+    trend: await monthlyTrend(type, target.id),
+    last30Days: { avg: last30.avg, count: last30.count, previousAvg: recent.beforeAvg },
+  };
+}
+
+const feedQuerySchema = z.object({
+  limit: z.coerce.number().int().min(1).max(50).default(20),
+  before: z.string().datetime({ offset: true }).optional(),
+});
+
+async function partnerFeed(type, targetId, q) {
+  const { table, col } = T[type];
+  const ratings = await query(
+    `SELECT r.stars, r.sub_ratings, r.created_at, r.updated_at, (r.updated_at > r.created_at + interval '1 minute') AS edited,
+            CASE WHEN NULLIF(trim(u.name), '') IS NULL THEN 'FitKey member'
+                 ELSE upper(left(trim(u.name), 1)) || '•••'
+            END AS member
+     FROM ${table} r JOIN users u ON u.id = r.user_id
+     WHERE r.${col} = $1 AND ($2::timestamptz IS NULL OR r.updated_at < $2)
+     ORDER BY r.updated_at DESC LIMIT $3`,
+    [targetId, q.before ?? null, q.limit],
+  );
+  return { ratings, nextBefore: ratings.length === q.limit ? ratings.at(-1).updatedAt : null };
+}
+
+/** GET /ratings/partner/targets — my venues + trainer profile with their headline rating. */
+partner.get('/targets', async (req, res) => {
+  const venues = await query(
+    `SELECT id, name, area, city, categories, photos[1] AS photo_url, status, rating_avg AS avg, rating_count AS count
+     FROM venues WHERE owner_id = $1 ORDER BY created_at`,
+    [req.user.id],
+  );
+  const trainer = await queryOne(
+    `SELECT id, name, photo_url, rating_avg AS avg, rating_count AS count FROM trainers WHERE partner_id = $1`,
+    [req.user.id],
+  );
+  const mark = (r) => ({ ...r, isNew: r.count < NEW_UNTIL });
+  res.json({ venues: venues.map(mark), trainer: trainer ? mark(trainer) : null, newUntil: NEW_UNTIL });
+});
+
+/** GET /ratings/partner/venues/:id — summary, star breakdown, sub-rating averages, monthly trend. */
+partner.get('/venues/:id', async (req, res) => {
+  const id = validate(uuidSchema, req.params.id);
+  res.json({ summary: await partnerSummary('venue', await ownedTarget('venue', req.user.id, id)) });
+});
+
+/** GET /ratings/partner/venues/:id/ratings?limit=&before= — recent ratings (anonymous), newest first. */
+partner.get('/venues/:id/ratings', async (req, res) => {
+  const id = validate(uuidSchema, req.params.id);
+  const q = validate(feedQuerySchema, req.query);
+  const target = await ownedTarget('venue', req.user.id, id);
+  res.json(await partnerFeed('venue', target.id, q));
+});
+
+/** GET /ratings/partner/trainer — same for my trainer profile. */
+partner.get('/trainer', async (req, res) => {
+  res.json({ summary: await partnerSummary('trainer', await ownedTarget('trainer', req.user.id)) });
+});
+
+/** GET /ratings/partner/trainer/ratings?limit=&before= */
+partner.get('/trainer/ratings', async (req, res) => {
+  const q = validate(feedQuerySchema, req.query);
+  const target = await ownedTarget('trainer', req.user.id);
+  res.json(await partnerFeed('trainer', target.id, q));
+});
+
+// ============================================================================
 // Members
 // ============================================================================
 
@@ -329,6 +454,29 @@ router.post('/', requireAuth('user'), async (req, res) => {
     }
     return { rating, agg, alertId };
   });
+
+  // Tell the centre owner / trainer (partner app). Anonymous: stars only, no member details.
+  const owner = await queryOne(
+    b.targetType === 'venue'
+      ? `SELECT owner_id AS partner_id, name FROM venues WHERE id = $1`
+      : `SELECT partner_id, name FROM trainers WHERE id = $1`,
+    [b.targetId],
+  );
+  if (owner?.partnerId) {
+    const { avg, count } = result.agg;
+    await notify(owner.partnerId, {
+      type: 'rating_received',
+      title: `${result.rating.created ? 'New' : 'Updated'} ${b.stars}★ rating for ${b.targetType === 'venue' ? owner.name : 'your training'}`,
+      body:
+        count < NEW_UNTIL
+          ? `${count} of ${NEW_UNTIL} ratings — your average shows to members after ${NEW_UNTIL}.`
+          : `Your average is now ${Number(avg).toFixed(1)}★ from ${count} ratings.`,
+      data:
+        b.targetType === 'venue'
+          ? { venueId: b.targetId, stars: b.stars }
+          : { trainer: true, trainerId: b.targetId, stars: b.stars },
+    });
+  }
 
   res.status(result.rating.created ? 201 : 200).json({
     rating: { stars: result.rating.stars, subRatings: result.rating.subRatings, updatedAt: result.rating.updatedAt },

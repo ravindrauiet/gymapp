@@ -11,6 +11,7 @@ import '../circles/circle_detail_screen.dart';
 import '../community/contest_detail_screen.dart';
 import '../explore/venue_detail_screen.dart';
 import '../feed/feed_profile_screen.dart';
+import '../store/order_tracking_screen.dart';
 import '../feed/post_detail_screen.dart';
 import '../trainers/trainer_detail_screen.dart';
 import '../wallet/refer_earn_screen.dart';
@@ -24,6 +25,7 @@ Widget? notificationTarget(AppNotification n) {
   if (s('circleId') != null) return CircleDetailScreen(circleId: s('circleId')!);
   if (s('exerciseId') != null) return ArenaExerciseScreen(exerciseId: s('exerciseId')!);
   if (n.type.startsWith('coins') || n.type.startsWith('referral')) return const ReferEarnScreen();
+  if (s('orderId') != null) return OrderTrackingScreen(orderId: s('orderId')!);
   if (s('venueId') != null) return VenueDetailScreen(venueId: s('venueId')!);
   if (s('trainerId') != null) return TrainerDetailScreen(trainerId: s('trainerId')!);
   if (s('userId') != null) return FeedProfileScreen(userId: s('userId')!);
@@ -37,6 +39,7 @@ Widget? notificationTarget(AppNotification n) {
   if (type.startsWith('coins') || type.startsWith('referral')) return (Icons.monetization_on_rounded, AppColors.amber);
   if (type.startsWith('event') || type.startsWith('contest')) return (Icons.emoji_events_rounded, AppColors.primary);
   if (type.startsWith('circle')) return (Icons.groups_rounded, AppColors.teal);
+  if (type.startsWith('store')) return (Icons.local_shipping_rounded, AppColors.green);
   if (type.startsWith('rating')) return (Icons.star_rounded, AppColors.amber);
   if (type.startsWith('arena')) return (Icons.sports_gymnastics_rounded, AppColors.green);
   return (Icons.notifications_rounded, AppColors.text2);

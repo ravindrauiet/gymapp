@@ -1,4 +1,4 @@
-import 'package:fitkey_core/fitkey_core.dart';
+import 'package:fitkey_core/fitkey_core.dart' show ApiClient, ApiException;
 import 'package:flutter/foundation.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
@@ -28,8 +28,10 @@ class PartnerSession extends ChangeNotifier {
     _client.token = token;
     try {
       await refresh();
-    } on ApiException catch (e) {
-      if (e.statusCode == 401) await signOut();
+    } catch (e) {
+      // 401 → token is dead, forget it. Anything else (offline, server down): show login but keep the token
+      // stored so the next launch can restore the session.
+      if (e is ApiException && e.statusCode == 401) await signOut();
       if (status == SessionStatus.loading) _set(SessionStatus.signedOut);
     }
   }

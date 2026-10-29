@@ -1,11 +1,22 @@
+import 'package:fitkey_core/fitkey_core.dart' show formatPaise, formatDayDate;
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:image_picker/image_picker.dart';
 import 'package:provider/provider.dart';
+import 'package:url_launcher/url_launcher.dart';
 
-import 'package:fitkey_core/fitkey_core.dart';
 import '../../data/models.dart';
+import '../../data/partner_api.dart';
+import '../../data/vendor_trainer_api.dart';
 import '../../state/partner_session.dart';
+import '../../ui/ui.dart';
+import '../notifications/notifications_screen.dart';
+import '../ratings/partner_ratings_screen.dart';
 
-/// 6.2 Merchant Scope (FITKEY Partner App - Trainer Module)
+part 'trainer_bookings.dart';
+part 'trainer_profile_editor.dart';
+
+/// FITKEY Partner — trainer module: profile & categories, bookings and earnings.
 class PartnerTrainerScreen extends StatefulWidget {
   const PartnerTrainerScreen({super.key});
 
@@ -14,388 +25,542 @@ class PartnerTrainerScreen extends StatefulWidget {
 }
 
 class _PartnerTrainerScreenState extends State<PartnerTrainerScreen> with SingleTickerProviderStateMixin {
-  late final TabController _tabController;
-  late Future<({PartnerTrainerProfile? profile, List<TrainerBookingItem> bookings})> _future;
+  late final TabController _tabs = TabController(length: 3, vsync: this);
+  late Future<TrainerProfileDetails?> _profile;
+  late Future<List<TrainerBookingItem>> _bookings;
+
+  PartnerApi get _api => context.read<PartnerSession>().api;
 
   @override
   void initState() {
     super.initState();
-    _tabController = TabController(length: 2, vsync: this);
-    _load();
+    _profile = _api.trainerProfileDetails();
+    _bookings = _api.trainerBookings();
   }
-
-  void _load() {
-    final api = context.read<PartnerSession>().api;
-    _future = Future.wait([
-      api.trainerProfile(),
-      api.trainerBookings(),
-    ]).then((results) => (
-          profile: results[0] as PartnerTrainerProfile?,
-          bookings: results[1] as List<TrainerBookingItem>,
-        ));
-  }
-
-  void _reload() => setState(_load);
 
   @override
   void dispose() {
-    _tabController.dispose();
+    _tabs.dispose();
     super.dispose();
+  }
+
+  Future<void> _reloadAll() async {
+    setState(() {
+      _profile = _api.trainerProfileDetails();
+      _bookings = _api.trainerBookings();
+    });
+    await Future.wait([_profile.then((_) {}, onError: (_) {}), _bookings.then((_) {}, onError: (_) {})]);
+  }
+
+  Future<void> _reloadBookings() async {
+    setState(() => _bookings = _api.trainerBookings());
+    await _bookings.then((_) {}, onError: (_) {});
+  }
+
+  void _profileSaved(TrainerProfileDetails saved) {
+    setState(() => _profile = Future.value(saved));
+    _tabs.animateTo(0);
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      backgroundColor: AppColors.bg,
       appBar: AppBar(
-        title: const Text('FitPro Trainer Management'),
+        title: const Text('Trainer studio'),
+        actions: const [PartnerNotificationBell(), SizedBox(width: 6)],
         bottom: TabBar(
-          controller: _tabController,
-          tabs: const [
-            Tab(icon: Icon(Icons.tune), text: 'Profile & Slots Control'),
-            Tab(icon: Icon(Icons.event_available), text: 'Booked Sessions'),
-          ],
+          controller: _tabs,
+          labelStyle: const TextStyle(fontWeight: FontWeight.w800, fontSize: 14),
+          unselectedLabelStyle: const TextStyle(fontWeight: FontWeight.w600, fontSize: 14),
+          labelColor: AppColors.text,
+          unselectedLabelColor: AppColors.text3,
+          indicatorColor: AppColors.primary,
+          indicatorSize: TabBarIndicatorSize.label,
+          dividerColor: AppColors.line,
+          tabs: const [Tab(text: 'Overview'), Tab(text: 'Bookings'), Tab(text: 'Profile')],
         ),
       ),
-      body: FutureBuilder<({PartnerTrainerProfile? profile, List<TrainerBookingItem> bookings})>(
-        future: _future,
-        builder: (context, snap) {
-          if (snap.connectionState != ConnectionState.done) {
-            return const Center(child: CircularProgressIndicator());
-          }
-          if (snap.hasError) {
-            return ErrorState(message: errorMessage(snap.error!), onRetry: _reload);
-          }
-
-          final data = snap.data!;
-          return TabBarView(
-            controller: _tabController,
-            children: [
-              _TrainerSettingsTab(
-                initialProfile: data.profile,
-                onSaved: _reload,
-              ),
-              _TrainerBookingsTab(bookings: data.bookings, onReload: _reload),
-            ],
-          );
-        },
-      ),
-    );
-  }
-}
-
-class _TrainerSettingsTab extends StatefulWidget {
-  const _TrainerSettingsTab({required this.initialProfile, required this.onSaved});
-
-  final PartnerTrainerProfile? initialProfile;
-  final VoidCallback onSaved;
-
-  @override
-  State<_TrainerSettingsTab> createState() => _TrainerSettingsTabState();
-}
-
-class _TrainerSettingsTabState extends State<_TrainerSettingsTab> {
-  final _formKey = GlobalKey<FormState>();
-  late final TextEditingController _name;
-  late final TextEditingController _bio;
-  late final TextEditingController _hourlyRate;
-  late final TextEditingController _bufferMinutes;
-  late final TextEditingController _certifications;
-
-  final Set<String> _specializations = {'Gym Training', 'Weightlifting'};
-  final Set<String> _modes = {'online', 'home', 'gym'};
-  bool _saving = false;
-
-  final List<String> _availableSpecs = const [
-    'Gym Training',
-    'Yoga',
-    'Dance/Zumba',
-    'MMA/Boxing',
-    'Weightlifting',
-    'Swimming',
-    'Judo/Karate',
-    'Personal Rehab',
-  ];
-
-  @override
-  void initState() {
-    super.initState();
-    final p = widget.initialProfile;
-    _name = TextEditingController(text: p?.name ?? 'Coach Vikram');
-    _bio = TextEditingController(
-      text: p?.bio ??
-          'Certified strength and conditioning coach with 8+ years experience guiding clients toward peak hypertrophy and safe compound lifting.',
-    );
-    _hourlyRate = TextEditingController(text: p != null ? (p.hourlyRatePaise / 100).round().toString() : '1200');
-    _bufferMinutes = TextEditingController(text: p?.bufferMinutes.toString() ?? '30');
-    _certifications = TextEditingController(
-      text: p != null ? p.certifications.join(', ') : 'ACSM Certified Personal Trainer, CSCS Specialist',
-    );
-
-    if (p != null && p.specializations.isNotEmpty) {
-      _specializations.clear();
-      _specializations.addAll(p.specializations);
-    }
-    if (p != null && p.trainingModes.isNotEmpty) {
-      _modes.clear();
-      _modes.addAll(p.trainingModes);
-    }
-  }
-
-  @override
-  void dispose() {
-    _name.dispose();
-    _bio.dispose();
-    _hourlyRate.dispose();
-    _bufferMinutes.dispose();
-    _certifications.dispose();
-    super.dispose();
-  }
-
-  Future<void> _save() async {
-    if (!_formKey.currentState!.validate()) return;
-    if (_specializations.isEmpty) {
-      showSnack(context, 'Select at least one specialization', error: true);
-      return;
-    }
-    if (_modes.isEmpty) {
-      showSnack(context, 'Select at least one training mode', error: true);
-      return;
-    }
-
-    setState(() => _saving = true);
-    try {
-      final certsList = _certifications.text
-          .split(',')
-          .map((c) => c.trim())
-          .where((c) => c.isNotEmpty)
-          .toList();
-
-      final ratePaise = (int.tryParse(_hourlyRate.text) ?? 1200) * 100;
-      final buffer = int.tryParse(_bufferMinutes.text) ?? 30;
-
-      await context.read<PartnerSession>().api.saveTrainerProfile({
-        'name': _name.text.trim(),
-        'bio': _bio.text.trim(),
-        'certifications': certsList,
-        'specializations': _specializations.toList(),
-        'trainingModes': _modes.toList(),
-        'hourlyRatePaise': ratePaise,
-        'bufferMinutes': buffer,
-        'workingHours': {'start': '06:00', 'end': '21:00'},
-      });
-
-      widget.onSaved();
-      if (mounted) showSnack(context, 'Trainer profile, verification tags & pricing updated!');
-    } catch (e) {
-      if (mounted) showSnack(context, errorMessage(e), error: true);
-    } finally {
-      if (mounted) setState(() => _saving = false);
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Form(
-      key: _formKey,
-      child: ListView(
-        padding: const EdgeInsets.all(16),
+      body: TabBarView(
+        controller: _tabs,
         children: [
-          // Verification status banner
-          Container(
-            padding: const EdgeInsets.all(14),
-            decoration: BoxDecoration(
-              color: FkColors.lime.withValues(alpha: 0.12),
-              borderRadius: BorderRadius.circular(12),
-              border: Border.all(color: FkColors.lime.withValues(alpha: 0.4)),
-            ),
-            child: const Row(children: [
-              Icon(Icons.verified, color: FkColors.lime, size: 22),
-              SizedBox(width: 10),
-              Expanded(
-                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                  Text('Trainer Verification: VERIFIED',
-                      style: TextStyle(fontWeight: FontWeight.w800, color: FkColors.lime, fontSize: 13)),
-                  SizedBox(height: 2),
-                  Text('Background check complete. Profile active for on-demand bookings.',
-                      style: TextStyle(color: FkColors.textSecondary, fontSize: 11)),
-                ]),
-              ),
-            ]),
+          _OverviewTab(
+            profile: _profile,
+            bookings: _bookings,
+            onReload: _reloadAll,
+            onEditProfile: () => _tabs.animateTo(2),
+            onOpenBookings: () => _tabs.animateTo(1),
           ),
-          const SizedBox(height: 20),
-
-          TextFormField(
-            controller: _name,
-            decoration: const InputDecoration(labelText: 'Trainer Full Name'),
-            validator: (v) => (v ?? '').trim().isEmpty ? 'Enter trainer name' : null,
-          ),
-          const SizedBox(height: 12),
-          TextFormField(
-            controller: _bio,
-            maxLines: 3,
-            decoration: const InputDecoration(labelText: 'Professional Bio & Experience'),
-            validator: (v) => (v ?? '').trim().length < 10 ? 'Enter detailed bio' : null,
-          ),
-          const SizedBox(height: 12),
-          TextFormField(
-            controller: _certifications,
-            decoration: const InputDecoration(
-              labelText: 'Certifications (comma-separated)',
-              hintText: 'e.g. ACSM, CSCS, ACE, Yoga Alliance RYT 500',
-            ),
-          ),
-          const SizedBox(height: 20),
-
-          // Specialization Tagging
-          const Text('Specialization Tagging (Category Filter)', style: TextStyle(fontWeight: FontWeight.w700)),
-          const SizedBox(height: 8),
-          Wrap(
-            spacing: 8,
-            runSpacing: 6,
-            children: _availableSpecs.map((s) {
-              final selected = _specializations.contains(s);
-              return FilterChip(
-                label: Text(s),
-                selected: selected,
-                selectedColor: FkColors.lime.withValues(alpha: 0.2),
-                checkmarkColor: FkColors.lime,
-                labelStyle: TextStyle(
-                  color: selected ? FkColors.lime : Colors.white70,
-                  fontWeight: selected ? FontWeight.bold : FontWeight.normal,
-                  fontSize: 12,
-                ),
-                onSelected: (val) {
-                  setState(() {
-                    if (val) {
-                      _specializations.add(s);
-                    } else {
-                      _specializations.remove(s);
-                    }
-                  });
-                },
-              );
-            }).toList(),
-          ),
-          const SizedBox(height: 20),
-
-          // Training Modes
-          const Text('Supported Training Modes', style: TextStyle(fontWeight: FontWeight.w700)),
-          const SizedBox(height: 8),
-          Wrap(
-            spacing: 8,
-            children: [
-              FilterChip(
-                label: const Text('Online / Virtual'),
-                selected: _modes.contains('online'),
-                onSelected: (val) => setState(() => val ? _modes.add('online') : _modes.remove('online')),
-              ),
-              FilterChip(
-                label: const Text('At Client Place / Home'),
-                selected: _modes.contains('home'),
-                onSelected: (val) => setState(() => val ? _modes.add('home') : _modes.remove('home')),
-              ),
-              FilterChip(
-                label: const Text('At Partner Gym'),
-                selected: _modes.contains('gym'),
-                onSelected: (val) => setState(() => val ? _modes.add('gym') : _modes.remove('gym')),
-              ),
-            ],
-          ),
-          const SizedBox(height: 20),
-
-          // Pricing & Buffer Control
-          const SectionHeader('Slot & Pricing Control'),
-          Row(children: [
-            Expanded(
-              child: TextFormField(
-                controller: _hourlyRate,
-                keyboardType: TextInputType.number,
-                decoration: const InputDecoration(labelText: 'Hourly Rate (₹)', prefixText: '₹'),
-                validator: (v) => (v ?? '').trim().isEmpty ? 'Enter rate' : null,
-              ),
-            ),
-            const SizedBox(width: 14),
-            Expanded(
-              child: TextFormField(
-                controller: _bufferMinutes,
-                keyboardType: TextInputType.number,
-                decoration: const InputDecoration(
-                  labelText: 'Home Visit Buffer',
-                  suffixText: 'mins',
-                ),
-                validator: (v) => (v ?? '').trim().isEmpty ? 'Enter buffer' : null,
-              ),
-            ),
-          ]),
-          const SizedBox(height: 12),
-          const Text(
-            'Buffer zone allows travel and prep time between consecutive offline appointments.',
-            style: TextStyle(color: FkColors.textSecondary, fontSize: 12),
-          ),
-          const SizedBox(height: 28),
-
-          FilledButton(
-            onPressed: _saving ? null : _save,
-            child: _saving
-                ? const SizedBox(width: 22, height: 22, child: CircularProgressIndicator(strokeWidth: 2.5))
-                : const Text('Save Trainer Settings'),
-          ),
+          _BookingsTab(future: _bookings, onReload: _reloadBookings),
+          _ProfileTab(profile: _profile, onReload: _reloadAll, onSaved: _profileSaved),
         ],
       ),
     );
   }
 }
 
-class _TrainerBookingsTab extends StatelessWidget {
-  const _TrainerBookingsTab({required this.bookings, required this.onReload});
+// ---------------------------------------------------------------------------
+// Helpers shared by the trainer tabs
+// ---------------------------------------------------------------------------
 
-  final List<TrainerBookingItem> bookings;
-  final VoidCallback onReload;
+const _modeInfo = <String, (String, IconData, Color, Color)>{
+  'online': ('Online', Icons.videocam_rounded, AppColors.blue, AppColors.blueSoft),
+  'home': ('At home', Icons.home_rounded, AppColors.purple, AppColors.purpleSoft),
+  'gym': ('At gym', Icons.fitness_center_rounded, AppColors.primary, AppColors.primarySoft),
+};
+
+(String, IconData, Color, Color) _mode(String m) => _modeInfo[m] ?? (m, Icons.event_rounded, AppColors.text2, AppColors.surfaceAlt);
+
+/// Parses "06:30 AM" / "18:00" into minutes since midnight for sorting.
+int _slotMinutes(String slot) {
+  final m = RegExp(r'(\d{1,2}):(\d{2})\s*([AaPp][Mm])?').firstMatch(slot);
+  if (m == null) return 0;
+  var h = int.parse(m.group(1)!);
+  final min = int.parse(m.group(2)!);
+  final ap = m.group(3)?.toUpperCase();
+  if (ap == 'PM' && h < 12) h += 12;
+  if (ap == 'AM' && h == 12) h = 0;
+  return h * 60 + min;
+}
+
+DateTime? _sessionDay(TrainerBookingItem b) {
+  final d = DateTime.tryParse(b.sessionDate);
+  return d == null ? null : DateTime(d.year, d.month, d.day);
+}
+
+/// Upcoming = not cancelled / completed, and today or later.
+bool _isUpcoming(TrainerBookingItem b) {
+  final d = _sessionDay(b);
+  return b.status == 'confirmed' && d != null && !d.isBefore(DateUtils.dateOnly(DateTime.now()));
+}
+
+class _RefreshableFill extends StatelessWidget {
+  const _RefreshableFill({required this.onRefresh, required this.child});
+  final Future<void> Function() onRefresh;
+  final Widget child;
 
   @override
   Widget build(BuildContext context) {
-    if (bookings.isEmpty) {
-      return const EmptyState(
-        icon: Icons.event_busy,
-        title: 'No member sessions booked',
-        message: 'Bookings scheduled by FITKEY members will appear here with contact details.',
-      );
-    }
-
     return RefreshIndicator(
-      onRefresh: () async => onReload(),
-      child: ListView.separated(
-        padding: const EdgeInsets.all(16),
-        itemCount: bookings.length,
-        separatorBuilder: (_, _) => const SizedBox(height: 12),
-        itemBuilder: (context, idx) {
-          final b = bookings[idx];
-          return Card(
-            child: ListTile(
-              leading: const CircleAvatar(
-                backgroundColor: FkColors.lime,
-                foregroundColor: Colors.black,
-                child: Icon(Icons.fitness_center),
-              ),
-              title: Text(b.memberName, style: const TextStyle(fontWeight: FontWeight.w800)),
-              subtitle: Text(
-                'Phone: ${b.memberPhone}\nDate: ${b.sessionDate} at ${b.slotTime}\nMode: ${b.mode.toUpperCase()} · Fee: ${formatInr(b.amountPaise)}',
-              ),
-              isThreeLine: true,
-              trailing: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                decoration: BoxDecoration(
-                  color: FkColors.lime.withValues(alpha: 0.15),
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                child: Text(
-                  b.status.toUpperCase(),
-                  style: const TextStyle(color: FkColors.lime, fontSize: 11, fontWeight: FontWeight.bold),
-                ),
-              ),
+      onRefresh: onRefresh,
+      child: LayoutBuilder(
+        builder: (context, c) => SingleChildScrollView(
+          physics: const AlwaysScrollableScrollPhysics(),
+          child: ConstrainedBox(constraints: BoxConstraints(minHeight: c.maxHeight), child: child),
+        ),
+      ),
+    );
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Overview
+// ---------------------------------------------------------------------------
+
+class _OverviewTab extends StatelessWidget {
+  const _OverviewTab({
+    required this.profile,
+    required this.bookings,
+    required this.onReload,
+    required this.onEditProfile,
+    required this.onOpenBookings,
+  });
+
+  final Future<TrainerProfileDetails?> profile;
+  final Future<List<TrainerBookingItem>> bookings;
+  final Future<void> Function() onReload;
+  final VoidCallback onEditProfile;
+  final VoidCallback onOpenBookings;
+
+  @override
+  Widget build(BuildContext context) {
+    return FutureBuilder<TrainerProfileDetails?>(
+      future: profile,
+      builder: (context, pSnap) => FutureBuilder<List<TrainerBookingItem>>(
+        future: bookings,
+        builder: (context, bSnap) {
+          if (pSnap.connectionState != ConnectionState.done || bSnap.connectionState != ConnectionState.done) {
+            return const _OverviewSkeleton();
+          }
+          final error = pSnap.error ?? bSnap.error;
+          if (error != null) return _RefreshableFill(onRefresh: onReload, child: ErrorView(error: error, onRetry: onReload));
+          final p = pSnap.data;
+          if (p == null) {
+            return _RefreshableFill(onRefresh: onReload, child: _Onboarding(onStart: onEditProfile));
+          }
+          return RefreshIndicator(
+            onRefresh: onReload,
+            child: _OverviewBody(
+              details: p,
+              bookings: bSnap.data!,
+              onEditProfile: onEditProfile,
+              onOpenBookings: onOpenBookings,
             ),
           );
         },
+      ),
+    );
+  }
+}
+
+class _Onboarding extends StatelessWidget {
+  const _Onboarding({required this.onStart});
+  final VoidCallback onStart;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.all(16),
+      child: Column(children: [
+        PhotoBanner(
+          image: AppImages.strength,
+          eyebrow: 'FitPro on FITKEY',
+          title: 'Get booked by members near you',
+          subtitle: 'Online, at their home or at a partner gym — you set the rate.',
+          cta: 'Create trainer profile',
+          height: 200,
+          onTap: onStart,
+        ),
+        const SizedBox(height: 18),
+        for (final s in const [
+          (Icons.category_rounded, 'Pick your categories', 'Choose up to 12 trainer types so members find you in the right category.'),
+          (Icons.payments_rounded, 'Set your rate & modes', 'Hourly rate, home-visit buffer and the modes you train in.'),
+          (Icons.event_available_rounded, 'Get bookings', 'Members book a date and slot; sessions appear in Bookings.'),
+        ])
+          Padding(
+            padding: const EdgeInsets.only(bottom: 10),
+            child: AppCard(
+              padding: const EdgeInsets.all(14),
+              child: Row(children: [
+                IconBubble(s.$1, size: 40),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                    Text(s.$2, style: const TextStyle(fontWeight: FontWeight.w800)),
+                    const SizedBox(height: 2),
+                    Text(s.$3, style: const TextStyle(color: AppColors.text2, fontSize: 12.5)),
+                  ]),
+                ),
+              ]),
+            ),
+          ),
+        const SizedBox(height: 8),
+        AppButton(label: 'Create trainer profile', icon: Icons.arrow_forward_rounded, onPressed: onStart),
+      ]),
+    );
+  }
+}
+
+class _OverviewBody extends StatelessWidget {
+  const _OverviewBody({required this.details, required this.bookings, required this.onEditProfile, required this.onOpenBookings});
+  final TrainerProfileDetails details;
+  final List<TrainerBookingItem> bookings;
+  final VoidCallback onEditProfile;
+  final VoidCallback onOpenBookings;
+
+  @override
+  Widget build(BuildContext context) {
+    final p = details.profile;
+    final now = DateTime.now();
+    final valid = bookings.where((b) => b.status != 'cancelled').toList();
+    final thisMonth = valid.where((b) {
+      final d = _sessionDay(b);
+      return d != null && d.year == now.year && d.month == now.month;
+    }).toList();
+    final upcoming = bookings.where(_isUpcoming).toList()
+      ..sort((a, b) {
+        final c = a.sessionDate.compareTo(b.sessionDate);
+        return c != 0 ? c : _slotMinutes(a.slotTime).compareTo(_slotMinutes(b.slotTime));
+      });
+    final upcomingValue = upcoming.fold<int>(0, (s, b) => s + b.amountPaise);
+    final lifetime = valid.fold<int>(0, (s, b) => s + b.amountPaise);
+    final byMode = <String, int>{};
+    for (final b in valid) {
+      byMode[b.mode] = (byMode[b.mode] ?? 0) + 1;
+    }
+
+    return ListView(
+      physics: const AlwaysScrollableScrollPhysics(),
+      padding: const EdgeInsets.fromLTRB(16, 16, 16, 28),
+      children: [
+        // Profile header
+        AppCard(
+          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Row(children: [
+              PersonAvatar(name: p.name, photoUrl: p.photoUrl, size: 64),
+              const SizedBox(width: 14),
+              Expanded(
+                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  Row(children: [
+                    Flexible(
+                      child: Text(p.name,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(fontSize: 19, fontWeight: FontWeight.w800, letterSpacing: -0.3)),
+                    ),
+                    if (p.verificationStatus == 'verified') ...[
+                      const SizedBox(width: 6),
+                      const Icon(Icons.verified_rounded, color: AppColors.blue, size: 19),
+                    ],
+                  ]),
+                  const SizedBox(height: 3),
+                  Text('${formatPaise(p.hourlyRatePaise)}/hr · ${p.trainingModes.map((m) => _mode(m).$1).join(' · ')}',
+                      maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(color: AppColors.text2, fontSize: 12.5)),
+                ]),
+              ),
+              IconButton(tooltip: 'Edit profile', onPressed: onEditProfile, icon: const Icon(Icons.edit_rounded, color: AppColors.text2)),
+            ]),
+            if (details.trainerTypeLabels.isNotEmpty) ...[
+              const SizedBox(height: 12),
+              Wrap(spacing: 6, runSpacing: 6, children: [
+                for (final l in details.trainerTypeLabels) Tag(l, color: AppColors.ink, bg: AppColors.surfaceAlt, dense: true),
+              ]),
+            ],
+          ]),
+        ),
+        const SizedBox(height: 12),
+        _VerificationBanner(status: p.verificationStatus),
+        const SizedBox(height: 12),
+        _RatingCard(details: details),
+        const SectionTitle('Earnings', subtitle: 'Booking value of sessions (cancelled excluded)', padding: EdgeInsets.fromLTRB(0, 24, 0, 12)),
+        Row(children: [
+          Expanded(
+            child: MetricTile(
+              label: 'This month · ${thisMonth.length} sessions',
+              value: formatPaise(thisMonth.fold(0, (s, b) => s + b.amountPaise)),
+              icon: Icons.calendar_month_rounded,
+              color: AppColors.green,
+            ),
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: MetricTile(
+              label: 'Upcoming · ${upcoming.length} sessions',
+              value: formatPaise(upcomingValue),
+              icon: Icons.event_available_rounded,
+              color: AppColors.blue,
+            ),
+          ),
+        ]),
+        const SizedBox(height: 10),
+        Row(children: [
+          Expanded(
+            child: MetricTile(label: 'Lifetime booking value', value: formatPaise(lifetime), icon: Icons.savings_rounded, color: AppColors.purple),
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: MetricTile(label: 'Total sessions', value: '${valid.length}', icon: Icons.fitness_center_rounded, color: AppColors.primary),
+          ),
+        ]),
+        if (byMode.isNotEmpty) ...[
+          const SizedBox(height: 10),
+          AppCard(
+            padding: const EdgeInsets.all(14),
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              const Text('Sessions by mode', style: TextStyle(fontWeight: FontWeight.w800)),
+              const SizedBox(height: 10),
+              ClipRRect(
+                borderRadius: BorderRadius.circular(4),
+                child: SizedBox(
+                  height: 8,
+                  child: Row(children: [
+                    for (final e in byMode.entries) Expanded(flex: e.value, child: Container(color: _mode(e.key).$3)),
+                  ]),
+                ),
+              ),
+              const SizedBox(height: 10),
+              Wrap(spacing: 14, runSpacing: 6, children: [
+                for (final e in byMode.entries)
+                  Row(mainAxisSize: MainAxisSize.min, children: [
+                    Icon(_mode(e.key).$2, size: 15, color: _mode(e.key).$3),
+                    const SizedBox(width: 4),
+                    Text('${_mode(e.key).$1} · ${e.value}', style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600)),
+                  ]),
+              ]),
+            ]),
+          ),
+        ],
+        SectionTitle('Next up', action: bookings.isEmpty ? null : 'All bookings', onAction: onOpenBookings,
+            padding: const EdgeInsets.fromLTRB(0, 24, 0, 12)),
+        if (upcoming.isEmpty)
+          AppCard(
+            child: Row(children: [
+              const IconBubble(Icons.event_busy_rounded, color: AppColors.text2, bg: AppColors.surfaceAlt, size: 40),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Text(
+                  bookings.isEmpty
+                      ? 'No bookings yet. Members find you under your trainer categories in the FITKEY app.'
+                      : 'No upcoming sessions right now.',
+                  style: const TextStyle(color: AppColors.text2, fontSize: 13),
+                ),
+              ),
+            ]),
+          )
+        else
+          for (final b in upcoming.take(3))
+            Padding(padding: const EdgeInsets.only(bottom: 10), child: _BookingCard(booking: b)),
+        const SizedBox(height: 14),
+        const _FitFeedCard(),
+      ],
+    );
+  }
+}
+
+class _VerificationBanner extends StatelessWidget {
+  const _VerificationBanner({required this.status});
+  final String status;
+
+  @override
+  Widget build(BuildContext context) {
+    final look = switch (status) {
+      'verified' => (
+          c: AppColors.green,
+          soft: AppColors.greenSoft,
+          icon: Icons.verified_user_rounded,
+          title: 'Verified trainer',
+          body: 'Your profile is live and members can book you.'
+        ),
+      'rejected' => (
+          c: AppColors.red,
+          soft: AppColors.redSoft,
+          icon: Icons.gpp_bad_rounded,
+          title: 'Verification rejected',
+          body: 'Your profile is hidden from members. Update your certifications and contact FITKEY partner support for a re-check.'
+        ),
+      _ => (
+          c: AppColors.amber,
+          soft: AppColors.amberSoft,
+          icon: Icons.hourglass_top_rounded,
+          title: 'Verification pending',
+          body: 'We are checking your profile. It goes live for bookings once verified.'
+        ),
+    };
+    return AppCard(
+      color: look.soft,
+      shadow: false,
+      padding: const EdgeInsets.all(14),
+      child: Row(children: [
+        IconBubble(look.icon, color: look.c, bg: Colors.white, size: 40),
+        const SizedBox(width: 12),
+        Expanded(
+          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Text(look.title, style: TextStyle(fontWeight: FontWeight.w800, color: look.c)),
+            const SizedBox(height: 2),
+            Text(look.body, style: const TextStyle(color: AppColors.text2, fontSize: 12.5, height: 1.35)),
+          ]),
+        ),
+      ]),
+    );
+  }
+}
+
+class _RatingCard extends StatelessWidget {
+  const _RatingCard({required this.details});
+  final TrainerProfileDetails details;
+
+  @override
+  Widget build(BuildContext context) {
+    final d = details;
+    return AppCard(
+      onTap: () => push(context, const PartnerRatingsScreen(trainer: true)),
+      padding: const EdgeInsets.all(14),
+      child: Row(children: [
+        Container(
+          width: 58,
+          height: 50,
+          alignment: Alignment.center,
+          decoration: BoxDecoration(
+            color: d.isNew ? AppColors.surfaceAlt : AppColors.green,
+            borderRadius: BorderRadius.circular(12),
+          ),
+          child: d.isNew
+              ? const Text('New', style: TextStyle(fontWeight: FontWeight.w800, color: AppColors.text2))
+              : Row(mainAxisSize: MainAxisSize.min, children: [
+                  Text(d.ratingAvg!.toStringAsFixed(1),
+                      style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w800, fontSize: 17)),
+                  const SizedBox(width: 2),
+                  const Icon(Icons.star_rounded, color: Colors.white, size: 16),
+                ]),
+        ),
+        const SizedBox(width: 12),
+        Expanded(
+          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Text(d.isNew ? 'Ratings show after 5 reviews' : '${d.ratingCount} member ratings',
+                style: const TextStyle(fontWeight: FontWeight.w800)),
+            const SizedBox(height: 2),
+            Text(
+              d.isNew
+                  ? '${d.ratingCount} of 5 so far — members rate you after a session.'
+                  : 'See what members say and reply to reviews.',
+              style: const TextStyle(color: AppColors.text2, fontSize: 12.5),
+            ),
+          ]),
+        ),
+        const Icon(Icons.chevron_right_rounded, color: AppColors.text3),
+      ]),
+    );
+  }
+}
+
+class _FitFeedCard extends StatelessWidget {
+  const _FitFeedCard();
+
+  @override
+  Widget build(BuildContext context) {
+    final phone = context.select<PartnerSession, String?>((s) => s.user?.phone);
+    return AppCard(
+      padding: const EdgeInsets.all(16),
+      child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Container(
+          width: 44,
+          height: 44,
+          decoration: BoxDecoration(gradient: AppColors.mansiGradient, borderRadius: BorderRadius.circular(14)),
+          child: const Icon(Icons.dynamic_feed_rounded, color: Colors.white, size: 22),
+        ),
+        const SizedBox(width: 12),
+        Expanded(
+          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            const Row(children: [
+              Flexible(child: Text('Verified Trainer on FitFeed', style: TextStyle(fontWeight: FontWeight.w800))),
+              SizedBox(width: 6),
+              Icon(Icons.verified_rounded, color: AppColors.blue, size: 16),
+            ]),
+            const SizedBox(height: 4),
+            Text(
+              'Your Verified Trainer badge appears on FitFeed when you post from the FITKEY member app with this same '
+              'phone number${phone == null || phone.isEmpty ? '' : ' ($phone)'}. Share tips and workouts to get discovered.',
+              style: const TextStyle(color: AppColors.text2, fontSize: 12.5, height: 1.4),
+            ),
+          ]),
+        ),
+      ]),
+    );
+  }
+}
+
+class _OverviewSkeleton extends StatelessWidget {
+  const _OverviewSkeleton();
+
+  @override
+  Widget build(BuildContext context) {
+    return Shimmer(
+      child: ListView(
+        physics: const NeverScrollableScrollPhysics(),
+        padding: const EdgeInsets.all(16),
+        children: const [
+          SkeletonBox(height: 120, radius: 20),
+          SizedBox(height: 12),
+          SkeletonBox(height: 70, radius: 20),
+          SizedBox(height: 12),
+          SkeletonBox(height: 78, radius: 20),
+          SizedBox(height: 28),
+          Row(children: [
+            Expanded(child: SkeletonBox(height: 104, radius: 20)),
+            SizedBox(width: 10),
+            Expanded(child: SkeletonBox(height: 104, radius: 20)),
+          ]),
+        ],
       ),
     );
   }

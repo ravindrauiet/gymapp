@@ -327,10 +327,12 @@ export async function joinEvent(id, userId, { orgId } = {}) {
     // Open events: still record a verified org so org-wise leaderboards work.
     repOrg = memberships.find((m) => m.status === 'verified' && m.orgId === orgId)?.orgId ?? null;
   }
-  await query(
-    `INSERT INTO contest_participants (contest_id, user_id, org_id) VALUES ($1, $2, $3) ON CONFLICT DO NOTHING`,
+  const inserted = await queryOne(
+    `INSERT INTO contest_participants (contest_id, user_id, org_id) VALUES ($1, $2, $3) ON CONFLICT DO NOTHING
+     RETURNING contest_id`,
     [row.id, userId, repOrg],
   );
+  if (inserted && row.kind === 'partner' && row.venueId) await notifyHostOfRegistration(row, userId);
   // Registered after already checking in at the venue on the event day → count attendance now.
   if (row.format === 'onground' && row.venueId) {
     await query(
@@ -714,6 +716,246 @@ admin.get('/events/:id/participants', async (req, res) => {
     [id],
   );
   res.json({ participants });
+});
+
+// ---------------------------------------------------------------------------
+// Partner (gym / studio / sports club owners) — Partner Events for venues they own (venues.owner_id).
+// Mounted before the member routes so /partner/* never reaches them.
+// ---------------------------------------------------------------------------
+
+const partner = Router();
+partner.use(requireAuth('partner'));
+router.use('/partner', partner);
+
+/** Tells the venue owner that a member registered for their partner event. Never throws (notify doesn't). */
+async function notifyHostOfRegistration(row, userId) {
+  try {
+    const host = await queryOne(
+      `SELECT v.owner_id, u.name AS member_name,
+              (SELECT COUNT(*) FROM contest_participants x WHERE x.contest_id = $3) AS registered
+       FROM venues v, users u WHERE v.id = $1 AND u.id = $2`,
+      [row.venueId, userId, row.id],
+    );
+    if (!host?.ownerId) return;
+    const first = host.memberName?.trim().split(/\s+/)[0] || 'A member';
+    await notify(host.ownerId, {
+      type: 'event_registration',
+      title: `New registration: ${row.title}`,
+      body: `${first} registered · ${host.registered} registered so far`,
+      data: { contestId: row.id, venueId: row.venueId, partnerEvent: true },
+    });
+  } catch (err) {
+    console.error('event host notify failed:', err.message);
+  }
+}
+
+const PARTNER_EVENT_SELECT = `
+  SELECT c.*, v.name AS venue_name, v.area AS venue_area, v.city AS venue_city, v.address AS venue_address,
+         v.photos[1] AS venue_photo, v.categories AS venue_categories, v.status AS venue_status,
+         (SELECT COUNT(*) FROM contest_participants p WHERE p.contest_id = c.id) AS participant_count,
+         (SELECT COUNT(*) FROM contest_participants p WHERE p.contest_id = c.id AND p.attended_at IS NOT NULL) AS attended_count,
+         CASE WHEN c.ends_on < today.d THEN 'past' WHEN c.starts_on > today.d THEN 'upcoming' ELSE 'live' END AS status
+  FROM contests c
+  JOIN venues v ON v.id = c.venue_id AND v.owner_id = $1
+  CROSS JOIN (SELECT (now() AT TIME ZONE $2)::date AS d) today`;
+
+function shapePartnerEvent(e) {
+  const {
+    createdBy: _c,
+    venueName,
+    venueArea,
+    venueCity,
+    venueAddress,
+    venuePhoto,
+    venueCategories,
+    venueStatus,
+    orgId: _o,
+    ...rest
+  } = e;
+  return {
+    ...rest,
+    unit: METRIC_UNITS[e.metric] ?? '',
+    // Only partner-kind events are the owner's to change; FitKey events hosted at their venue are read-only.
+    canEdit: e.kind === 'partner',
+    venue: {
+      id: e.venueId,
+      name: venueName,
+      area: venueArea,
+      city: venueCity,
+      address: venueAddress,
+      photo: venuePhoto,
+      categories: venueCategories ?? [],
+      status: venueStatus,
+    },
+  };
+}
+
+async function loadPartnerEvent(id, partnerId) {
+  if (!uuidSchema.safeParse(id).success) throw notFound('Event not found');
+  const row = await queryOne(`${PARTNER_EVENT_SELECT} WHERE c.id = $3`, [partnerId, config.tz, id]);
+  if (!row) throw notFound('Event not found');
+  return row;
+}
+
+async function assertOwnVenue(venueId, partnerId) {
+  if (!venueId) throw badRequest('Choose the venue hosting this event');
+  const v = await queryOne(`SELECT status, name FROM venues WHERE id = $1 AND owner_id = $2`, [venueId, partnerId]);
+  if (!v) throw forbidden('You can only host events at your own venues');
+  if (v.status !== 'live') throw badRequest(`${v.name} must be live on FitKey before it can host events`);
+}
+
+// Partners set everything except who hosts it (always their venue, kind 'partner') and org / battle / fee fields.
+const partnerEventSchema = eventInputSchema.omit({ kind: true, orgId: true, battleOrgIds: true, registrationFeePaise: true });
+
+const PARTNER_FIELDS_NOTIFIED = [
+  ['title', 'title'],
+  ['startsOn', 'dates'],
+  ['endsOn', 'dates'],
+  ['eventDate', 'event day'],
+  ['venueId', 'venue'],
+  ['format', 'format'],
+  ['metric', 'scoring'],
+  ['arenaExercise', 'exercise'],
+];
+
+/** GET /events/partner/events?status=live|upcoming|past|any&venueId= — events hosted at my venues. */
+partner.get('/events', async (req, res) => {
+  const { status, venueId } = validate(
+    z.object({ status: z.enum(['live', 'upcoming', 'past', 'any']).default('any'), venueId: uuidSchema.optional() }),
+    req.query,
+  );
+  const where = [];
+  if (status === 'live') where.push(`c.starts_on <= today.d AND c.ends_on >= today.d`);
+  if (status === 'upcoming') where.push(`c.starts_on > today.d`);
+  if (status === 'past') where.push(`c.ends_on < today.d`);
+  const params = [req.user.id, config.tz];
+  if (venueId) {
+    params.push(venueId);
+    where.push(`c.venue_id = $${params.length}`);
+  }
+  const order = status === 'past' ? 'c.ends_on DESC' : 'c.starts_on ASC, c.ends_on ASC';
+  const rows = await query(
+    `${PARTNER_EVENT_SELECT} ${where.length ? `WHERE ${where.join(' AND ')}` : ''} ORDER BY ${order} LIMIT 200`,
+    params,
+  );
+  const counts = await queryOne(
+    `SELECT COUNT(*) FILTER (WHERE c.starts_on <= today.d AND c.ends_on >= today.d)::int AS live,
+            COUNT(*) FILTER (WHERE c.starts_on > today.d)::int AS upcoming,
+            COUNT(*) FILTER (WHERE c.ends_on < today.d)::int AS past
+     FROM contests c JOIN venues v ON v.id = c.venue_id AND v.owner_id = $1
+     CROSS JOIN (SELECT (now() AT TIME ZONE $2)::date AS d) today
+     WHERE ($3::uuid IS NULL OR c.venue_id = $3)`,
+    [req.user.id, config.tz, venueId ?? null],
+  );
+  res.json({ events: rows.map(shapePartnerEvent), counts });
+});
+
+/** GET /events/partner/events/:id — event + its leaderboard (same scoring as the member app). */
+partner.get('/events/:id', async (req, res) => {
+  const row = await loadPartnerEvent(req.params.id, req.user.id);
+  const board = await eventLeaderboard(row, null);
+  res.json({ event: shapePartnerEvent(row), leaderboard: { entries: board.entries.map(publicEntry) } });
+});
+
+/** Leaderboard row without org / ids beyond what the member app shows publicly. */
+function publicEntry(r) {
+  return { userId: r.userId, name: r.name, city: r.city, avatarUrl: r.avatarUrl, score: r.score, rank: r.rank, attendedAt: r.attendedAt };
+}
+
+/** GET /events/partner/events/:id/leaderboard */
+partner.get('/events/:id/leaderboard', async (req, res) => {
+  const row = await loadPartnerEvent(req.params.id, req.user.id);
+  const board = await eventLeaderboard(row, null);
+  res.json({ entries: board.entries.map(publicEntry), unit: METRIC_UNITS[row.metric] ?? '' });
+});
+
+/** GET /events/partner/events/:id/participants — registrations with attendance (no phone numbers). */
+partner.get('/events/:id/participants', async (req, res) => {
+  const row = await loadPartnerEvent(req.params.id, req.user.id);
+  const participants = await query(
+    `SELECT cp.user_id, u.name, u.city, u.avatar_url, cp.joined_at, cp.attended_at
+     FROM contest_participants cp JOIN users u ON u.id = cp.user_id
+     WHERE cp.contest_id = $1 ORDER BY cp.attended_at IS NULL, cp.joined_at`,
+    [row.id],
+  );
+  res.json({
+    participants: participants.map((p) => ({ ...p, attended: p.attendedAt != null })),
+    total: participants.length,
+    attended: participants.filter((p) => p.attendedAt != null).length,
+  });
+});
+
+/** POST /events/partner/events — create a partner event at one of my live venues. */
+partner.post('/events', async (req, res) => {
+  const body = validate(partnerEventSchema, req.body ?? {});
+  await assertOwnVenue(body.venueId, req.user.id);
+  const e = await normalizeEvent({ ...body, kind: 'partner', registrationFeePaise: 0 });
+  const cols = EVENT_COLUMNS.map(([, c]) => c).concat('created_by');
+  const vals = EVENT_COLUMNS.map(([k]) => e[k] ?? null).concat(req.user.id);
+  vals[EVENT_COLUMNS.findIndex(([k]) => k === 'membersOnly')] = e.membersOnly;
+  vals[EVENT_COLUMNS.findIndex(([k]) => k === 'registrationFeePaise')] = 0;
+  const created = await queryOne(
+    `INSERT INTO contests (${cols.join(', ')}) VALUES (${cols.map((_, i) => `$${i + 1}`).join(', ')}) RETURNING id`,
+    vals,
+  );
+  res.status(201).json({ event: shapePartnerEvent(await loadPartnerEvent(created.id, req.user.id)) });
+});
+
+/** PATCH /events/partner/events/:id — any subset of the create fields; registered members are notified of changes. */
+partner.patch('/events/:id', async (req, res) => {
+  const existing = await loadPartnerEvent(req.params.id, req.user.id);
+  if (existing.kind !== 'partner') throw forbidden('FitKey-run events at your venue can only be changed by the FitKey team');
+  if (existing.status === 'past') throw badRequest('This event has ended and can no longer be edited');
+  const body = validate(partnerEventSchema.partial(), req.body ?? {});
+  if (body.venueId !== undefined && body.venueId !== existing.venueId) await assertOwnVenue(body.venueId, req.user.id);
+  const merged = {};
+  for (const [k] of EVENT_COLUMNS) if (existing[k] !== null && existing[k] !== undefined) merged[k] = existing[k];
+  const e = await normalizeEvent({ ...merged, ...body, kind: 'partner', orgId: null, registrationFeePaise: 0 });
+  const params = [existing.id, ...EVENT_COLUMNS.map(([k]) => e[k] ?? null)];
+  params[1 + EVENT_COLUMNS.findIndex(([k]) => k === 'membersOnly')] = e.membersOnly;
+  params[1 + EVENT_COLUMNS.findIndex(([k]) => k === 'registrationFeePaise')] = 0;
+  await query(`UPDATE contests SET ${EVENT_COLUMNS.map(([, c], i) => `${c} = $${i + 2}`).join(', ')} WHERE id = $1`, params);
+  const updated = await loadPartnerEvent(existing.id, req.user.id);
+
+  const changed = [
+    ...new Set(PARTNER_FIELDS_NOTIFIED.filter(([k]) => (existing[k] ?? null) !== (updated[k] ?? null)).map(([, l]) => l)),
+  ];
+  let notified = 0;
+  if (changed.length) {
+    const people = await query(`SELECT user_id FROM contest_participants WHERE contest_id = $1`, [existing.id]);
+    const when =
+      updated.format === 'onground'
+        ? `Now on ${updated.eventDate} at ${updated.venueName}.`
+        : `Runs ${updated.startsOn} – ${updated.endsOn}.`;
+    for (const p of people) {
+      await notify(p.userId, {
+        type: 'event_updated',
+        title: `Event updated: ${updated.title}`,
+        body: `${updated.venueName} changed the ${changed.join(', ')}. ${when}`,
+        data: { contestId: existing.id },
+      });
+    }
+    notified = people.length;
+  }
+  res.json({ event: shapePartnerEvent(updated), changed, notified });
+});
+
+/** DELETE /events/partner/events/:id — cancels an event that hasn't ended; registered members are notified. */
+partner.delete('/events/:id', async (req, res) => {
+  const existing = await loadPartnerEvent(req.params.id, req.user.id);
+  if (existing.kind !== 'partner') throw forbidden('FitKey-run events at your venue can only be changed by the FitKey team');
+  if (existing.status === 'past') throw badRequest('Past events stay on members’ history and can’t be deleted');
+  const people = await query(`SELECT user_id FROM contest_participants WHERE contest_id = $1`, [existing.id]);
+  await query(`DELETE FROM contests WHERE id = $1`, [existing.id]);
+  for (const p of people) {
+    await notify(p.userId, {
+      type: 'event_cancelled',
+      title: `Cancelled: ${existing.title}`,
+      body: `${existing.venueName} has cancelled this event. Sorry for the change of plans!`,
+      data: { venueId: existing.venueId },
+    });
+  }
+  res.json({ deleted: true, notified: people.length });
 });
 
 // ---------------------------------------------------------------------------

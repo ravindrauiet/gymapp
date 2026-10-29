@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { query, queryOne, withTransaction } from '../db/index.js';
 import { requireAuth } from '../middleware/auth.js';
 import { notFound, validate, conflict } from '../utils/http.js';
+import { notify } from '../utils/notify.js';
 
 export const marketplaceRouter = Router();
 
@@ -129,6 +130,22 @@ marketplaceRouter.post('/orders', requireAuth('user'), async (req, res) => {
     return order;
   });
 
+  // Tell each vendor whose products are in this order (partner app).
+  const vendors = await query(
+    `SELECT v.partner_id, SUM(i.quantity)::int AS items, SUM(i.price_paise * i.quantity)::int AS amount_paise
+     FROM marketplace_order_items i JOIN marketplace_vendors v ON v.id = i.vendor_id
+     WHERE i.order_id = $1 GROUP BY v.partner_id`,
+    [order.id],
+  );
+  for (const v of vendors) {
+    await notify(v.partnerId, {
+      type: 'vendor_order',
+      title: `New order · ${v.items} item${v.items === 1 ? '' : 's'}`,
+      body: `₹${(v.amountPaise / 100).toLocaleString('en-IN')} · ${body.paymentMethod === 'cod' ? 'Cash on delivery' : 'Paid'} — pack and dispatch it from your vendor portal.`,
+      data: { orderId: order.id },
+    });
+  }
+
   res.status(201).json({ order });
 });
 
@@ -254,6 +271,7 @@ const productSchema = z.object({
   stockQuantity: z.number().int().min(0),
   images: z.array(z.string()).default([]),
   specs: z.record(z.string()).default({}),
+  isActive: z.boolean().optional(), // PUT only: list / unlist the SKU in the member store
 });
 
 partnerVendorRouter.post('/products', async (req, res) => {
@@ -309,7 +327,9 @@ partnerVendorRouter.put('/products/:id', async (req, res) => {
        price_paise = COALESCE($5, price_paise),
        original_price_paise = COALESCE($6, original_price_paise),
        stock_quantity = COALESCE($7, stock_quantity),
-       specs = COALESCE($8, specs)
+       specs = COALESCE($8, specs),
+       images = COALESCE($10, images),
+       is_active = COALESCE($11, is_active)
      WHERE id = $9
      RETURNING *`,
     [
@@ -322,6 +342,9 @@ partnerVendorRouter.put('/products/:id', async (req, res) => {
       p.stockQuantity ?? null,
       p.specs ? JSON.stringify(p.specs) : null,
       req.params.id,
+      // .partial() keeps defaults, so only send images when the client actually included them.
+      'images' in req.body ? p.images : null,
+      p.isActive ?? null,
     ],
   );
   res.json({ product: updated });
@@ -333,13 +356,13 @@ partnerVendorRouter.get('/orders', async (req, res) => {
   if (!vendor) return res.json({ orders: [] });
 
   const orders = await query(
-    `SELECT DISTINCT o.id, o.status, o.total_amount_paise, o.payment_method, o.payment_status,
+    // EXISTS rather than JOIN + DISTINCT: DISTINCT cannot compare the json columns (Postgres 42883).
+    `SELECT o.id, o.status, o.total_amount_paise, o.payment_method, o.payment_status,
             o.shipping_address, o.tracking_number, o.created_at, o.dispatched_at,
             (SELECT json_agg(json_build_object('title', i.title, 'pricePaise', i.price_paise, 'quantity', i.quantity))
              FROM marketplace_order_items i WHERE i.order_id = o.id AND i.vendor_id = $1) AS vendor_items
      FROM marketplace_orders o
-     JOIN marketplace_order_items oi ON oi.order_id = o.id
-     WHERE oi.vendor_id = $1
+     WHERE EXISTS (SELECT 1 FROM marketplace_order_items oi WHERE oi.order_id = o.id AND oi.vendor_id = $1)
      ORDER BY o.created_at DESC`,
     [vendor.id],
   );
@@ -348,29 +371,45 @@ partnerVendorRouter.get('/orders', async (req, res) => {
 
 partnerVendorRouter.patch('/orders/:id/status', async (req, res) => {
   const schema = z.object({
-    status: z.enum(['processing', 'dispatched', 'delivered']),
+    status: z.enum(['processing', 'dispatched', 'out_for_delivery', 'delivered']),
     trackingNumber: z.string().optional(),
   });
   const data = validate(schema, req.body);
 
+  // Ownership: a vendor may only update orders that contain at least one of its items.
+  const owned = await queryOne(
+    `SELECT 1 FROM marketplace_order_items oi JOIN marketplace_vendors v ON v.id = oi.vendor_id
+     WHERE oi.order_id = $1 AND v.partner_id = $2 LIMIT 1`,
+    [req.params.id, req.user.id],
+  );
+  if (!owned) throw notFound('Order not found');
+
   const updated = await queryOne(
+    // $1::text everywhere: without the casts Postgres deduces varchar vs text for $1 and rejects the query (42P08).
     `UPDATE marketplace_orders SET
-       status = $1,
-       tracking_number = COALESCE($2, tracking_number),
-       dispatched_at = CASE WHEN $1 = 'dispatched' AND dispatched_at IS NULL THEN now() ELSE dispatched_at END,
-       delivered_at = CASE WHEN $1 = 'delivered' AND delivered_at IS NULL THEN now() ELSE delivered_at END
+       status = $1::text,
+       tracking_number = COALESCE($2::text, tracking_number),
+       dispatched_at = CASE WHEN $1::text = 'dispatched' AND dispatched_at IS NULL THEN now() ELSE dispatched_at END,
+       delivered_at = CASE WHEN $1::text = 'delivered' AND delivered_at IS NULL THEN now() ELSE delivered_at END
      WHERE id = $3
      RETURNING *`,
     [data.status, data.trackingNumber ?? null, req.params.id],
   );
   if (!updated) throw notFound('Order not found');
+  const label = { processing: 'is being packed', dispatched: 'has been shipped', out_for_delivery: 'is out for delivery', delivered: 'has been delivered' }[data.status];
+  await notify(updated.userId, {
+    type: 'store_order_status',
+    title: `Your FITKEY Store order ${label}`,
+    body: data.trackingNumber ? `Tracking number: ${data.trackingNumber}` : null,
+    data: { orderId: updated.id },
+  });
   res.json({ order: updated });
 });
 
 // 4. Commission & Earnings Reports
 partnerVendorRouter.get('/commissions', async (req, res) => {
   const vendor = await queryOne(`SELECT id, commission_rate FROM marketplace_vendors WHERE partner_id = $1`, [req.user.id]);
-  if (!vendor) return res.json({ totalRevenuePaise: 0, commissionPaise: 0, netPayoutPaise: 0, ordersCount: 0 });
+  if (!vendor) return res.json({ grossRevenuePaise: 0, commissionRatePercent: 10, commissionPaise: 0, netPayoutPaise: 0, ordersCount: 0 });
 
   const stats = await queryOne(
     `SELECT COUNT(DISTINCT o.id) AS orders_count,
@@ -381,8 +420,9 @@ partnerVendorRouter.get('/commissions', async (req, res) => {
     [vendor.id],
   );
 
-  const grossPaise = +stats.gross_paise;
-  const commissionRate = +(vendor.commission_rate || 10.0);
+  // query helpers camelCase the columns (gross_paise → grossPaise).
+  const grossPaise = +(stats.grossPaise ?? 0);
+  const commissionRate = +(vendor.commissionRate ?? 10.0);
   const commissionPaise = Math.round(grossPaise * (commissionRate / 100));
   const netPayoutPaise = grossPaise - commissionPaise;
 
@@ -391,6 +431,6 @@ partnerVendorRouter.get('/commissions', async (req, res) => {
     commissionRatePercent: commissionRate,
     commissionPaise,
     netPayoutPaise,
-    ordersCount: +stats.orders_count,
+    ordersCount: +(stats.ordersCount ?? 0),
   });
 });

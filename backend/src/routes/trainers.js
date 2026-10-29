@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { query, queryOne } from '../db/index.js';
 import { requireAuth } from '../middleware/auth.js';
 import { notFound, validate } from '../utils/http.js';
+import { notify } from '../utils/notify.js';
 import { dateSchema } from '../utils/schemas.js';
 
 export const trainersRouter = Router();
@@ -308,6 +309,17 @@ trainersRouter.post('/:id/book', requireAuth('user'), async (req, res) => {
      RETURNING *`,
     [trainer.id, req.user.id, data.mode, data.sessionDate, data.slotTime, trainer.hourlyRatePaise],
   );
+
+  // Tell the trainer (partner app).
+  if (trainer.partnerId) {
+    const member = await queryOne(`SELECT name FROM users WHERE id = $1`, [req.user.id]);
+    await notify(trainer.partnerId, {
+      type: 'trainer_booking',
+      title: `New ${data.mode} session booked`,
+      body: `${member?.name?.trim().split(/\s+/)[0] || 'A member'} booked ${data.sessionDate} at ${data.slotTime}`,
+      data: { bookingId: booking.id, trainer: true },
+    });
+  }
 
   res.status(201).json({ booking, trainerName: trainer.name });
 });

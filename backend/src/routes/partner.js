@@ -54,6 +54,7 @@ async function ownVenue(venueId, ownerId) {
 router.get('/venues', async (req, res) => {
   const venues = await query(
     `SELECT v.id, v.name, v.area, v.city, v.categories, v.status, v.review_note, v.photos[1] AS cover_photo, v.updated_at,
+            v.rating_avg, v.rating_count,
             (SELECT COUNT(*) FROM checkins c WHERE c.venue_id = v.id AND c.checkin_date = (now() AT TIME ZONE $2)::date) AS today_checkins,
             (SELECT COUNT(*) FROM checkins c WHERE c.venue_id = v.id
                AND c.checkin_date >= date_trunc('month', now() AT TIME ZONE $2)::date) AS month_checkins

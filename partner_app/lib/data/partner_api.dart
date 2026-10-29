@@ -1,4 +1,7 @@
-import 'package:fitkey_core/fitkey_core.dart';
+// dio ships with fitkey_core (transitive dependency); only its multipart types are used here.
+import 'package:dio/dio.dart' show DioMediaType, FormData, MultipartFile;
+import 'package:fitkey_core/fitkey_core.dart' show ApiClient;
+import 'package:image_picker/image_picker.dart' show XFile;
 
 import 'models.dart';
 
@@ -7,6 +10,28 @@ class PartnerApi {
   PartnerApi(this._client);
 
   final ApiClient _client;
+  ApiClient get client => _client;
+
+  /// Uploads a photo (≤ 3 MB) or MP4 clip and returns its server-relative URL.
+  /// Reads bytes rather than a file path so it also works on Flutter web.
+  Future<String> upload(XFile file) async {
+    final bytes = await file.readAsBytes();
+    final name = file.name.toLowerCase();
+    final mime = (file.mimeType ?? '').toLowerCase();
+    final type = mime == 'video/mp4' || name.endsWith('.mp4')
+        ? DioMediaType('video', 'mp4')
+        : mime == 'image/png' || name.endsWith('.png')
+            ? DioMediaType('image', 'png')
+            : mime == 'image/webp' || name.endsWith('.webp')
+                ? DioMediaType('image', 'webp')
+                : DioMediaType('image', 'jpeg');
+    final filename = file.name.isEmpty ? 'upload.${type.subtype}' : file.name;
+    final r = await _client.post(
+      '/uploads',
+      FormData.fromMap({'file': MultipartFile.fromBytes(bytes, filename: filename, contentType: type)}),
+    );
+    return r['url'] as String;
+  }
 
   // ---- Auth & profile -------------------------------------------------------
   Future<String?> requestOtp(String phone) async =>
@@ -39,7 +64,7 @@ class PartnerApi {
 
   Future<void> deleteVenue(String id) => _client.delete('/partner/venues/$id');
 
-  /// Uploads a photo and returns its URL (server-relative path).
+  /// Path-based upload (mobile/desktop only). Prefer [upload], which also works on web.
   Future<String> uploadPhoto(String filePath, {void Function(double)? onProgress}) async =>
       (await _client.uploadImage('/uploads', filePath, onProgress: onProgress))['url'] as String;
 

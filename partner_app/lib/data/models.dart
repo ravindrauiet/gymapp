@@ -32,13 +32,16 @@ enum VenueStatus {
   const VenueStatus(this.label);
   final String label;
 
-  static VenueStatus parse(String s) => switch (s) {
+  static VenueStatus parse(String? s) => switch (s) {
         'submitted' => submitted,
         'under_review' => underReview,
         'live' => live,
         'rejected' => rejected,
         _ => draft,
       };
+
+  /// Wire value, e.g. `under_review`.
+  String get apiValue => this == underReview ? 'under_review' : name;
 
   bool get canSubmit => this == draft || this == rejected;
   bool get canDelete => this == draft || this == rejected;
@@ -55,7 +58,9 @@ class VenueListItem {
         reviewNote = j['reviewNote'],
         coverPhoto = j['coverPhoto'],
         todayCheckins = _int(j['todayCheckins']),
-        monthCheckins = _int(j['monthCheckins']);
+        monthCheckins = _int(j['monthCheckins']),
+        ratingAvg = _double(j['ratingAvg']),
+        ratingCount = _int(j['ratingCount']);
 
   final String id;
   final String name;
@@ -67,6 +72,10 @@ class VenueListItem {
   final String? coverPhoto;
   final int todayCheckins;
   final int monthCheckins;
+
+  /// Present only when the backend includes rating aggregates in the venue list.
+  final double? ratingAvg;
+  final int ratingCount;
 
   String get location => [area, city].whereType<String>().join(', ');
 }
@@ -94,6 +103,8 @@ class PartnerVenue {
     List<String>? equipment,
     List<String>? amenities,
     List<String>? photos,
+    this.ratingAvg,
+    this.ratingCount = 0,
   })  : categories = categories ?? [],
         openDays = openDays ?? ['mon', 'tue', 'wed', 'thu', 'fri', 'sat'],
         equipment = equipment ?? [],
@@ -121,6 +132,8 @@ class PartnerVenue {
         equipment: _strings(j['equipment']),
         amenities: _strings(j['amenities']),
         photos: _strings(j['photos']),
+        ratingAvg: _double(j['ratingAvg']),
+        ratingCount: _int(j['ratingCount']),
       );
 
   String? id;
@@ -143,6 +156,36 @@ class PartnerVenue {
   List<String> equipment;
   List<String> amenities;
   List<String> photos;
+
+  /// Read-only rating aggregates (members rate venues after visiting).
+  final double? ratingAvg;
+  final int ratingCount;
+
+  /// Deep copy, so the listing wizard can edit without touching the original until saved.
+  PartnerVenue copy() => PartnerVenue(
+        id: id,
+        status: status,
+        reviewNote: reviewNote,
+        name: name,
+        description: description,
+        categories: List.of(categories),
+        address: address,
+        area: area,
+        city: city,
+        latitude: latitude,
+        longitude: longitude,
+        opensAt: opensAt,
+        closesAt: closesAt,
+        openDays: List.of(openDays),
+        contactPhone: contactPhone,
+        contactEmail: contactEmail,
+        trainerAvailable: trainerAvailable,
+        equipment: List.of(equipment),
+        amenities: List.of(amenities),
+        photos: List.of(photos),
+        ratingAvg: ratingAvg,
+        ratingCount: ratingCount,
+      );
 
   Json toJson() {
     String? blank(String s) => s.trim().isEmpty ? null : s.trim();
@@ -268,7 +311,7 @@ class VendorOrder {
         shippingAddress = (j['shipping_address'] is Map)
             ? Map<String, dynamic>.from(j['shipping_address'] as Map)
             : {},
-        items = (j['vendor_items'] as List? ?? const [])
+        items = ((j['vendorItems'] ?? j['vendor_items']) as List? ?? const [])
             .map((i) => (title: i['title'] as String, pricePaise: _int(i['pricePaise']), quantity: _int(i['quantity'])))
             .toList();
 
