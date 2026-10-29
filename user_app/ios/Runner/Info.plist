@@ -2,8 +2,6 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-	<key>NSHealthShareUsageDescription</key>
-	<string>FITKEY reads your steps, distance and active calories to show your progress.</string>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>FITKEY records AI Arena proof clips and Circle voice notes.</string>
 	<key>NSLocationWhenInUseUsageDescription</key>

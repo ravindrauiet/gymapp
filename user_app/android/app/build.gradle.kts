@@ -28,8 +28,7 @@ android {
         applicationId = "com.fitkey.fitkey_user"
         // You can update the following values to match your application needs.
         // For more information, see: https://flutter.dev/to/review-gradle-config.
-        // Health Connect (health package) needs API 26+.
-        minSdk = 26
+        minSdk = flutter.minSdkVersion
         targetSdk = 36
         versionCode = flutter.versionCode
         versionName = flutter.versionName
@@ -52,6 +51,10 @@ android {
             } else {
                 signingConfigs.getByName("debug")
             }
+            // The camera / ML Kit / Health Connect plugins load parts of themselves by reflection at startup,
+            // which code shrinking can break (app closes before the first screen). Ship unshrunk.
+            isMinifyEnabled = false
+            isShrinkResources = false
         }
     }
 }
