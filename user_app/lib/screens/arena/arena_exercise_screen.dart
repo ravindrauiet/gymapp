@@ -1,5 +1,6 @@
 import 'package:fitkey_core/fitkey_core.dart' show formatDateTime, resolveMediaUrl;
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'package:video_player/video_player.dart';
 
@@ -48,6 +49,9 @@ class _ArenaExerciseScreenState extends State<ArenaExerciseScreen> {
   }
 
   Future<void> _start(ArenaExercise e) async {
+    // Lock first so the camera screen opens already in portrait, without a visible rotation.
+    await SystemChrome.setPreferredOrientations(const [DeviceOrientation.portraitUp]);
+    if (!mounted) return;
     final saved = await Navigator.of(context).push<bool>(MaterialPageRoute(
       fullscreenDialog: true,
       builder: (_) => ArenaCameraScreen(exercise: e, level: e.levels[_levelIndex]),

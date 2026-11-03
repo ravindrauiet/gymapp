@@ -53,7 +53,8 @@ class Cue {
 }
 
 /// Minimum ML Kit in-frame likelihood for a landmark to be trusted.
-const double kMinLikelihood = 0.5;
+// inFrameLikelihood isn't an occlusion score and real side-on limbs often sit near 0.5, so the bar stays low.
+const double kMinLikelihood = 0.3;
 
 /// Interior angle ABC in degrees (0–180).
 double angleAt(Pt a, Pt b, Pt c) {
@@ -87,21 +88,34 @@ class BodySide {
   final Joint shoulder, elbow, wrist, hip, knee, ankle;
 }
 
-const _left = BodySide(Joint.leftShoulder, Joint.leftElbow, Joint.leftWrist, Joint.leftHip, Joint.leftKnee, Joint.leftAnkle);
-const _right =
-    BodySide(Joint.rightShoulder, Joint.rightElbow, Joint.rightWrist, Joint.rightHip, Joint.rightKnee, Joint.rightAnkle);
+const _left = BodySide(
+  Joint.leftShoulder,
+  Joint.leftElbow,
+  Joint.leftWrist,
+  Joint.leftHip,
+  Joint.leftKnee,
+  Joint.leftAnkle,
+);
+const _right = BodySide(
+  Joint.rightShoulder,
+  Joint.rightElbow,
+  Joint.rightWrist,
+  Joint.rightHip,
+  Joint.rightKnee,
+  Joint.rightAnkle,
+);
 
 abstract class RepCounter {
   RepCounter();
 
   factory RepCounter.forExercise(String id) => switch (id) {
-        'pushups' => PushupCounter(),
-        'squats' => SquatCounter(),
-        'pullups' => PullupCounter(),
-        'plank' => PlankCounter(),
-        'burpees' => BurpeeCounter(),
-        _ => throw ArgumentError('Unknown arena exercise $id'),
-      };
+    'pushups' => PushupCounter(),
+    'squats' => SquatCounter(),
+    'pullups' => PullupCounter(),
+    'plank' => PlankCounter(),
+    'burpees' => BurpeeCounter(),
+    _ => throw ArgumentError('Unknown arena exercise $id'),
+  };
 
   /// Full-range reps (for plank: whole seconds held with good form).
   int get count => reps;
@@ -126,7 +140,7 @@ abstract class RepCounter {
     if (ok) {
       _lastSeen = t;
       tracking = true;
-    } else if (_lastSeen == null || t - _lastSeen! > const Duration(milliseconds: 700)) {
+    } else if (_lastSeen == null || t - _lastSeen! > lostAfter) {
       if (tracking || cue.tone != CueTone.warn) cue = Cue(lostCue, CueTone.warn);
       tracking = false;
       onLost();
@@ -137,6 +151,9 @@ abstract class RepCounter {
   bool process(PoseFrame pose, Duration t);
 
   String get lostCue => 'Step back — your whole body must be in the frame';
+
+  /// How long the pose may be missing before the user is told tracking is lost.
+  Duration get lostAfter => const Duration(milliseconds: 700);
 
   void onLost() {}
 
@@ -171,8 +188,7 @@ abstract class RepCounter {
     return l >= r ? _left : _right;
   }
 
-  static bool visible(PoseFrame p, Iterable<Joint> js) =>
-      js.every((j) => (p[j]?.likelihood ?? 0) >= kMinLikelihood);
+  static bool visible(PoseFrame p, Iterable<Joint> js) => js.every((j) => (p[j]?.likelihood ?? 0) >= kMinLikelihood);
 }
 
 /// Generic flex/extend counter: a rep is extended → flexed below [downAt] → extended above [upAt].
@@ -191,6 +207,7 @@ abstract class _FlexCounter extends RepCounter {
   double _minSinceTop = 180;
   double _maxSinceBottom = 0;
   bool _formBroken = false;
+  int _problemFrames = 0; // consecutive frames with a form problem; one noisy frame must not void a rep
 
   String get lowerCue;
   String get upCue;
@@ -211,6 +228,8 @@ abstract class _FlexCounter extends RepCounter {
     if (raw == null) return false;
     final a = _angle.add(raw);
     final problem = formProblem(p);
+    _problemFrames = problem == null ? 0 : _problemFrames + 1;
+    final sustained = _problemFrames >= 3;
 
     if (!_armed) {
       if (a >= upAt && problem == null) {
@@ -224,7 +243,7 @@ abstract class _FlexCounter extends RepCounter {
 
     if (!_down) {
       _minSinceTop = math.min(_minSinceTop, a);
-      if (problem != null && a < startAt) _formBroken = true;
+      if (sustained && a < startAt) _formBroken = true;
       if (a <= downAt) {
         _down = true;
         _maxSinceBottom = a;
@@ -237,7 +256,7 @@ abstract class _FlexCounter extends RepCounter {
         _minSinceTop = 180;
       }
     } else {
-      if (problem != null) _formBroken = true;
+      if (sustained) _formBroken = true;
       if (a >= upAt) {
         if (_formBroken) {
           partial(formCueForPartial);
@@ -260,41 +279,310 @@ abstract class _FlexCounter extends RepCounter {
   String get formCueForPartial => 'Keep good form for the whole rep';
 }
 
-class PushupCounter extends _FlexCounter {
-  PushupCounter() : super(downAt: 95, upAt: 158, startAt: 140);
+/// Low-pass filter with a time constant, so behaviour does not change with frame rate (unlike a per-frame alpha).
+class _TimeEma {
+  _TimeEma(this.tauMs);
+  final double tauMs;
+  double? v;
+  Duration? _at;
+  double add(double x, Duration t) {
+    final prev = v, at = _at;
+    _at = t;
+    if (prev == null || at == null) return v = x;
+    final dt = (t - at).inMicroseconds / 1000.0;
+    return v = prev + (1 - math.exp(-dt / tauMs)) * (x - prev);
+  }
 
-  BodySide? _side;
+  void reset() {
+    v = null;
+    _at = null;
+  }
+}
+
+/// Median of the last three samples: removes one-frame spikes without the lag of a heavier filter.
+class _Median3 {
+  final _b = <double>[];
+  double add(double x) {
+    _b.add(x);
+    if (_b.length > 3) _b.removeAt(0);
+    final s = [..._b]..sort();
+    return s[s.length ~/ 2];
+  }
+
+  void reset() => _b.clear();
+}
+
+double _medianOf(List<double> xs) {
+  final s = [...xs]..sort();
+  return s[s.length ~/ 2];
+}
+
+/// Pushups from any camera angle.
+///
+/// Signal: how far the shoulders drop, in torso lengths, where a torso length is measured so that it does not depend
+/// on the camera azimuth: hypot(2D torso, 1.25 x 2D shoulder width). Side-on the first term dominates, head-on the
+/// second. Shoulders are the steadiest landmarks in this pose, and arms cannot lower them without bending.
+///
+/// The 2D elbow angle does not decide depth: with flared elbows it stays near 170 degrees side-on even at the bottom.
+/// It is only used side-on to confirm the arms straightened at the top.
+/// Form is the median over a rep, so one bad frame cannot void it.
+class PushupCounter extends RepCounter {
+  // Distances are in torso lengths.
+  static const double startDrop = 0.10; // the shoulders have clearly left the top
+  static const double countDrop = 0.17; // deep enough: about 105-110 degrees of 3D elbow bend in simulation
+  static const double topDrop = 0.07; // back at the top
+  static const double bridgeDrop = 0.12; // this deep on both sides of a tracking gap: the bottom was in the gap
+  static const double settleDrop = 0.05; // movement below this counts as holding still
+  static const double sideOnFrom = 0.80; // 2D torso / torso length above which this is a side view
+  static const double topElbow = 150; // side-on, the arms must open at least this far to finish a rep
+  static const double minBodyLine = 140; // side-on, median shoulder-hip-foot over the rep
+  static const double maxHandMove = 0.6; // hands moved this fraction of the shoulder drop: the camera or hands moved
+  static const double kArm = 0.30; // landmark likelihoods: soft, because they do not measure occlusion
+  static const double kLoose = 0.15; // below this, treat the landmark as out of frame
+
+  final _shoulder = _Median3();
+  final _shoulderSmooth = _TimeEma(80);
+  final _elbow = _Median3();
+  final _wrist = _Median3();
+  final _scales = <double>[];
+  Duration? _scaleAt;
+  double _sideness = 1;
+
+  double? _top; // shoulder y of the top position, in pixels (smaller y = higher)
+  double? _settleY;
+  Duration? _settleSince;
+  double? _wristRef;
+  double _handMove = 0;
+
+  bool _inRep = false;
+  double _depth = 0;
+  final _bodyLine = <double>[];
+  double? _stillY; // shoulder y when the body last moved, to spot someone resting mid-rep
+  Duration? _stillSince;
+
+  double _plankMs = 0;
+  double _notPlankMs = 0;
+  bool _plank = false;
+
+  Duration? _lastT;
+  double? _lastDrop;
 
   @override
-  String get lowerCue => 'Go lower! Elbows past 90°';
-  @override
-  String get upCue => 'Push all the way up — lock your arms';
-  @override
-  String get readyCue => 'Plank position locked — start your pushups';
-  @override
-  String get formCueForPartial => 'Keep your body straight — rep not counted';
-  @override
-  String get lostCue => 'Phone to your side — whole body in the frame';
+  String get lostCue => 'Keep your shoulders and arms in the frame';
 
   @override
-  double? measure(PoseFrame p) {
-    _side = RepCounter.pickSide(p, (s) => [s.shoulder, s.elbow, s.wrist, s.hip, s.ankle]);
-    final s = _side;
-    if (s == null) return null;
-    return angleAt(p[s.shoulder]!, p[s.elbow]!, p[s.wrist]!);
+  Duration get lostAfter => const Duration(milliseconds: 1500);
+
+  static Pt? _at(PoseFrame p, Joint j, double min) {
+    final pt = p[j];
+    return pt != null && pt.likelihood >= min ? pt : null;
+  }
+
+  static double? _midY(Pt? a, Pt? b) => a == null ? b?.y : (b == null ? a.y : (a.y + b.y) / 2);
+  static double? _midX(Pt? a, Pt? b) => a == null ? b?.x : (b == null ? a.x : (a.x + b.x) / 2);
+
+  void _resetRep() {
+    _inRep = false;
+    _depth = 0;
+    _handMove = 0;
+    _bodyLine.clear();
+    _stillY = null;
+    _stillSince = null;
+  }
+
+  void _resetAll() {
+    _resetRep();
+    _top = null;
+    _settleY = null;
+    _settleSince = null;
+    _wristRef = null;
+    _lastDrop = null;
+    _shoulder.reset();
+    _shoulderSmooth.reset();
+    _elbow.reset();
+    _wrist.reset();
   }
 
   @override
-  String? formProblem(PoseFrame p) {
-    final s = _side!;
-    final sh = p[s.shoulder]!, hip = p[s.hip]!, an = p[s.ankle]!;
-    if (tiltFromHorizontal(sh, an) > 50) return 'Get down into a plank position';
-    if (angleAt(sh, hip, an) < 145) {
-      // Hip below the shoulder–ankle line (larger y) = sagging.
-      final lineY = sh.y + (an.y - sh.y) * ((hip.x - sh.x) / ((an.x - sh.x) == 0 ? 1 : (an.x - sh.x)));
-      return hip.y > lineY ? 'Hips are sagging — brace your core' : 'Hips too high — straighten your body';
+  bool process(PoseFrame p, Duration t) {
+    final gapMs = _lastT == null ? 0.0 : (t - _lastT!).inMicroseconds / 1000.0;
+    _lastT = t;
+    if (gapMs > 4000) _resetAll(); // they left and came back: nothing before the gap carries over
+
+    final ls = _at(p, Joint.leftShoulder, kArm), rs = _at(p, Joint.rightShoulder, kArm);
+    if (ls == null && rs == null) return false;
+    final shY = _midY(ls, rs)!, shX = _midX(ls, rs)!;
+
+    final lh = _at(p, Joint.leftHip, kLoose), rh = _at(p, Joint.rightHip, kLoose);
+    final hipY = _midY(lh, rh), hipX = _midX(lh, rh);
+
+    // ---- scale
+    final torso2d = hipY == null ? null : _dist(Pt(shX, shY, 1), Pt(hipX!, hipY, 1));
+    final width2d = ls != null && rs != null ? _dist(ls, rs) : 0.0;
+    if (torso2d != null && (_scaleAt == null || t - _scaleAt! >= const Duration(milliseconds: 200))) {
+      final raw = math.sqrt(torso2d * torso2d + 1.5625 * width2d * width2d);
+      if (raw > 0) {
+        _scales.add(raw);
+        if (_scales.length > 15) _scales.removeAt(0);
+        _scaleAt = t;
+      }
     }
-    return null;
+    if (_scales.isEmpty) return false;
+    final scale = _medianOf(_scales);
+    if (torso2d != null) _sideness += 0.1 * ((torso2d / scale).clamp(0.0, 1.0) - _sideness);
+    final sideOn = _sideness >= sideOnFrom;
+
+    // ---- is this a plank, from any angle? (y grows downwards)
+    final lw = _at(p, Joint.leftWrist, kArm), rw = _at(p, Joint.rightWrist, kArm);
+    final wristRaw = _midY(lw, rw);
+    final la = _at(p, Joint.leftAnkle, kLoose), ra = _at(p, Joint.rightAnkle, kLoose);
+    final lk = _at(p, Joint.leftKnee, kLoose), rk = _at(p, Joint.rightKnee, kLoose);
+    final footY = _midY(la, ra) ?? _midY(lk, rk);
+
+    var plankNow = true;
+    if (hipY != null && (hipY - shY) / scale > 0.6) plankNow = false; // torso upright: standing, sitting, kneeling
+    if (hipY != null && footY != null && (footY - hipY) / scale > 0.9) plankNow = false; // legs under the hips
+    if (wristRaw != null && (wristRaw - shY) / scale < 0.15) plankNow = false; // hands are not below the shoulders
+
+    final stepMs = gapMs.clamp(0.0, 500.0);
+    if (plankNow) {
+      _plankMs += stepMs;
+      _notPlankMs = 0;
+    } else {
+      _notPlankMs += stepMs;
+      _plankMs = 0;
+    }
+    if (!_plank && _plankMs >= 350) {
+      _plank = true;
+    } else if (_plank && _notPlankMs >= 600) {
+      _plank = false;
+      _resetAll();
+    }
+    if (!_plank) {
+      cue = const Cue('Get into a plank — hands on the floor', CueTone.info);
+      return true;
+    }
+
+    final y = _shoulderSmooth.add(_shoulder.add(shY), t);
+    final wristY = wristRaw == null ? null : _wrist.add(wristRaw);
+    final rawElbow = _bestElbow(p);
+    final elbow = rawElbow == null ? null : _elbow.add(rawElbow);
+
+    // ---- learn the top once they hold still, so the move into position is not mistaken for it
+    if (_top == null) {
+      if (_settleY == null || (y - _settleY!).abs() / scale > settleDrop) {
+        _settleY = y;
+        _settleSince = t;
+      } else if (t - _settleSince! >= const Duration(milliseconds: 300)) {
+        _top = y;
+        _wristRef = wristY;
+        cue = const Cue('Ready — start your pushups', CueTone.info);
+      }
+      return true;
+    }
+
+    // ---- depth
+    final top = _top!;
+    if (y < top) {
+      _top = top + 0.5 * (y - top);
+    } else if (!_inRep) {
+      // Slow drift so a shifted phone or body is absorbed. Frozen during a rep.
+      _top = top + (1 - math.exp(-stepMs / 5000)) * (y - top);
+    }
+    final drop = (y - _top!) / scale;
+
+    if (!_inRep) {
+      if (wristY != null) {
+        final ref = _wristRef;
+        _wristRef = ref == null ? wristY : ref + (1 - math.exp(-stepMs / 1000)) * (wristY - ref);
+      }
+      if (drop >= startDrop) {
+        _inRep = true;
+        _depth = drop;
+        _stillY = y;
+        _stillSince = t;
+      }
+      _lastDrop = drop;
+      return true;
+    }
+
+    // ---- inside a rep
+    _depth = math.max(_depth, drop);
+    final ref = _wristRef;
+    if (wristY != null && ref != null) _handMove = math.max(_handMove, (wristY - ref).abs() / scale);
+    final line = _bodyLineAngle(p);
+    if (line != null) _bodyLine.add(line);
+
+    // A dropout hid the bottom: deep on both sides of the gap means they went through it.
+    final last = _lastDrop;
+    if (gapMs >= 400 && last != null && last >= bridgeDrop && drop >= bridgeDrop) {
+      _depth = math.max(_depth, countDrop);
+    }
+    _lastDrop = drop;
+
+    if ((y - _stillY!).abs() / scale > settleDrop) {
+      _stillY = y;
+      _stillSince = t;
+    } else if (t - _stillSince! > const Duration(seconds: 6)) {
+      // Resting low down. Only stillness rebases the top, so pulsing near the bottom never becomes a new "top".
+      _resetRep();
+      _top = y;
+      cue = const Cue('Push up to continue', CueTone.info);
+      return true;
+    }
+
+    if (drop <= topDrop) {
+      if (sideOn && elbow != null && elbow < topElbow) {
+        cue = const Cue('Straighten your arms', CueTone.info);
+        return true; // shoulders are up but the arms are still bent: stay in the rep
+      }
+      if (_depth < countDrop) {
+        partial('Go lower — chest toward the floor');
+      } else if (_handMove >= maxHandMove * _depth) {
+        partial('Keep your hands and the phone still');
+      } else if (sideOn && _bodyLine.length >= 3 && _medianOf(_bodyLine) < minBodyLine) {
+        partial('Keep your body straight — rep not counted');
+      } else {
+        countRep(t);
+      }
+      _resetRep();
+    } else if (_depth >= countDrop && cue.tone != CueTone.warn) {
+      cue = const Cue('Push up', CueTone.info);
+    }
+    return true;
+  }
+
+  /// Elbow angle of the arm with the best likelihood, or null when neither arm is usable.
+  double? _bestElbow(PoseFrame p) {
+    double? best;
+    var bestScore = kArm;
+    for (final s in const [_left, _right]) {
+      final a = _at(p, s.shoulder, kArm), b = _at(p, s.elbow, kArm), c = _at(p, s.wrist, kArm);
+      if (a == null || b == null || c == null) continue;
+      final score = math.min(a.likelihood, math.min(b.likelihood, c.likelihood));
+      if (score > bestScore) {
+        bestScore = score;
+        best = angleAt(a, b, c);
+      }
+    }
+    return best;
+  }
+
+  /// Shoulder-hip-foot angle on the side with the best likelihood.
+  double? _bodyLineAngle(PoseFrame p) {
+    double? best;
+    var bestScore = kArm;
+    for (final s in const [_left, _right]) {
+      final a = _at(p, s.shoulder, kArm), b = _at(p, s.hip, kArm);
+      final c = _at(p, s.ankle, kArm) ?? _at(p, s.knee, kArm);
+      if (a == null || b == null || c == null) continue;
+      final score = math.min(b.likelihood, c.likelihood);
+      if (score > bestScore) {
+        bestScore = score;
+        best = angleAt(a, b, c);
+      }
+    }
+    return best;
   }
 }
 
@@ -342,9 +630,11 @@ class PullupCounter extends RepCounter {
       Joint.rightWrist,
     ];
     if (!RepCounter.visible(p, need)) return false;
-    final elbow = _elbow.add((angleAt(p[Joint.leftShoulder]!, p[Joint.leftElbow]!, p[Joint.leftWrist]!) +
-            angleAt(p[Joint.rightShoulder]!, p[Joint.rightElbow]!, p[Joint.rightWrist]!)) /
-        2);
+    final elbow = _elbow.add(
+      (angleAt(p[Joint.leftShoulder]!, p[Joint.leftElbow]!, p[Joint.leftWrist]!) +
+              angleAt(p[Joint.rightShoulder]!, p[Joint.rightElbow]!, p[Joint.rightWrist]!)) /
+          2,
+    );
     final wristY = (p[Joint.leftWrist]!.y + p[Joint.rightWrist]!.y) / 2;
     final shoulderY = (p[Joint.leftShoulder]!.y + p[Joint.rightShoulder]!.y) / 2;
     final noseY = p[Joint.nose]!.y;
