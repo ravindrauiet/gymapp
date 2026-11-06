@@ -1,5 +1,5 @@
-// AI Arena rep counting: pure Dart state machines over pose landmarks (no Flutter / ML Kit imports, so the
-// logic can be simulated and unit-tested off-device).
+// ProveIt rep counting ("Only real reps count"): pure Dart state machines over pose landmarks (no Flutter / ML Kit
+// imports, so the logic can be simulated and unit-tested off-device — see test/proveit/pose_sim.dart).
 //
 // Coordinates are image pixels in the upright frame ML Kit returns (y grows downwards). Angles are invariant to
 // scale, rotation and mirroring, so they don't depend on how the phone is held; "above"/"below" checks rely on the
@@ -11,10 +11,12 @@
 //   pushup  elbow  ≤ 95 = bottom (≈ 90° = chest near the floor),  ≥ 158 = locked out (fully straight ≈ 170–180)
 //           body (shoulder–hip–ankle) must stay ≥ 145 through the rep (straight ≈ 180; sag/pike drops it)
 //   squat   knee   ≤ 100 = depth (thighs ≈ parallel),             ≥ 160 = standing tall
-//   pullup  top    = nose above the wrists (chin over the bar),   bottom = elbows ≥ 150 (dead hang)
+//   pullup  see [PullupCounter]: hands fixed above the head, shoulders AND hips rise, chin over the hands, back to a
+//           dead hang (elbows ≥ 150). Standing arm movements never move the body up with the hands still → 0 reps.
 //   burpee  floor  = shoulder→ankle line within 40° of horizontal; finish = standing (knee ≥ 150, torso within 30°
 //           of vertical) with both wrists above the nose, or a jump (ankles lift ≥ 6% of body height)
-//   plank   body   ≥ 162 to (re)start the timer, < 155 pauses it (hysteresis), body within 40° of horizontal
+//   plank   see [PlankCounter]: timer runs only while shoulders, hips and ankles are in line, knees off the floor and
+//           the shoulders are held up on the arms; it pauses on sag / pike / knees down and stops when the hold breaks.
 // The gap between each "down" and "up" threshold is the hysteresis that stops jitter from double counting.
 
 import 'dart:math' as math;
@@ -116,6 +118,23 @@ abstract class RepCounter {
     'burpees' => BurpeeCounter(),
     _ => throw ArgumentError('Unknown arena exercise $id'),
   };
+
+  /// A fresh counter for the same exercise that keeps this one's score (reps / held seconds, partial reps, last rep
+  /// time) but none of its tracking state. Used when the camera is switched mid-set: the new camera sees the body
+  /// from another place, so baselines (top position, hang height…) must be learnt again.
+  RepCounter carryOver(String exerciseId) {
+    final n = RepCounter.forExercise(exerciseId);
+    n.reps = reps;
+    n.partialReps = partialReps;
+    n._lastRepAt = _lastRepAt;
+    return n;
+  }
+
+  /// When the last full rep was counted (stream time), null before the first one.
+  Duration? get lastRepAt => _lastRepAt;
+
+  /// Timed holds only: true once the member has clearly left the position, which ends the set.
+  bool get holdBroken => false;
 
   /// Full-range reps (for plank: whole seconds held with good form).
   int get count => reps;
@@ -606,71 +625,282 @@ class SquatCounter extends _FlexCounter {
   }
 }
 
+/// Pullups, phone propped up in front of the bar (straight on or at an angle).
+///
+/// What separates a pullup from copying the arm movement: the hands hold a fixed bar, so during a real rep the hands
+/// stay still in the image while the shoulders AND the hips (and the feet, when they are in view) rise by most of a
+/// torso length. Standing and waving the arms moves the hands, not the body; squatting under a low bar and standing
+/// up lifts the hips but leaves the knees and feet where they were. Neither is counted. The legs (knees or ankles) must
+/// be in view, because they are what proves the feet left the floor.
+///
+/// One rep = dead hang (hands above the head, arms straight) → pull until the nose is clearly above the hands (chin at
+/// or over the bar) → lower back to straight arms.
 class PullupCounter extends RepCounter {
-  final _elbow = _Ema(0.5);
-  bool _armed = false; // seen a dead hang
+  // Distances are in torso lengths (shoulder to hip, about 0.5 m on an adult).
+  static const double hangElbow = 150; // arms straight enough for a dead hang
+  static const double handsOverHead = 0.10; // hands at least this far above the nose = hanging from something
+  static const double startRise = 0.15; // shoulders have clearly left the hang
+  static const double topMargin = 0.16; // nose this far above the hands (~8 cm) = chin at or over the bar
+  static const double minShoulderRise = 0.45; // a real rep lifts the shoulders by about 0.8-1 torso
+  static const double minHipRise = 0.35; // ...and the hips with them
+  static const double minLegRise = 0.30; // ...and the legs (knees / ankles): the feet are off the floor
+  static const double maxThighGrow = 0.45; // hip–knee gap opening this much = standing up out of a squat
+  static const double maxHandMove = 0.25; // hands on a bar barely move; waving hands move a full forearm
+  static const double letGo = 0.55; // hands moved this far from the bar position: they let go / are not hanging
+  static const double backDown = 0.20; // shoulders back within this of the hang = the rep is over
+  static const double kNeed = 0.30;
+
+  final _elbow = _Median3();
+  final _sh = _Median3();
+  final _hip = _Median3();
+  final _wr = _Median3();
+  final _nose = _Median3();
+  final _ank = _Median3();
+  final _knee = _Median3();
+  final _torsos = <double>[];
+  Duration? _torsoAt;
+  Duration? _lastT;
+
+  Duration? _hangSince; // hanging still (arms straight, shoulders not moving) since
+  double _settleSh = 0;
+  Duration? _stuckSince; // straight arms but not back at the reference: the hang height changed
+  bool _armed = false;
+  double _shRef = 0, _hipRef = 0, _wrRef = 0;
+  double? _ankRef, _kneeRef;
+
+  bool _inRep = false;
   bool _top = false;
-  bool _pulled = false; // started pulling since the last hang
+  double _shRise = 0, _hipRise = 0, _handMove = 0;
+  double? _legRise, _ankBest, _kneeBest;
+  double _thighGrow = 0;
 
   @override
   String get lostCue => 'Step back — head, hands and hips must be visible';
 
   @override
-  void onLost() => _elbow.reset();
+  Duration get lostAfter => const Duration(milliseconds: 1500);
+
+  /// Losing sight of the body ends the current rep (its top can't be verified), but the bar does not move, so the
+  /// hang reference survives short gaps; only a long one (see [process]) starts over.
+  @override
+  void onLost() {
+    _inRep = false;
+    _top = false;
+    _stuckSince = null;
+    for (final m in [_elbow, _sh, _hip, _wr, _nose, _ank, _knee]) {
+      m.reset();
+    }
+  }
+
+  void _reset() {
+    _armed = false;
+    _inRep = false;
+    _top = false;
+    _hangSince = null;
+    _ankRef = null;
+    _kneeRef = null;
+    for (final m in [_elbow, _sh, _hip, _wr, _nose, _ank, _knee]) {
+      m.reset();
+    }
+  }
+
+  static double? _y(PoseFrame p, Iterable<Joint> js, {double min = kNeed}) {
+    var sum = 0.0, n = 0;
+    for (final j in js) {
+      final pt = p[j];
+      if (pt != null && pt.likelihood >= min) {
+        sum += pt.y;
+        n++;
+      }
+    }
+    return n == 0 ? null : sum / n;
+  }
 
   @override
   bool process(PoseFrame p, Duration t) {
-    const need = [
-      Joint.nose,
-      Joint.leftShoulder,
-      Joint.rightShoulder,
-      Joint.leftElbow,
-      Joint.rightElbow,
-      Joint.leftWrist,
-      Joint.rightWrist,
-    ];
-    if (!RepCounter.visible(p, need)) return false;
-    final elbow = _elbow.add(
-      (angleAt(p[Joint.leftShoulder]!, p[Joint.leftElbow]!, p[Joint.leftWrist]!) +
-              angleAt(p[Joint.rightShoulder]!, p[Joint.rightElbow]!, p[Joint.rightWrist]!)) /
-          2,
-    );
-    final wristY = (p[Joint.leftWrist]!.y + p[Joint.rightWrist]!.y) / 2;
-    final shoulderY = (p[Joint.leftShoulder]!.y + p[Joint.rightShoulder]!.y) / 2;
-    final noseY = p[Joint.nose]!.y;
+    final gap = _lastT == null ? Duration.zero : t - _lastT!;
+    _lastT = t;
+    if (gap > const Duration(seconds: 4)) _reset();
 
-    if (wristY > shoulderY) {
-      cue = const Cue('Grab the bar — hands above your head', CueTone.info);
-      return true;
+    final noseRaw = _y(p, const [Joint.nose]);
+    final shRaw = _y(p, const [Joint.leftShoulder, Joint.rightShoulder]);
+    final wrRaw = _y(p, const [Joint.leftWrist, Joint.rightWrist]);
+    final hipRaw = _y(p, const [Joint.leftHip, Joint.rightHip]);
+    if (noseRaw == null || shRaw == null || wrRaw == null || hipRaw == null) return false;
+    var elbowSum = 0.0, elbowN = 0;
+    for (final s in const [_left, _right]) {
+      if (!RepCounter.visible(p, [s.shoulder, s.elbow, s.wrist])) continue;
+      elbowSum += angleAt(p[s.shoulder]!, p[s.elbow]!, p[s.wrist]!);
+      elbowN++;
     }
-    final hang = elbow >= 150;
-    final chinOver = noseY < wristY;
+    if (elbowN == 0) return false;
+    final ankRaw = _y(p, const [Joint.leftAnkle, Joint.rightAnkle]);
+    final kneeRaw = _y(p, const [Joint.leftKnee, Joint.rightKnee]);
 
-    if (!_armed) {
-      if (hang) {
-        _armed = true;
-        cue = const Cue('Dead hang — pull!', CueTone.info);
+    final nose = _nose.add(noseRaw), sh = _sh.add(shRaw), wr = _wr.add(wrRaw), hip = _hip.add(hipRaw);
+    final elbow = _elbow.add(elbowSum / elbowN);
+    final ank = ankRaw == null ? null : _ank.add(ankRaw);
+    final knee = kneeRaw == null ? null : _knee.add(kneeRaw);
+
+    // Torso length in pixels (median, so a bent-over frame or a jitter spike does not change the scale).
+    if (_torsoAt == null || t - _torsoAt! >= const Duration(milliseconds: 150)) {
+      final torso = (hip - sh).abs();
+      if (torso > 0) {
+        _torsos.add(torso);
+        if (_torsos.length > 21) _torsos.removeAt(0);
+        _torsoAt = t;
+      }
+    }
+    if (_torsos.isEmpty) return false;
+    final torso = _medianOf(_torsos);
+
+    final hanging = wr < nose - handsOverHead * torso && wr < sh;
+    final straight = elbow >= hangElbow;
+
+    if (!_inRep) {
+      if (hanging && straight) {
+        // Settled = the shoulders stayed within a small band, so jumping up to the bar is not taken as the hang.
+        if (_hangSince == null || (sh - _settleSh).abs() / torso > 0.06) {
+          _hangSince = t;
+          _settleSh = sh;
+        }
+        if (!_armed && t - _hangSince! >= const Duration(milliseconds: 300)) {
+          if (ank == null && knee == null) {
+            cue = const Cue('Step back — your legs must be in the frame too', CueTone.warn);
+            return true;
+          }
+          _armed = true;
+          _shRef = sh;
+          _hipRef = hip;
+          _wrRef = wr;
+          _ankRef = ank;
+          _kneeRef = knee;
+          cue = const Cue('Dead hang — now pull!', CueTone.info);
+        } else if (_armed) {
+          // Follow the hang slowly: the body sways and the grip shifts a little between reps.
+          final k = 1 - math.exp(-gap.inMicroseconds / 400000);
+          _shRef += k * (sh - _shRef);
+          _hipRef += k * (hip - _hipRef);
+          _wrRef += k * (wr - _wrRef);
+          if (ank != null) _ankRef = _ankRef == null ? ank : _ankRef! + k * (ank - _ankRef!);
+          if (knee != null) _kneeRef = _kneeRef == null ? knee : _kneeRef! + k * (knee - _kneeRef!);
+        }
       } else {
-        cue = const Cue('Start from a dead hang, arms straight', CueTone.info);
+        _hangSince = null;
+      }
+      if (!_armed) {
+        cue = hanging
+            ? const Cue('Straighten your arms — start from a dead hang', CueTone.info)
+            : const Cue('Hang from the bar — hands above your head', CueTone.info);
+        return true;
+      }
+      if ((wr - _wrRef).abs() / torso > letGo) {
+        // The hands moved, not the body: arm waving, or they let go of the bar.
+        _armed = false;
+        _hangSince = null;
+        cue = const Cue('Hang from the bar — arm movements alone do not count', CueTone.warn);
+        return true;
+      }
+      final rise = (_shRef - sh) / torso;
+      if (rise >= startRise) {
+        _inRep = true;
+        _top = false;
+        _stuckSince = null;
+        _shRise = rise;
+        _hipRise = (_hipRef - hip) / torso;
+        _handMove = (wr - _wrRef).abs() / torso;
+        _legRise = _ankBest = _kneeBest = null;
+        _thighGrow = 0;
+        _noteLegs(ank, knee, hip, rise, torso);
+      } else if (elbow < 110 && rise < 0.08) {
+        cue = const Cue('Pull your body up — the hands stay on the bar', CueTone.warn);
       }
       return true;
     }
-    if (!_top) {
-      if (elbow < 120) _pulled = true;
-      if (chinOver) {
-        _top = true;
-      } else if (hang && _pulled) {
-        partial('Chin over the bar!');
-        _pulled = false;
+
+    // ---- inside a rep
+    final rise = (_shRef - sh) / torso;
+    _shRise = math.max(_shRise, rise);
+    _hipRise = math.max(_hipRise, (_hipRef - hip) / torso);
+    _handMove = math.max(_handMove, (wr - _wrRef).abs() / torso);
+    _noteLegs(ank, knee, hip, rise, torso);
+    // The top lasts only a few frames on a slow phone and a median would clip it, so a single confident raw frame
+    // (nose and both hands clearly tracked) is enough.
+    if (nose <= wr - topMargin * torso) _top = true;
+    final wrSure = _y(p, const [Joint.leftWrist, Joint.rightWrist], min: 0.5);
+    final noseSure = _y(p, const [Joint.nose], min: 0.5);
+    if (wrSure != null && noseSure != null && noseSure <= wrSure - topMargin * torso) _top = true;
+
+    if (_handMove > letGo) {
+      _inRep = false;
+      _armed = false;
+      _hangSince = null;
+      cue = const Cue('Keep your hands on the bar', CueTone.warn);
+      return true;
+    }
+
+    // Back in a straight-arm hang, but higher than the reference: the reference was taken too low (still getting
+    // onto the bar) or they re-gripped. This IS the bottom of the rep: move the reference here and judge the rep
+    // with its rises measured from the new hang height.
+    var atBottom = rise <= backDown && straight;
+    if (straight && hanging && rise > backDown) {
+      _stuckSince ??= t;
+      if (t - _stuckSince! >= const Duration(milliseconds: 350)) {
+        final dHip = (_hipRef - hip) / torso;
+        _shRise -= rise;
+        _hipRise -= dHip;
+        if (_legRise != null) _legRise = _legRise! - rise;
+        _thighGrow = 0;
+        _shRef = sh;
+        _hipRef = hip;
+        _wrRef = wr;
+        if (ank != null) _ankRef = ank;
+        if (knee != null) _kneeRef = knee;
+        _stuckSince = null;
+        atBottom = true;
       }
-    } else if (hang) {
-      countRep(t);
+    } else {
+      _stuckSince = null;
+    }
+
+    if (atBottom) {
+      if (!_top) {
+        if (_shRise >= 0.3) partial('Chin over the bar!');
+      } else if (_handMove > maxHandMove) {
+        partial('Keep your hands on the bar');
+      } else if (_shRise < minShoulderRise || _hipRise < minHipRise) {
+        partial('Pull your whole body up — arm movements alone do not count');
+      } else if ((_legRise ?? 0) < minLegRise || _thighGrow > maxThighGrow) {
+        partial('Feet off the floor — legs must rise with you');
+      } else {
+        countRep(t, cue: 'Clean pullup!');
+      }
+      _inRep = false;
       _top = false;
-      _pulled = false;
-    } else if (!chinOver && elbow < 150) {
+      _hangSince = t; // already back in the hang
+      _settleSh = sh;
+    } else if (_top) {
       cue = const Cue('Lower all the way — straighten your arms', CueTone.info);
+    } else if (_shRise >= 0.3 && rise < _shRise - 0.2) {
+      cue = const Cue('Chin over the bar!', CueTone.warn);
     }
     return true;
+  }
+
+  /// How far the legs rose since the rep started: the smaller of the knees' and the ankles' best rise (each one that
+  /// is visible must rise — squatting moves the knees a little but leaves the ankles on the floor), and the thighs
+  /// must not "grow" (hip–knee gap opening up = standing up out of a squat, not pulling).
+  /// A joint only takes part once it was seen while the shoulders were well up, so a foot that dropped out of
+  /// tracking for the top of the rep is not mistaken for a foot that stayed on the floor.
+  void _noteLegs(double? ank, double? knee, double hip, double shRise, double torso) {
+    final up = shRise >= 0.4;
+    if (up && ank != null && _ankRef != null) _ankBest = math.max(_ankBest ?? -1, (_ankRef! - ank) / torso);
+    if (up && knee != null && _kneeRef != null) _kneeBest = math.max(_kneeBest ?? -1, (_kneeRef! - knee) / torso);
+    if (knee != null && _kneeRef != null) {
+      _thighGrow = math.max(_thighGrow, ((knee - hip) - (_kneeRef! - _hipRef)) / torso);
+    }
+    final rises = [?_ankBest, ?_kneeBest];
+    _legRise = rises.isEmpty ? null : rises.reduce(math.min);
   }
 }
 
@@ -739,11 +969,55 @@ class BurpeeCounter extends RepCounter {
   }
 }
 
+/// Plank hold timer (forearm or straight-arm plank, phone side-on).
+///
+/// The timer runs only while the hold is good: shoulders, hips and ankles in one straight line, knees off the floor
+/// and the shoulders held up on the forearms / hands. It pauses the moment the hips sag or pike or the knees touch
+/// down, and the hold is over ([holdBroken]) once the member leaves the plank (stands, sits, lies down, walks off).
+///
+/// Distances are in body lengths (shoulder to ankle in the image, about 1.35 m on an adult):
+///   hip sag   hip below the shoulder–ankle line: > 0.065 pauses (≈ 9 cm, body line ≈ 164°), < 0.045 resumes
+///   hip pike  hip above the line: > 0.085 pauses (≈ 12 cm), < 0.06 resumes — a slight pike is normal and safe
+///   knees     knee height above the elbow/hand–ankle floor line: < 0.025 = knees down (a plank holds ≈ 0.07)
+///   support   shoulders above the forearms / hands by ≥ 0.10 (lying flat on the floor ≈ 0)
+///   tilt      shoulder→ankle within 35° of horizontal (standing ≈ 90°)
+/// Changes of state need 250 ms of agreement, so one noisy frame neither pauses nor resumes the timer; the delays
+/// on the way in and out cancel out, so a 60 s hold reads 60 s.
 class PlankCounter extends RepCounter {
-  final _body = _Ema(0.5);
-  bool _good = false;
-  Duration? _lastT;
+  static const double pauseSag = 0.065, resumeSag = 0.045;
+  static const double pausePike = 0.085, resumePike = 0.06;
+  static const double kneesDown = 0.025, kneesUp = 0.04;
+  static const double minSupport = 0.10;
+  static const double maxTilt = 35;
+  static const Duration debounce = Duration(milliseconds: 250);
+  static const Duration leaveAfter = Duration(milliseconds: 1200); // out of plank this long = hold broken
+  static const Duration lostBreak = Duration(seconds: 3); // out of view this long = hold broken
+  static const Duration maxPause = Duration(seconds: 15); // paused for bad form this long = hold broken
+  static const Duration maxBridge = Duration(milliseconds: 1500); // tracking gaps up to this are bridged
+
+  final _dev = _Median3();
+  final _devS = _TimeEma(150);
+  final _knee = _Median3();
+  final _kneeS = _TimeEma(150);
+  final _support = _Median3();
+  final _tilt = _Median3();
+
   double heldSeconds = 0;
+  bool _good = false;
+  bool _posture = false;
+  bool _kneesOk = true;
+  Duration? _pendingSince;
+  Duration? _lastT;
+  Duration? _offSince; // left the plank posture
+  Duration? _pausedSince; // in posture but bad form
+  bool _broken = false;
+  bool _started = false;
+
+  /// Last measured hip offset from the line in body lengths (positive = sagging), for diagnostics and tests.
+  double hipOffset = 0;
+
+  /// Whether the timer is running right now.
+  bool get running => _good && !_broken;
 
   @override
   int get reps => heldSeconds.floor();
@@ -751,48 +1025,202 @@ class PlankCounter extends RepCounter {
   set reps(int v) {}
 
   @override
+  bool get holdBroken => _broken;
+
+  @override
+  RepCounter carryOver(String exerciseId) => PlankCounter()
+    ..heldSeconds = heldSeconds
+    ..partialReps = partialReps
+    .._started = _started;
+
+  @override
   String get lostCue => 'Phone to your side — shoulders to ankles in the frame';
+
+  @override
+  Duration get lostAfter => const Duration(milliseconds: 1500);
+
+  @override
+  void update(PoseFrame? pose, Duration t) {
+    super.update(pose, t);
+    if (_started && !tracking && _lastSeen != null && t - _lastSeen! > lostBreak) _broken = true;
+  }
 
   @override
   void onLost() {
     _good = false;
+    _kneesOk = true;
+    _pendingSince = null;
     _lastT = null;
-    _body.reset();
+    for (final m in [_dev, _knee, _support, _tilt]) {
+      m.reset();
+    }
+    _devS.reset();
+    _kneeS.reset();
+  }
+
+  static Pt? _at(PoseFrame p, Joint j) {
+    final pt = p[j];
+    return pt != null && pt.likelihood >= kMinLikelihood ? pt : null;
+  }
+
+  /// Signed distance of [q] from the line a→b, in units of [len]: positive = lower in the image (y grows down).
+  static double _below(Pt a, Pt b, Pt q, double len) {
+    final dx = b.x - a.x, dy = b.y - a.y;
+    final cross = dx * (q.y - a.y) - dy * (q.x - a.x);
+    final l = math.sqrt(dx * dx + dy * dy);
+    if (l == 0 || len == 0) return 0;
+    return (dx >= 0 ? 1 : -1) * cross / l / len;
   }
 
   @override
   bool process(PoseFrame p, Duration t) {
-    final s = RepCounter.pickSide(p, (s) => [s.shoulder, s.hip, s.ankle]);
-    if (s == null) return false;
-    final sh = p[s.shoulder]!, hip = p[s.hip]!, an = p[s.ankle]!;
-    final body = _body.add(angleAt(sh, hip, an));
-    final horizontal = tiltFromHorizontal(sh, an) <= 40;
+    if (_broken) {
+      cue = const Cue('Hold over — great effort!', CueTone.info);
+      return true;
+    }
+    // The side facing the camera: shoulder, hip and ankle (or the knee when the feet are cut off).
+    BodySide? side;
+    var best = -1.0;
+    var useKnee = false;
+    for (final s in const [_left, _right]) {
+      final sh = _at(p, s.shoulder), hip = _at(p, s.hip), an = _at(p, s.ankle), kn = _at(p, s.knee);
+      if (sh == null || hip == null) continue;
+      final end = an ?? kn;
+      if (end == null) continue;
+      final score = (sh.likelihood + hip.likelihood + end.likelihood) / 3 + (an != null ? 0.2 : 0);
+      if (score > best) {
+        best = score;
+        side = s;
+        useKnee = an == null;
+      }
+    }
+    if (side == null) return false;
+    final sh = p[side.shoulder]!, hip = p[side.hip]!;
+    final end = useKnee ? p[side.knee]! : p[side.ankle]!;
+    final len = _dist(sh, end);
+    if (len <= 0) return false;
+
+    final tilt = _tilt.add(tiltFromHorizontal(sh, end));
+    final dev = _devS.add(_dev.add(_below(sh, end, hip, len)), t);
+    hipOffset = dev;
+
+    // Floor contact: the lower of elbow / wrist (forearm plank: both on the floor; straight arms: the hand).
+    Pt? support;
+    for (final s in [side, side == _left ? _right : _left]) {
+      for (final j in [s.elbow, s.wrist]) {
+        final q = _at(p, j);
+        if (q != null && (support == null || q.y > support.y)) support = q;
+      }
+      if (support != null) break;
+    }
+    double? supportLift;
+    if (support != null) supportLift = _support.add((support.y - sh.y) / len);
+
+    double? kneeLift;
+    final knee = _at(p, side.knee);
+    if (!useKnee && knee != null && support != null) {
+      kneeLift = _kneeS.add(_knee.add(-_below(support, end, knee, len)), t);
+    }
+
+    // ---- posture: is this a plank at all?
+    if (supportLift != null) {
+      _posture = tilt <= maxTilt && supportLift >= minSupport;
+    } else {
+      _posture = _posture && tilt <= maxTilt; // arms hidden: keep the last verdict while the body stays low
+    }
+
+    // ---- form (hysteresis: harder to start than to keep going)
+    final sagOk = _good ? dev <= pauseSag : dev <= resumeSag;
+    final pikeOk = _good ? dev >= -pausePike : dev >= -resumePike;
+    // Knee not measurable this frame (dropout, feet cut off): keep the last verdict rather than assume it is up.
+    final kneesOk = kneeLift == null ? _kneesOk : (_good ? kneeLift >= kneesDown : kneeLift >= kneesUp);
+    _kneesOk = kneesOk;
+    final want = _posture && sagOk && pikeOk && kneesOk;
 
     final wasGood = _good;
-    if (!horizontal) {
-      _good = false;
-    } else if (_good) {
-      _good = body >= 155;
+    if (want != _good) {
+      _pendingSince ??= t;
+      if (t - _pendingSince! >= debounce) {
+        _good = want;
+        _pendingSince = null;
+      }
     } else {
-      _good = body >= 162;
+      _pendingSince = null;
     }
 
-    if (_good && wasGood && _lastT != null) {
-      // Cap the step so a stalled stream never adds a big jump.
-      final dt = (t - _lastT!).inMicroseconds / 1e6;
-      heldSeconds += dt.clamp(0, 0.5);
-    }
+    final last = _lastT;
     _lastT = t;
+    if (wasGood && last != null) {
+      final dt = t - last;
+      if (dt <= maxBridge) heldSeconds += dt.inMicroseconds / 1e6;
+    }
+    if (heldSeconds >= 1) _started = true;
+    if (wasGood && !_good) partialReps++; // form breaks
 
+    // ---- has the hold ended?
+    if (_posture) {
+      _offSince = null;
+    } else {
+      _offSince ??= t;
+    }
+    if (_good || !_posture) {
+      _pausedSince = null;
+    } else {
+      _pausedSince ??= t;
+    }
+    final left = _offSince != null && t - _offSince! >= leaveAfter;
+    final gaveUp = _pausedSince != null && t - _pausedSince! >= maxPause;
+    if (_started && (left || gaveUp)) {
+      _broken = true;
+      _good = false;
+      cue = const Cue('Hold over — great effort!', CueTone.info);
+      return true;
+    }
+
+    // ---- cue
     if (_good) {
       cue = const Cue('Perfect line — hold it!', CueTone.good);
-    } else if (!horizontal) {
-      cue = Cue(heldSeconds > 0 ? 'Timer paused — get back into your plank' : 'Get down into a plank', CueTone.warn);
+    } else if (!_posture) {
+      cue = _started
+          ? const Cue('Timer paused — get back into your plank', CueTone.warn)
+          : const Cue('Get into a plank — forearms on the floor', CueTone.info);
+    } else if (!sagOk) {
+      cue = const Cue('Hips sagging — timer paused', CueTone.warn);
+    } else if (!pikeOk) {
+      cue = const Cue('Hips too high — timer paused', CueTone.warn);
+    } else if (!kneesOk) {
+      cue = const Cue('Knees off the floor — timer paused', CueTone.warn);
     } else {
-      final lineY = sh.y + (an.y - sh.y) * ((hip.x - sh.x) / ((an.x - sh.x) == 0 ? 1 : (an.x - sh.x)));
-      cue = Cue(hip.y > lineY ? 'Hips sagging — timer paused' : 'Hips too high — timer paused', CueTone.warn);
+      cue = const Cue('Hold still — straight line…', CueTone.info);
     }
-    if (wasGood && !_good) partialReps++; // number of form breaks
     return true;
+  }
+}
+
+/// When an Unlimited ProveIt set ends by itself: one continuous set, no target.
+///  - reps: [idle] without a new full rep (partial reps do not keep the set alive);
+///  - plank: as soon as the hold breaks;
+///  - nobody started: [firstRepWithin] after the countdown without a first rep / first second held.
+class UnlimitedSetRule {
+  static const Duration idle = Duration(seconds: 5);
+  static const Duration firstRepWithin = Duration(seconds: 20);
+
+  static bool shouldEnd(RepCounter c, Duration elapsed) {
+    if (c is PlankCounter) return c.holdBroken || (c.heldSeconds < 1 && elapsed >= firstRepWithin);
+    final last = c.lastRepAt;
+    if (last == null) return elapsed >= firstRepWithin;
+    return elapsed - last >= idle;
+  }
+
+  /// Time left before the set ends on its own, or null when that does not apply (a plank already under way).
+  static Duration? remaining(RepCounter c, Duration elapsed) {
+    if (c is PlankCounter) {
+      if (c.heldSeconds >= 1) return null;
+      final left = firstRepWithin - elapsed;
+      return left.isNegative ? Duration.zero : left;
+    }
+    final last = c.lastRepAt;
+    final left = last == null ? firstRepWithin - elapsed : idle - (elapsed - last);
+    return left.isNegative ? Duration.zero : left;
   }
 }

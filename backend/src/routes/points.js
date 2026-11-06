@@ -8,12 +8,12 @@ import { arenaTableExists } from './events.js';
 
 /**
  * Trophy board (BRD §3.4): overall FitKey points, rank and badges across all activity.
- * Points: 10 per check-in day, 5 per logged workout, 1 per km run, plus AI Arena points.
+ * Points: 10 per check-in day, 5 per logged workout, 1 per km run, plus ProveIt points.
  */
 const router = Router();
 router.use(requireAuth('user'));
 
-export const SCORING = { perCheckinDay: 10, perWorkoutLog: 5, perRunningKm: 1, arena: 'AI Arena points as earned' };
+export const SCORING = { perCheckinDay: 10, perWorkoutLog: 5, perRunningKm: 1, arena: 'ProveIt points as earned' };
 
 /**
  * Ranked points for the current week / month in APP_TZ, optionally for one city.
@@ -127,7 +127,7 @@ export async function badgesFor(userId) {
     milestone('workouts_25', '25 workouts', 'Logged 25 workouts', 'workout', stats.workouts, 25),
     milestone('first_event', 'Event debut', 'Joined your first FitKey event', 'event', stats.eventsJoined, 1, stats.firstEvent),
     milestone('onground', 'Showed up', 'Attended an on-ground event', 'place', stats.eventsAttended, 1),
-    milestone('arena_first', 'Arena debut', 'Completed a set in the AI Arena', 'arena', arena.sets, 1, arena.firstAt),
+    milestone('arena_first', 'Arena debut', 'Completed a set in the ProveIt', 'arena', arena.sets, 1, arena.firstAt),
   ];
   const earned = badges.filter((b) => b.earned);
   // Only the next locked milestone of each family, so the list shows real progress rather than a wall of locks.

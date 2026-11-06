@@ -4,13 +4,18 @@ import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'package:url_launcher/url_launcher.dart';
 
+import '../../data/booking_api.dart';
 import '../../data/models.dart';
 import '../../state/session.dart';
 import '../../ui/ui.dart';
 import '../../widgets/rating_widgets.dart';
 import '../../widgets/venue_card.dart' show isOpenNow;
+import '../booking/book_slot_screen.dart';
 import '../checkin/checkin_screen.dart';
 import '../community/buddy_screens.dart';
+import '../memberships/buy_membership_screen.dart';
+import '../memberships/centre_plans_section.dart';
+import '../memberships/my_memberships_screen.dart';
 import '../plans/plans_screen.dart';
 
 class VenueDetailScreen extends StatefulWidget {
@@ -24,14 +29,36 @@ class VenueDetailScreen extends StatefulWidget {
 
 class _VenueDetailScreenState extends State<VenueDetailScreen> {
   late Future<({Venue venue, List<PlanRef> plans})> _future;
+  // Booking access + the centre's own plans. Failures here never break the page (it falls back to the old CTA).
+  late Future<_Extras> _extras;
+  final _plansKey = GlobalKey();
 
   @override
   void initState() {
     super.initState();
     _future = context.read<Session>().api.venue(widget.venueId);
+    _extras = _loadExtras();
   }
 
-  void _retry() => setState(() => _future = context.read<Session>().api.venue(widget.venueId));
+  Future<_Extras> _loadExtras() async {
+    final api = context.read<Session>().api;
+    final results = await Future.wait<Object?>([
+      api.venueAccess(widget.venueId).then<Object?>((a) => a, onError: (_) => null),
+      api.centrePlans(widget.venueId).then<Object?>((p) => p, onError: (_) => const <CentrePlan>[]),
+    ]);
+    return _Extras(access: results[0] as VenueAccess?, plans: results[1] as List<CentrePlan>);
+  }
+
+  void _retry() => setState(() {
+        _future = context.read<Session>().api.venue(widget.venueId);
+        _extras = _loadExtras();
+      });
+
+  /// Coming back from booking / buying refreshes what the member holds here.
+  Future<void> _go(Widget screen) async {
+    await push(context, screen);
+    if (mounted) setState(() => _extras = _loadExtras());
+  }
 
   Future<void> _open(Uri uri) async {
     final ok = await launchUrl(uri, mode: LaunchMode.externalApplication).catchError((_) => false);
@@ -70,8 +97,19 @@ class _VenueDetailScreenState extends State<VenueDetailScreen> {
         if (snap.hasError) return Scaffold(appBar: AppBar(), body: ErrorView(error: snap.error!, onRetry: _retry));
         final venue = snap.data!.venue;
         final plans = snap.data!.plans;
-        final covered = sub != null && sub.categories.any(venue.categories.contains);
-        return Scaffold(
+        final legacyCovered = sub != null && sub.categories.any(venue.categories.contains);
+        return FutureBuilder<_Extras>(
+          future: _extras,
+          builder: (context, extraSnap) {
+            final extras = extraSnap.data;
+            final access = extras?.access;
+            final centrePlans = extras?.plans ?? const <CentrePlan>[];
+            final hasMembership = access?.hasMembership ?? false;
+            // Case 1: a FitKey pass can pay a visit here (legacy pass, session plan or enough coins).
+            final hasPass = legacyCovered || (access?.hasFitkeyPass ?? false);
+            final covered = hasPass || hasMembership;
+            void book() => _go(BookSlotScreen(venueId: venue.id, venueName: venue.name));
+            return Scaffold(
           body: CustomScrollView(slivers: [
             SliverAppBar(
               expandedHeight: 300,
@@ -99,40 +137,81 @@ class _VenueDetailScreenState extends State<VenueDetailScreen> {
               venue: venue,
               plans: plans,
               covered: covered,
+              access: access,
+              hasPass: hasPass,
+              hasMembership: hasMembership,
+              legacyPlanName: legacyCovered ? sub.planName : access?.legacyPlanName,
+              centrePlans: centrePlans,
+              plansKey: _plansKey,
+              onBuyPlan: (p) => _go(BuyMembershipScreen(plan: p, venueName: venue.name)),
+              onCheckin: () => push(context, CheckinScreen(venueId: venue.id, venueName: venue.name)),
               onDirections: () => _directions(venue),
               onCall: venue.contactPhone == null ? null : () => _open(Uri.parse('tel:${venue.contactPhone}')),
             )),
           ]),
           bottomNavigationBar: BottomActionBar(
             leading: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Text(covered ? 'Included in' : 'From',
-                  style: const TextStyle(fontSize: 11.5, color: AppColors.text2, fontWeight: FontWeight.w600)),
               Text(
-                covered
-                    ? sub.planName
-                    : plans.isEmpty
-                        ? 'FitKey Pass'
-                        : '${formatPaise(plans.map((p) => p.pricePaise).reduce((a, b) => a < b ? a : b))}/pass',
-                style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 15),
+                hasMembership
+                    ? 'Your membership'
+                    : hasPass
+                        ? 'Each visit'
+                        : 'From',
+                style: const TextStyle(fontSize: 11.5, color: AppColors.text2, fontWeight: FontWeight.w600),
+              ),
+              ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 150),
+                child: Text(
+                  hasMembership
+                      ? 'Included'
+                      : hasPass
+                          ? (access?.fitkey.canPay ?? false ? access!.fitkey.label : sub?.planName ?? 'FitKey Pass')
+                          : centrePlans.isNotEmpty
+                              ? formatPaise(centrePlans.map((p) => p.effectivePricePaise).reduce((a, b) => a < b ? a : b))
+                              : plans.isEmpty
+                                  ? 'FitKey Pass'
+                                  : '${formatPaise(plans.map((p) => p.pricePaise).reduce((a, b) => a < b ? a : b))}/pass',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 15),
+                ),
               ),
             ]),
             child: covered
                 ? AppButton(
-                    label: 'Check in here',
-                    icon: Icons.qr_code_scanner_rounded,
-                    onPressed: () => push(context, CheckinScreen(venueId: venue.id, venueName: venue.name)),
+                    label: hasMembership || !hasPass ? 'Book a slot' : 'Book with FitKey pass',
+                    icon: Icons.event_available_rounded,
+                    onPressed: book,
                   )
-                : AppButton(
-                    label: 'Get a pass',
-                    icon: Icons.key_rounded,
-                    color: AppColors.ink,
-                    onPressed: () => push(context, const PlansScreen()),
-                  ),
+                : centrePlans.isNotEmpty
+                    ? AppButton(
+                        label: 'View memberships',
+                        icon: Icons.card_membership_rounded,
+                        color: AppColors.ink,
+                        onPressed: () {
+                          final ctx = _plansKey.currentContext;
+                          if (ctx != null) Scrollable.ensureVisible(ctx, duration: const Duration(milliseconds: 400), alignment: 0.05);
+                        },
+                      )
+                    : AppButton(
+                        label: 'Get a pass',
+                        icon: Icons.key_rounded,
+                        color: AppColors.ink,
+                        onPressed: () => push(context, const PlansScreen()),
+                      ),
           ),
+        );
+          },
         );
       },
     );
   }
+}
+
+class _Extras {
+  const _Extras({required this.access, required this.plans});
+  final VenueAccess? access;
+  final List<CentrePlan> plans;
 }
 
 class _Gallery extends StatefulWidget {
@@ -194,13 +273,47 @@ class _GalleryState extends State<_Gallery> {
 }
 
 class _Body extends StatelessWidget {
-  const _Body({required this.venue, required this.plans, required this.covered, required this.onDirections, this.onCall});
+  const _Body({
+    required this.venue,
+    required this.plans,
+    required this.covered,
+    required this.onDirections,
+    this.onCall,
+    this.access,
+    this.hasPass = false,
+    this.hasMembership = false,
+    this.legacyPlanName,
+    this.centrePlans = const [],
+    required this.plansKey,
+    required this.onBuyPlan,
+    required this.onCheckin,
+  });
 
   final Venue venue;
   final List<PlanRef> plans;
   final bool covered;
   final VoidCallback onDirections;
   final VoidCallback? onCall;
+  final VenueAccess? access;
+  final bool hasPass;
+  final bool hasMembership;
+  final String? legacyPlanName;
+  final List<CentrePlan> centrePlans;
+  final GlobalKey plansKey;
+  final ValueChanged<CentrePlan> onBuyPlan;
+  final VoidCallback onCheckin;
+
+  String get _coverText {
+    if (hasMembership) {
+      final m = access!.memberships.firstWhere((m) => m['state'] == 'active', orElse: () => access!.memberships.first);
+      return 'Your ${m['planName']} membership covers this centre — book a slot or scan the QR at the front desk.';
+    }
+    final cost = access?.fitkey;
+    if (cost != null && cost.canPay && cost.method != 'legacy_pass') {
+      return 'Your FitKey pass works here — each visit costs ${cost.label}. Book a slot or scan the QR at the front desk.';
+    }
+    return 'Your FitKey Pass${legacyPlanName == null ? '' : ' ($legacyPlanName)'} covers this venue — just scan the QR at the front desk.';
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -237,10 +350,12 @@ class _Body extends StatelessWidget {
           const SizedBox(width: 10),
           Expanded(child: _Action(Icons.call_rounded, 'Call', onCall)),
           const SizedBox(width: 10),
+          Expanded(child: _Action(Icons.qr_code_scanner_rounded, 'Check in', onCheckin)),
+          const SizedBox(width: 10),
           Expanded(
             child: _Action(
               Icons.people_alt_rounded,
-              'Find buddy',
+              'Buddy',
               () => push(
                 context,
                 CreateBuddyPostScreen(
@@ -261,14 +376,42 @@ class _Body extends StatelessWidget {
           Container(
             padding: const EdgeInsets.all(14),
             decoration: BoxDecoration(color: AppColors.greenSoft, borderRadius: BorderRadius.circular(16)),
-            child: const Row(children: [
-              Icon(Icons.verified_rounded, color: AppColors.green),
-              SizedBox(width: 10),
+            child: Row(children: [
+              const Icon(Icons.verified_rounded, color: AppColors.green),
+              const SizedBox(width: 10),
               Expanded(
-                child: Text('Your FitKey Pass covers this venue — just scan the QR at the front desk.',
-                    style: TextStyle(fontWeight: FontWeight.w700, color: Color(0xFF0E6B49), height: 1.35)),
+                child: Text(_coverText,
+                    style: const TextStyle(fontWeight: FontWeight.w700, color: Color(0xFF0E6B49), height: 1.35)),
               ),
             ]),
+          ),
+        ],
+        // Case 2 — no FitKey pass: the centre's own plans come first, with the FitKey pass upsell.
+        if (!hasPass && !hasMembership && centrePlans.isNotEmpty) ...[
+          KeyedSubtree(
+            key: plansKey,
+            child: CentrePlansSection(plans: centrePlans, venueName: venue.name, primary: true, onSelect: onBuyPlan),
+          ),
+          const SizedBox(height: 6),
+          PhotoBanner(
+            image: AppImages.gymFloor,
+            eyebrow: 'FitKey pass',
+            title: 'Get FitKey pass for all centres',
+            subtitle: 'One pass, every FitKey gym, pool, studio & club near you.',
+            cta: 'See passes',
+            height: 150,
+            onTap: () => push(context, const PlansScreen()),
+          ),
+        ],
+        if (access != null && (hasMembership || access!.memberships.isNotEmpty)) ...[
+          const SizedBox(height: 10),
+          Align(
+            alignment: Alignment.centerLeft,
+            child: TextButton.icon(
+              onPressed: () => push(context, const MyMembershipsScreen()),
+              icon: const Icon(Icons.card_membership_rounded, size: 18),
+              label: const Text('My memberships'),
+            ),
           ),
         ],
         if ((venue.description ?? '').isNotEmpty) ...[
@@ -331,6 +474,11 @@ class _Body extends StatelessWidget {
               ),
           ]),
         ],
+        if ((hasPass || hasMembership) && centrePlans.isNotEmpty)
+          KeyedSubtree(
+            key: plansKey,
+            child: CentrePlansSection(plans: centrePlans, venueName: venue.name, onSelect: onBuyPlan),
+          ),
         if (plans.isNotEmpty) ...[
           const SectionTitle('Passes that include this venue'),
           for (final p in plans)

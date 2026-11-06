@@ -9,8 +9,12 @@ import '../../widgets/brand.dart';
 import '../../widgets/status.dart';
 import '../attendance/attendance_screen.dart';
 import '../auth/profile_screen.dart';
+import '../bookings/partner_bookings_screen.dart';
 import '../checkin/checkin_code_screen.dart';
 import '../events/partner_events_screen.dart';
+import '../memberships/members_screen.dart';
+import '../memberships/membership_plans_screen.dart';
+import '../memberships/partner_earnings_screen.dart';
 import '../notifications/notifications_screen.dart';
 import '../ratings/partner_ratings_screen.dart';
 import '../trainer/partner_trainer_screen.dart';
@@ -261,6 +265,17 @@ class _HomeTab extends StatelessWidget {
       _QuickAction(Icons.insights_rounded, 'Attendance', AppColors.blue, () {
         nav.forLiveVenue(context, venues,
             title: 'Attendance for…', build: (v) => AttendanceScreen(venueId: v.id, venueName: v.name));
+      }),
+      _QuickAction(Icons.event_available_rounded, 'Bookings', AppColors.teal, () {
+        nav.forLiveVenue(context, venues,
+            title: 'Bookings & slots for…', build: (v) => PartnerBookingsScreen(venueId: v.id, venueName: v.name));
+      }),
+      _QuickAction(Icons.card_membership_rounded, 'Plans', AppColors.pink, () {
+        nav.forLiveVenue(context, venues,
+            title: 'Membership plans for…', build: (v) => MembershipPlansScreen(venueId: v.id, venueName: v.name));
+      }),
+      _QuickAction(Icons.account_balance_wallet_rounded, 'Earnings', AppColors.green, () {
+        nav.open(const PartnerEarningsScreen());
       }),
       _QuickAction(Icons.event_rounded, 'Events', AppColors.purple, () => nav.goTab(2)),
       _QuickAction(Icons.star_rounded, 'Ratings', AppColors.amber, () => nav.open(const PartnerRatingsScreen())),
@@ -716,6 +731,37 @@ class _BusinessTab extends StatelessWidget {
               subtitle: 'Daily visitors and monthly trends',
               onTap: () => nav.forLiveVenue(context, venues,
                   title: 'Attendance for…', build: (v) => AttendanceScreen(venueId: v.id, venueName: v.name)),
+            ),
+            _ToolRow(
+              icon: Icons.event_available_rounded,
+              color: AppColors.teal,
+              title: 'Bookings & slots',
+              subtitle: 'Slot occupancy, bookings and check-ins',
+              onTap: () => nav.forLiveVenue(context, venues,
+                  title: 'Bookings & slots for…', build: (v) => PartnerBookingsScreen(venueId: v.id, venueName: v.name)),
+            ),
+            _ToolRow(
+              icon: Icons.card_membership_rounded,
+              color: AppColors.pink,
+              title: 'Membership plans',
+              subtitle: 'Sell your own day, monthly & annual plans',
+              onTap: () => nav.forLiveVenue(context, venues,
+                  title: 'Membership plans for…', build: (v) => MembershipPlansScreen(venueId: v.id, venueName: v.name)),
+            ),
+            _ToolRow(
+              icon: Icons.groups_rounded,
+              color: AppColors.blue,
+              title: 'Members',
+              subtitle: 'Your members and FitKey pass visitors',
+              onTap: () => nav.forLiveVenue(context, venues,
+                  title: 'Members of…', build: (v) => MembersScreen(venueId: v.id, venueName: v.name)),
+            ),
+            _ToolRow(
+              icon: Icons.account_balance_wallet_rounded,
+              color: AppColors.green,
+              title: 'Venue earnings',
+              subtitle: 'Membership sales, visit payouts & statement',
+              onTap: () => nav.open(const PartnerEarningsScreen()),
             ),
             _ToolRow(
               icon: Icons.event_rounded,

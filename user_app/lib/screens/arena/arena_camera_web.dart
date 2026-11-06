@@ -5,20 +5,21 @@ import '../../ui/ui.dart';
 
 /// Web build: the camera rep counter is mobile-only.
 class ArenaCameraScreen extends StatelessWidget {
-  const ArenaCameraScreen({super.key, required this.exercise, this.level});
+  const ArenaCameraScreen({super.key, required this.exercise, this.level, this.unlimited = false});
 
   final ArenaExercise exercise;
   final ArenaLevel? level;
+  final bool unlimited;
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: AppColors.bg,
-      appBar: AppBar(title: Text('${exercise.name} · AI Arena')),
+      appBar: AppBar(title: Text('${exercise.name} · ProveIt')),
       body: EmptyView(
         icon: Icons.phone_iphone_rounded,
         title: 'Use the FITKEY mobile app for AI rep counting',
-        message: 'AI Arena uses your phone camera to count every rep on-device. '
+        message: 'ProveIt uses your phone camera to count every rep on-device. '
             'Leaderboards and your history work here too.',
         action: SizedBox(
           width: 200,

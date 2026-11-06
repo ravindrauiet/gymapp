@@ -16,6 +16,7 @@ import '../../state/session.dart';
 import '../../ui/ui.dart';
 import 'arena_visuals.dart';
 import 'pose_painter.dart';
+import 'proveit_share.dart';
 import 'rep_counter.dart';
 
 /// Clips above this are not uploaded (server limit for videos is 12 MB).
@@ -37,12 +38,16 @@ const _maxAccurateMs = 350;
 
 enum _Phase { loading, error, ready, countdown, active, review, saving, done }
 
-/// Live AI rep counter: front camera → ML Kit pose → [RepCounter]. Pops `true` when a set was saved.
+/// ProveIt live counter: front or rear camera → ML Kit pose → [RepCounter]. Pops `true` when a set was saved.
+///
+/// Levels mode ([level] set): the set ends when the target is reached (or a plank hold breaks).
+/// Unlimited mode: one continuous set that ends by itself ([UnlimitedSetRule]: 5 s without a rep, plank hold broken).
 class ArenaCameraScreen extends StatefulWidget {
-  const ArenaCameraScreen({super.key, required this.exercise, this.level});
+  const ArenaCameraScreen({super.key, required this.exercise, this.level, this.unlimited = false});
 
   final ArenaExercise exercise;
   final ArenaLevel? level;
+  final bool unlimited;
 
   @override
   State<ArenaCameraScreen> createState() => _ArenaCameraScreenState();
@@ -90,6 +95,12 @@ class _ArenaCameraScreenState extends State<ArenaCameraScreen> with WidgetsBindi
   Timer? _countdownTimer;
   int _countdown = 3;
 
+  // Camera choice (front by default); switching keeps the set running.
+  CameraLensDirection _lens = CameraLensDirection.front;
+  bool _switching = false;
+  Duration? _switchedAt; // set time of the last switch: auto-end waits a moment after it
+  bool _autoEnded = false;
+
   bool _levelDone = false;
   bool _showLevelBanner = false;
   bool _saved = false;
@@ -97,7 +108,7 @@ class _ArenaCameraScreenState extends State<ArenaCameraScreen> with WidgetsBindi
   String? _clipNote;
   bool _clipFailed = false;
 
-  int? get _target => widget.level?.target;
+  int? get _target => widget.unlimited ? null : widget.level?.target;
 
   /// Where to put the phone: always upright (portrait); a flat phone's front camera only sees the ceiling.
   String get _placementHint => switch (widget.exercise.id) {
@@ -107,7 +118,7 @@ class _ArenaCameraScreenState extends State<ArenaCameraScreen> with WidgetsBindi
       'Stand the phone upright against a wall or bottle, 2.5–3 m away and side-on to you, with head to feet in view.',
     'squats' =>
       'Stand the phone upright at hip height, 2–3 m away and side-on or at an angle, with head to feet in view.',
-    _ => 'Stand the phone upright 2–3 m away, so the bar and your whole body are in view.',
+    _ => 'Stand the phone upright 2–3 m in front of the bar, so your hands, head, hips and legs are all in view.',
   };
 
   @override
@@ -200,21 +211,13 @@ class _ArenaCameraScreenState extends State<ArenaCameraScreen> with WidgetsBindi
       await _releasing;
       final cams = await availableCameras();
       if (cams.isEmpty) throw CameraException('NoCamera', 'No camera found on this device');
-      final cam = cams.firstWhere((c) => c.lensDirection == CameraLensDirection.front, orElse: () => cams.first);
-      final c = pending = CameraController(
-        cam,
-        ResolutionPreset.high, // same as Google's sample: a body on the floor needs the pixels (256 px guidance)
-        enableAudio: false,
-        imageFormatGroup: Platform.isAndroid ? ImageFormatGroup.nv21 : ImageFormatGroup.bgra8888,
-      );
-      await c.initialize();
+      final cam = cams.firstWhere((c) => c.lensDirection == _lens, orElse: () => cams.first);
+      _lens = cam.lensDirection;
+      final c = pending = await _openCamera(cam);
       if (!mounted) {
         await c.dispose();
         return;
       }
-      try {
-        await c.lockCaptureOrientation(DeviceOrientation.portraitUp); // also keeps CameraPreview's layout portrait
-      } catch (_) {}
       _c = c;
       _lastFrameAt = DateTime.now();
       await _startPreviewStream();
@@ -242,6 +245,84 @@ class _ArenaCameraScreenState extends State<ArenaCameraScreen> with WidgetsBindi
       });
     } finally {
       _initializing = false;
+    }
+  }
+
+  /// Creates and initialises a controller for [cam], locked to portrait.
+  Future<CameraController> _openCamera(CameraDescription cam) async {
+    final c = CameraController(
+      cam,
+      ResolutionPreset.high, // same as Google's sample: a body on the floor needs the pixels (256 px guidance)
+      enableAudio: false,
+      imageFormatGroup: Platform.isAndroid ? ImageFormatGroup.nv21 : ImageFormatGroup.bgra8888,
+    );
+    try {
+      await c.initialize();
+    } catch (_) {
+      c.dispose().catchError((_) {});
+      rethrow;
+    }
+    try {
+      await c.lockCaptureOrientation(DeviceOrientation.portraitUp); // also keeps CameraPreview's layout portrait
+    } catch (_) {}
+    return c;
+  }
+
+  /// Front ↔ rear, before or during a set. The set clock pauses while the new camera starts, the score is kept and
+  /// the counter re-learns its baselines from the new viewpoint. ML Kit's rotation follows the active camera's sensor.
+  Future<void> _switchCamera() async {
+    if (_switching || _initializing || _c == null) return;
+    final cams = await availableCameras().catchError((Object _) => <CameraDescription>[]);
+    final want = _lens == CameraLensDirection.front ? CameraLensDirection.back : CameraLensDirection.front;
+    final cam = cams.where((c) => c.lensDirection == want).firstOrNull;
+    if (cam == null) {
+      if (mounted) toast(context, 'This phone has only one camera.');
+      return;
+    }
+    if (!mounted) return;
+    setState(() => _switching = true);
+    final wasActive = _phase == _Phase.active;
+    if (wasActive) _active.stop();
+    await _stopPreviewStream();
+    final old = _c;
+    _c = null;
+    await old?.dispose().catchError((_) {});
+    try {
+      final c = await _openCamera(cam);
+      if (!mounted) {
+        await c.dispose();
+        return;
+      }
+      _c = c;
+      _lens = want;
+      _pose = null;
+      _latencyN = 0;
+      _latencyMs = 0;
+      if (wasActive) {
+        _counter = _counter.carryOver(widget.exercise.id);
+        _switchedAt = _active.elapsed;
+      }
+      _lastFrameAt = DateTime.now();
+      await _startPreviewStream();
+    } catch (e) {
+      _dLastError = '$e';
+      if (mounted) toast(context, 'That camera could not be started — back to the other one.', error: true);
+      // Back to the camera that worked.
+      try {
+        final back = cams.firstWhere((c) => c.lensDirection == _lens, orElse: () => cams.first);
+        final c = await _openCamera(back);
+        if (mounted) {
+          _c = c;
+          await _startPreviewStream();
+        } else {
+          await c.dispose();
+        }
+      } catch (_) {
+        if (mounted) setState(() => _phase = _Phase.error);
+      }
+    } finally {
+      if (wasActive && mounted && _phase == _Phase.active) _active.start();
+      if (mounted) setState(() => _switching = false);
     }
   }
 
@@ -439,10 +520,11 @@ class _ArenaCameraScreenState extends State<ArenaCameraScreen> with WidgetsBindi
           _noteLatency(sw.elapsedMilliseconds);
           poses.isEmpty ? _dEmpty++ : _dPoses++;
           final frame = poses.isEmpty ? null : _toFrame(poses.first);
-          if (_phase == _Phase.active) {
+          if (_phase == _Phase.active && !_switching) {
             final before = _counter.reps;
             _counter.update(frame, _active.elapsed);
             if (_counter.reps > before) _onRep();
+            _checkAutoEnd();
           }
           setState(() => _pose = frame);
         })
@@ -496,6 +578,22 @@ class _ArenaCameraScreenState extends State<ArenaCameraScreen> with WidgetsBindi
     );
   }
 
+  /// Ends the set by itself: Unlimited per [UnlimitedSetRule]; Levels when the target is reached or a plank breaks.
+  void _checkAutoEnd() {
+    if (_phase != _Phase.active || _switching) return;
+    final at = _active.elapsed;
+    final sw = _switchedAt;
+    if (sw != null && at - sw < const Duration(seconds: 5)) return; // give the new camera a moment
+    final t = _target;
+    final end = widget.unlimited
+        ? UnlimitedSetRule.shouldEnd(_counter, at)
+        : (_counter.holdBroken || (t != null && _counter.reps >= t));
+    if (end) {
+      _autoEnded = true;
+      _finish();
+    }
+  }
+
   void _onRep() {
     if (widget.exercise.timed) {
       HapticFeedback.selectionClick();
@@ -541,12 +639,16 @@ class _ArenaCameraScreenState extends State<ArenaCameraScreen> with WidgetsBindi
   void _begin() {
     HapticFeedback.heavyImpact();
     _counter = RepCounter.forExercise(widget.exercise.id);
+    _switchedAt = null;
+    _autoEnded = false;
     _active
       ..reset()
       ..start();
     _ticker?.cancel();
     _ticker = Timer.periodic(const Duration(milliseconds: 250), (_) {
-      if (mounted) setState(() {});
+      if (!mounted) return;
+      _checkAutoEnd(); // time-based: also fires when no frames arrive
+      setState(() {});
     });
     setState(() => _phase = _Phase.active);
   }
@@ -555,6 +657,7 @@ class _ArenaCameraScreenState extends State<ArenaCameraScreen> with WidgetsBindi
     if (_phase != _Phase.active) return;
     _active.stop();
     _ticker?.cancel();
+    if (_autoEnded) HapticFeedback.heavyImpact();
     setState(() => _phase = _Phase.review);
     await _stopCamera();
     if (mounted) setState(() {});
@@ -586,6 +689,7 @@ class _ArenaCameraScreenState extends State<ArenaCameraScreen> with WidgetsBindi
     try {
       final r = await api.submitArenaAttempt(
         exerciseId: widget.exercise.id,
+        unlimited: widget.unlimited,
         level: _target,
         reps: _counter.reps,
         durationSec: math.max(1, _active.elapsed.inSeconds),
@@ -776,8 +880,8 @@ class _ArenaCameraScreenState extends State<ArenaCameraScreen> with WidgetsBindi
           Flexible(
             child: _pill(
               Text(
-                level == null
-                    ? widget.exercise.name
+                widget.unlimited || level == null
+                    ? '${widget.exercise.name} · Unlimited'
                     : '${widget.exercise.name} · ${widget.exercise.format(level.target)}',
                 overflow: TextOverflow.ellipsis,
                 style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w800, fontSize: 13),
@@ -785,6 +889,23 @@ class _ArenaCameraScreenState extends State<ArenaCameraScreen> with WidgetsBindi
             ),
           ),
           const Spacer(),
+          if (_c != null && (_phase == _Phase.ready || _phase == _Phase.countdown || _phase == _Phase.active))
+            Padding(
+              padding: const EdgeInsets.only(right: 8),
+              child: _switching
+                  ? Container(
+                      width: 42,
+                      height: 42,
+                      padding: const EdgeInsets.all(11),
+                      decoration: BoxDecoration(color: Colors.black.withValues(alpha: 0.45), shape: BoxShape.circle),
+                      child: const CircularProgressIndicator(strokeWidth: 2.2, color: Colors.white),
+                    )
+                  : Semantics(
+                      label: _lens == CameraLensDirection.front ? 'Switch to rear camera' : 'Switch to front camera',
+                      button: true,
+                      child: _circleButton(Icons.cameraswitch_rounded, _switchCamera),
+                    ),
+            ),
           if (_phase == _Phase.active) ...[
             if (_recording)
               Padding(
@@ -956,6 +1077,15 @@ class _ArenaCameraScreenState extends State<ArenaCameraScreen> with WidgetsBindi
                 ],
               ),
             ),
+            if (widget.unlimited) ...[
+              const SizedBox(height: 8),
+              _pill(
+                Text(
+                  _unlimitedHint(),
+                  style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w700, fontSize: 12),
+                ),
+              ),
+            ],
             if (_counter.partialReps > 0) ...[
               const SizedBox(height: 8),
               _pill(
@@ -979,6 +1109,16 @@ class _ArenaCameraScreenState extends State<ArenaCameraScreen> with WidgetsBindi
         ),
       ),
     ];
+  }
+
+  String _unlimitedHint() {
+    final left = UnlimitedSetRule.remaining(_counter, _active.elapsed);
+    if (widget.exercise.timed) {
+      return left == null ? 'Unlimited · the set ends when you break the hold' : 'Get into your plank · ${left.inSeconds}s';
+    }
+    if (_counter.lastRepAt == null) return 'Unlimited · start within ${left?.inSeconds ?? 0}s';
+    final s = left?.inSeconds ?? 0;
+    return s <= 3 ? 'Keep going — set ends in ${s + 1}s' : 'Unlimited · ends 5 s after your last rep';
   }
 
   Widget _countdownOverlay() => Container(
@@ -1097,7 +1237,7 @@ class _ArenaCameraScreenState extends State<ArenaCameraScreen> with WidgetsBindi
                 : done
                 ? 'Level complete!'
                 : t == null
-                ? 'Set finished'
+                ? (_autoEnded ? (widget.exercise.timed ? 'Hold over' : 'Set over — no rep for 5 s') : 'Set finished')
                 : '${ex.format(t - reps)} short of the level',
             style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w800, letterSpacing: -0.3),
           ),
@@ -1119,7 +1259,11 @@ class _ArenaCameraScreenState extends State<ArenaCameraScreen> with WidgetsBindi
             const SizedBox(height: 14),
             AppButton(label: 'Try again', icon: Icons.refresh_rounded, onPressed: _again),
           ] else ...[
-            AppButton(label: 'Save to leaderboard', icon: Icons.leaderboard_rounded, busy: saving, onPressed: _save),
+            AppButton(
+                label: widget.unlimited ? 'Save to All India Rank' : (done ? 'Save & claim badge' : 'Save set'),
+                icon: widget.unlimited ? Icons.leaderboard_rounded : Icons.workspace_premium_rounded,
+                busy: saving,
+                onPressed: _save),
             const SizedBox(height: 6),
             TextButton(onPressed: saving ? null : _again, child: const Text('Discard & try again')),
           ],
@@ -1154,31 +1298,47 @@ class _ArenaCameraScreenState extends State<ArenaCameraScreen> with WidgetsBindi
           ),
           const SizedBox(height: 12),
           Text(
-            r.qualifiesTop10
-                ? "You're #${r.rank} in India!"
+            r.badgeLevel != null
+                ? 'Badge unlocked!'
+                : r.qualifiesTop10
+                ? "You're AIR #${r.rank}!"
                 : r.personalBest
-                ? (r.previousBest == null ? 'First set on the board!' : 'New personal best!')
+                ? (r.previousBest == null ? 'You\'re on the All India board!' : 'New personal best!')
                 : 'Set saved',
             style: const TextStyle(fontSize: 22, fontWeight: FontWeight.w800, letterSpacing: -0.4),
           ),
           const SizedBox(height: 4),
           Text(
-            '${ex.format(a.reps)}${a.completed && a.level != null ? ' · level ${ex.format(a.level!)} complete' : ''}',
+            '${ex.format(a.reps)}${a.completed && a.level != null ? ' · ${ex.format(a.level!)} level complete' : ''}',
             style: const TextStyle(color: AppColors.text2, fontWeight: FontWeight.w600),
           ),
           const SizedBox(height: 16),
           Row(
             children: [
-              _stat('points', '+${r.pointsAwarded}'),
-              _stat('India rank', r.rank == null ? '—' : '#${r.rank}'),
-              _stat('best', r.previousBest == null || r.personalBest ? ex.format(a.reps) : ex.format(r.previousBest!)),
+              if (widget.unlimited) ...[
+                _stat('All India', r.myRank == null ? '—' : '#${r.myRank}'),
+                _stat(r.myCity ?? 'City', r.myCityRank == null ? '—' : '#${r.myCityRank}'),
+                _stat('best', r.previousBest == null || r.personalBest ? ex.format(a.reps) : ex.format(r.previousBest!)),
+              ] else ...[
+                _stat('points', '+${r.pointsAwarded}'),
+                _stat('coins', r.badgeLevel == null ? '—' : '+${r.badgeCoins}'),
+                _stat('level', a.level == null ? '—' : ex.format(a.level!)),
+              ],
             ],
           ),
-          if (r.pointsAwarded == 0 || r.dailyCapReached) ...[
+          if (r.badgeLevel != null && r.badgeCoins > 0 && r.badgeCoinsStatus != 'credited') ...[
+            const SizedBox(height: 10),
+            Text(
+              'Your ${r.badgeCoins} ProveIt coins will be added to your wallet shortly.',
+              textAlign: TextAlign.center,
+              style: const TextStyle(color: AppColors.text3, fontSize: 12.5),
+            ),
+          ],
+          if (!widget.unlimited && (r.pointsAwarded == 0 || r.dailyCapReached)) ...[
             const SizedBox(height: 10),
             Text(
               r.levelPoints == 0
-                  ? 'Complete a level to earn points.'
+                  ? 'Complete the level to earn points and the badge.'
                   : r.dailyCapReached
                   ? 'Daily ${ex.name} points maxed (${ex.dailyPointsCap}) — come back tomorrow for more.'
                   : '',
@@ -1204,6 +1364,16 @@ class _ArenaCameraScreenState extends State<ArenaCameraScreen> with WidgetsBindi
             ),
           ],
           const SizedBox(height: 16),
+          SizedBox(
+            width: double.infinity,
+            height: 50,
+            child: OutlinedButton.icon(
+              onPressed: () => shareProveIt(context, _shareData(r)),
+              icon: const Icon(Icons.ios_share_rounded),
+              label: const Text('Share · FitFeed, WhatsApp, Instagram'),
+            ),
+          ),
+          const SizedBox(height: 10),
           Row(
             children: [
               Expanded(
@@ -1224,6 +1394,34 @@ class _ArenaCameraScreenState extends State<ArenaCameraScreen> with WidgetsBindi
           ),
         ],
       ),
+    );
+  }
+
+  ProveItShareData _shareData(ArenaSubmitResult r) {
+    final ex = widget.exercise;
+    final a = r.attempt;
+    final unit = ex.timed ? 'seconds' : 'reps';
+    if (r.badgeLevel != null || (!widget.unlimited && a.completed)) {
+      return ProveItShareData(
+        exerciseId: ex.id,
+        exerciseName: ex.name,
+        headline: 'Level ${r.badgeLevel ?? widget.level?.level ?? ''} complete',
+        value: '${a.level ?? a.reps}',
+        unit: unit,
+        lines: ['ProveIt badge', if (r.badgeCoins > 0) '+${r.badgeCoins} coins'],
+      );
+    }
+    return ProveItShareData(
+      exerciseId: ex.id,
+      exerciseName: ex.name,
+      headline: widget.unlimited ? 'Unlimited set' : 'Set done',
+      value: '${a.reps}',
+      unit: unit,
+      lines: [
+        if (r.myRank != null) 'AIR #${r.myRank}',
+        if (r.myCityRank != null && r.myCity != null) '#${r.myCityRank} in ${r.myCity}',
+        if (r.personalBest && r.previousBest != null) 'New best',
+      ],
     );
   }
 }

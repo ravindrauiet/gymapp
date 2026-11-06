@@ -46,7 +46,7 @@ WHERE NOT EXISTS (SELECT 1 FROM contests WHERE title = '30-Day Consistency Strea
 
 INSERT INTO contests (title, description, period, metric, starts_on, ends_on, reward, kind, format, arena_exercise)
 SELECT 'AI Push-up Showdown',
-       'Do your best set of push-ups in the AI Arena. The camera counts only full-range reps — your best set this week is your score.',
+       'Do your best set of push-ups on ProveIt. The camera counts only full-range reps — your best set this week is your score.',
        'weekly', 'arena_reps',
        date_trunc('week', now() AT TIME ZONE 'Asia/Kolkata')::date,
        (date_trunc('week', now() AT TIME ZONE 'Asia/Kolkata') + interval '6 days')::date,

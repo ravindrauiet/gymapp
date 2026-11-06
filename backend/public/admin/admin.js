@@ -483,7 +483,7 @@ const views = {
       const needsVenue = format === 'onground' || kind === 'partner';
       show('metric', format === 'virtual');
       show('autoMetric', format !== 'virtual');
-      el.autoMetric.value = format === 'onground' ? 'Attendance (auto)' : format === 'ai' ? 'Best AI Arena set — reps (auto)' : '';
+      el.autoMetric.value = format === 'onground' ? 'Attendance (auto)' : format === 'ai' ? 'Best ProveIt set — reps (auto)' : '';
       show('arena', format === 'ai');
       show('eventDate', format === 'onground');
       show('org', kind === 'org');
@@ -985,6 +985,20 @@ const views = {
     );
   },
 };
+
+// ---------------------------------------------------------------- extension tabs
+// Feature modules add their own tabs from separate files (public/admin/ext-*.js) without editing this file:
+//   window.FitkeyAdmin.register('key', 'Tab title', async () => element)
+window.FitkeyAdmin = {
+  h, api, toast, rupees, label, when, csv, assetUrl, uploadFile,
+  rerender: () => render(),
+  register(key, title, view) {
+    views[key] = view;
+    if (!document.querySelector(`#tabs [data-tab="${key}"]`)) $('#tabs').append(h('button', { 'data-tab': key }, title));
+  },
+};
+const EXTENSIONS = ['ext-passes.js', 'ext-memberships.js', 'ext-studio-import.js', 'ext-mansi.js', 'ext-food.js'];
+for (const file of EXTENSIONS) import(`./${file}`).catch(() => {}); // a missing extension is simply skipped
 
 async function render() {
   const signedIn = Boolean(token);

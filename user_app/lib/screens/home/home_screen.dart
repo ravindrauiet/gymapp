@@ -5,11 +5,13 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../../data/models.dart';
+import '../../data/wallet_api.dart';
 import '../../state/session.dart';
 import '../../ui/ui.dart';
 import '../../widgets/rating_prompt.dart';
 import '../../widgets/venue_card.dart';
 import '../ai/ai_coach_screen.dart';
+import '../arena/proveit_screen.dart';
 import '../auth/profile_setup_screen.dart';
 import '../community/buddy_screens.dart';
 import '../community/contest_detail_screen.dart';
@@ -18,11 +20,12 @@ import '../feed/feed_screen.dart';
 import '../notifications/notifications_screen.dart';
 import '../explore/venue_detail_screen.dart';
 import '../health/health_report_screen.dart';
-import '../healthstop/healthstop_screen.dart';
 import '../nutrition/ai_food_scanner.dart';
 import '../nutrition/fuel_log_screen.dart';
 import '../plans/plans_screen.dart';
 import '../profile/profile_screen.dart';
+import '../wallet/low_balance_banner.dart';
+import '../wallet/wallet_screen.dart';
 import '../store/store_screen.dart';
 import '../trainers/trainers_screen.dart';
 import 'home_shell.dart';
@@ -39,19 +42,30 @@ typedef _HomeData = ({HealthReport week, List<Contest> contests, List<VenueSumma
 class _HomeScreenState extends State<HomeScreen> {
   late Future<_HomeData> _future;
 
+  /// Coin / session balances, so the pass card also reflects the new FitKey pass models.
+  CoinWallet? _wallet;
+
   @override
   void initState() {
     super.initState();
     _future = _load();
     // After the feed loads, ask about recent visits / sessions the member hasn't rated yet.
-    _future.then((_) {
-      if (mounted) promptPendingRatings(context);
-    }).catchError((_) {});
+    _future
+        .then((_) {
+          if (mounted) promptPendingRatings(context);
+        })
+        .catchError((_) {});
   }
 
   Future<_HomeData> _load() async {
     final session = context.read<Session>();
     final api = session.api;
+    api
+        .wallet()
+        .then((w) {
+          if (mounted) setState(() => _wallet = w.wallet);
+        })
+        .catchError((_) {});
     final results = await Future.wait([
       api.healthReport(days: 7),
       api.contests(),
@@ -87,7 +101,8 @@ class _HomeScreenState extends State<HomeScreen> {
               padding: const EdgeInsets.fromLTRB(16, 0, 16, 32),
               sliver: SliverList.list(
                 children: [
-                  _PassCard(subscription: session.subscription),
+                  _PassCard(subscription: session.subscription, wallet: _wallet),
+                  const LowBalanceBanner(),
                   const DividerTitle("What's on your mind?", padding: EdgeInsets.fromLTRB(0, 26, 0, 14)),
                   const _CategoryRail(),
                   const SectionTitle('Everything fitness', subtitle: 'One app for training, food & recovery'),
@@ -211,8 +226,9 @@ class _Header extends StatelessWidget {
 
 /// The member's FitKey Pass — styled like a premium membership card.
 class _PassCard extends StatelessWidget {
-  const _PassCard({required this.subscription});
+  const _PassCard({required this.subscription, this.wallet});
   final ActiveSubscription? subscription;
+  final CoinWallet? wallet;
 
   @override
   Widget build(BuildContext context) {
@@ -220,8 +236,10 @@ class _PassCard extends StatelessWidget {
     final total = sub == null ? 1 : sub.endsAt.difference(sub.startsAt).inDays.clamp(1, 3650);
     final progress = sub == null ? 0.0 : (sub.daysLeft / total).clamp(0.0, 1.0);
 
+    final w = wallet;
+    final hasCredit = sub == null && w != null && (w.sessionsLeft > 0 || w.fitkeyCoins > 0);
     return Tap(
-      onTap: () => push(context, const PlansScreen()),
+      onTap: () => push(context, hasCredit ? const WalletScreen() : const PlansScreen()),
       child: Container(
         decoration: BoxDecoration(
           gradient: AppColors.passGradient,
@@ -245,12 +263,50 @@ class _PassCard extends StatelessWidget {
               bottom: -30,
               child: Icon(Icons.key_rounded, size: 130, color: Colors.white.withValues(alpha: 0.04)),
             ),
-            Padding(padding: const EdgeInsets.all(20), child: sub == null ? _empty() : _active(sub, progress)),
+            Padding(
+              padding: const EdgeInsets.all(20),
+              child: sub != null ? _active(sub, progress) : (hasCredit ? _credit(w) : _empty()),
+            ),
           ],
         ),
       ),
     );
   }
+
+  /// Coin-pack / session-plan holders: show what's left instead of "no pass".
+  Widget _credit(CoinWallet w) => Column(
+    crossAxisAlignment: CrossAxisAlignment.start,
+    children: [
+      const Row(
+        children: [
+          Icon(Icons.key_rounded, color: AppColors.lime, size: 18),
+          SizedBox(width: 6),
+          Text(
+            'FITKEY PASS',
+            style: TextStyle(color: AppColors.lime, fontWeight: FontWeight.w800, fontSize: 12, letterSpacing: 2),
+          ),
+        ],
+      ),
+      const SizedBox(height: 14),
+      Text(
+        w.sessionsLeft > 0
+            ? '${w.sessionsLeft} ${w.sessionsLeft == 1 ? 'session' : 'sessions'} left'
+            : '${w.fitkeyCoins} FitKey coins',
+        style: const TextStyle(color: Colors.white, fontSize: 28, fontWeight: FontWeight.w800, letterSpacing: -0.5),
+      ),
+      const SizedBox(height: 4),
+      Text(
+        [
+          if (w.sessionsLeft > 0 && w.sessionsExpiresAt != null)
+            'Sessions valid till ${formatDate(w.sessionsExpiresAt!)}',
+          if (w.sessionsLeft > 0 && w.fitkeyCoins > 0) '${w.fitkeyCoins} coins',
+          if (w.sessionsLeft == 0 && w.fitkeyExpiresAt != null) 'Valid till ${formatDate(w.fitkeyExpiresAt!)}',
+          'Book any centre',
+        ].join(' · '),
+        style: TextStyle(color: Colors.white.withValues(alpha: 0.65), fontSize: 12.5, fontWeight: FontWeight.w600),
+      ),
+    ],
+  );
 
   Widget _empty() => Column(
     crossAxisAlignment: CrossAxisAlignment.start,
@@ -419,16 +475,51 @@ class _ServiceGrid extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    // Order per BRD §2 (left → right, top → bottom). Mansi lives in the card below the grid.
+    // Order per the ProveIt BRD §1.1 (left → right, top → bottom). HealthStop lives in Profile; Mansi in the card below.
     final items = <(String, String, IconData, Color, Color, Widget)>[
-      ('Gym Buddy', 'Find a partner', Icons.people_alt_rounded, AppColors.teal, AppColors.tealSoft, const BuddyHubScreen()),
+      (
+        'ProveIt',
+        'Only real reps',
+        Icons.sports_gymnastics_rounded,
+        AppColors.green,
+        AppColors.greenSoft,
+        const ProveItScreen(),
+      ),
+      (
+        'Gym Buddy',
+        'Find a partner',
+        Icons.people_alt_rounded,
+        AppColors.teal,
+        AppColors.tealSoft,
+        const BuddyHubScreen(),
+      ),
       ('Fuel Log', 'Calories', Icons.restaurant_rounded, AppColors.amber, AppColors.amberSoft, const FuelLogScreen()),
-      ('Meal Scan', 'Snap & log', Icons.document_scanner_rounded, AppColors.green, AppColors.greenSoft, const AiFoodScannerScreen()),
-      ('Progress', 'Your report', Icons.insights_rounded, AppColors.blue, AppColors.blueSoft, const HealthReportScreen()),
+      (
+        'Progress',
+        'Your report',
+        Icons.insights_rounded,
+        AppColors.blue,
+        AppColors.blueSoft,
+        const HealthReportScreen(),
+      ),
+      (
+        'FitFeed',
+        'Stories & tips',
+        Icons.dynamic_feed_rounded,
+        AppColors.primary,
+        AppColors.primarySoft,
+        const FitFeedScreen(),
+      ),
       ('Store', 'Gear & whey', Icons.shopping_bag_rounded, AppColors.pink, AppColors.pinkSoft, const StoreScreen()),
-      ('HealthStop', 'Clinics', Icons.local_hospital_rounded, AppColors.red, AppColors.redSoft, const HealthStopScreen()),
       ('Trainers', 'Book 1:1', Icons.sports_rounded, AppColors.purple, AppColors.purpleSoft, const TrainersScreen()),
-      ('FitFeed', 'Stories & tips', Icons.dynamic_feed_rounded, AppColors.primary, AppColors.primarySoft, const FitFeedScreen()),
+      (
+        'Meal Scan',
+        'Snap & log',
+        Icons.document_scanner_rounded,
+        AppColors.red,
+        AppColors.redSoft,
+        const AiFoodScannerScreen(),
+      ),
     ];
     return GridView.builder(
       shrinkWrap: true,

@@ -947,7 +947,7 @@ async function openEventForm(existing, arenaAvailable) {
     [{ name: 'startsOn', label: 'Starts', type: 'date', value: e.startsOn ?? today }, { name: 'endsOn', label: 'Ends', type: 'date', value: e.endsOn ?? in30 }],
     { name: 'eventDate', label: 'Event day (on-ground)', type: 'date', value: e.eventDate ?? '' },
     { name: 'arenaExercise', label: 'AI exercise', type: 'select', value: e.arenaExercise ?? 'pushups', options: [['pushups', 'Push-ups'], ['squats', 'Squats'], ['situps', 'Sit-ups'], ['jumping_jacks', 'Jumping jacks'], ['lunges', 'Lunges']],
-      hint: arenaAvailable ? 'Scores come from AI-counted sets in the FITKEY Arena.' : 'Scores appear once the AI Arena records attempts.' },
+      hint: arenaAvailable ? 'Scores come from AI-counted sets in the FITKEY Arena.' : 'Scores appear once the ProveIt records attempts.' },
     [{ name: 'reward', label: 'Reward (optional)', value: e.reward ?? '', max: 200, placeholder: 'e.g. Team dinner + trophy' }, { name: 'sponsor', label: 'Sponsor (optional)', value: e.sponsor ?? '', max: 120 }],
   ]);
   // Venue picker (on-ground)

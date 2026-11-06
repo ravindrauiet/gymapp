@@ -103,7 +103,7 @@ class _TrophyScreenState extends State<TrophyScreen> {
                   const EmptyView(
                     icon: Icons.leaderboard_rounded,
                     title: 'No points on the board yet',
-                    message: 'Check in, log workouts and runs, or try the AI Arena to be first on the board.',
+                    message: 'Check in, log workouts and runs, or try the ProveIt to be first on the board.',
                   )
                 else
                   Padding(
@@ -176,7 +176,7 @@ class _MyPointsCard extends StatelessWidget {
             for (final p in parts) _BreakdownRow(icon: p.$1, label: p.$2, count: p.$3, per: p.$4, color: p.$5),
             _BreakdownRow(
               icon: Icons.auto_awesome_rounded,
-              label: 'AI Arena points',
+              label: 'ProveIt points',
               count: me?.arenaPoints ?? 0,
               per: 1,
               color: AppColors.pink,

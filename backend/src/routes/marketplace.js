@@ -4,6 +4,7 @@ import { query, queryOne, withTransaction } from '../db/index.js';
 import { requireAuth } from '../middleware/auth.js';
 import { notFound, validate, conflict } from '../utils/http.js';
 import { notify } from '../utils/notify.js';
+import { redeemCoins } from '../utils/wallet.js';
 
 export const marketplaceRouter = Router();
 
@@ -67,6 +68,10 @@ const checkoutSchema = z.object({
     pincode: z.string().min(4),
   }),
   paymentMethod: z.enum(['upi', 'card', 'netbanking', 'cod']),
+  // Wallet v2: pay part of the order with coins — ProveIt coins first, then referral coins, max 50% of the order
+  // (wallet_settings.store_max_coin_pct). `coins` caps how many (default: as many as allowed).
+  useCoins: z.boolean().default(false),
+  coins: z.number().int().min(0).optional(),
 });
 
 marketplaceRouter.post('/orders', requireAuth('user'), async (req, res) => {
@@ -116,7 +121,21 @@ marketplaceRouter.post('/orders', requireAuth('user'), async (req, res) => {
        RETURNING *`,
       [req.user.id, totalPaise, body.paymentMethod, paymentStatus, JSON.stringify(body.shippingAddress), trackingNum],
     );
-    const order = orderRes.rows[0];
+    let order = orderRes.rows[0];
+
+    // 2b. Coins (FitKey coins bought with money are for visits only and are never used here).
+    if (body.useCoins && (body.coins ?? 1) > 0) {
+      const used = await redeemCoins(client, req.user.id, {
+        context: 'store', amountPaise: totalPaise, requested: body.coins ?? null, ref: `order:${order.id}`, orderId: order.id,
+      });
+      order = (await client.query(
+        `UPDATE marketplace_orders SET coins_redeemed = $2, proveit_coins_redeemed = $3, referral_coins_redeemed = $4,
+           payable_paise = total_amount_paise - $2 * 100 WHERE id = $1 RETURNING *`,
+        [order.id, used.coins, used.proveit, used.referral],
+      )).rows[0];
+    } else {
+      order = (await client.query(`UPDATE marketplace_orders SET payable_paise = total_amount_paise WHERE id = $1 RETURNING *`, [order.id])).rows[0];
+    }
 
     // 3. Insert items
     for (const it of itemsData) {

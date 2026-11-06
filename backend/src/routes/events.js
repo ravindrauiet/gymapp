@@ -14,7 +14,7 @@ import { dateSchema, uuidSchema } from '../utils/schemas.js';
  * Events (BRD §3.1) — the evolution of contests.
  *  kind:   fitkey (anyone) | org (company / college members, verified) | partner (gym / studio; optionally venue members only)
  *  format: virtual (checkins / running_km / streak) | onground (attendance via venue check-in on event_date)
- *          | ai (best AI Arena set of arena_exercise)
+ *          | ai (best ProveIt set of arena_exercise)
  * Inter-org battles: orgs listed in contest_orgs may all join; teams are ranked by average score.
  */
 const router = Router();
@@ -34,7 +34,7 @@ const todaySql = `(now() AT TIME ZONE $TZ)::date`;
 // ---------------------------------------------------------------------------
 
 let arenaTableKnown = false;
-/** AI Arena attempts live in a table owned by the Arena feature; tolerate it not existing yet. */
+/** ProveIt attempts live in a table owned by the Arena feature; tolerate it not existing yet. */
 export async function arenaTableExists() {
   if (arenaTableKnown) return true;
   const row = await queryOne(`SELECT to_regclass('public.arena_attempts') IS NOT NULL AS ok`);
@@ -560,7 +560,7 @@ const eventInputSchema = z.object({
   arenaExercise: z
     .string()
     .trim()
-    .regex(/^[a-z0-9_]{2,20}$/, 'Use the AI Arena exercise id, e.g. pushups')
+    .regex(/^[a-z0-9_]{2,20}$/, 'Use the ProveIt exercise id, e.g. pushups')
     .nullable()
     .optional(),
   coverUrl: urlSchema.nullable().optional(),

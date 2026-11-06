@@ -7,8 +7,12 @@ import '../../state/partner_session.dart';
 import '../../ui/ui.dart';
 import '../../widgets/status.dart';
 import '../attendance/attendance_screen.dart';
+import '../bookings/partner_bookings_screen.dart';
 import '../checkin/checkin_code_screen.dart';
 import '../events/partner_events_screen.dart';
+import '../memberships/members_screen.dart';
+import '../memberships/membership_plans_screen.dart';
+import '../memberships/partner_earnings_screen.dart';
 import '../ratings/partner_ratings_screen.dart';
 import 'venue_editor_screen.dart';
 
@@ -261,6 +265,36 @@ class _VenueOverviewScreenState extends State<VenueOverviewScreen> {
                       title: 'Ratings',
                       subtitle: v.ratingCount > 0 ? '${v.ratingCount} reviews' : 'Member feedback',
                       onTap: () => _push(PartnerRatingsScreen(venueId: v.id)),
+                    ),
+                    _ManageTile(
+                      icon: Icons.card_membership_rounded,
+                      color: AppColors.pink,
+                      title: 'Membership plans',
+                      subtitle: 'Sell your own plans',
+                      onTap: () => _push(MembershipPlansScreen(venueId: v.id!, venueName: v.name)),
+                    ),
+                    _ManageTile(
+                      icon: Icons.groups_rounded,
+                      color: AppColors.teal,
+                      title: 'Members',
+                      subtitle: 'Yours & FitKey pass',
+                      onTap: () => _push(MembersScreen(venueId: v.id!, venueName: v.name)),
+                    ),
+                    _ManageTile(
+                      icon: Icons.event_available_rounded,
+                      color: AppColors.blue,
+                      title: 'Bookings & slots',
+                      subtitle: live ? 'Slots, check-ins' : 'Once live',
+                      onTap: live
+                          ? () => _push(PartnerBookingsScreen(venueId: v.id!, venueName: v.name))
+                          : () => toast(context, 'Members can book slots once your venue is live', icon: Icons.info_outline_rounded),
+                    ),
+                    _ManageTile(
+                      icon: Icons.account_balance_wallet_rounded,
+                      color: AppColors.green,
+                      title: 'Earnings',
+                      subtitle: 'Payouts & statement',
+                      onTap: () => _push(PartnerEarningsScreen(venueId: v.id)),
                     ),
                     _ManageTile(
                       icon: Icons.edit_note_rounded,

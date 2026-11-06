@@ -10,6 +10,7 @@ import '../../data/models.dart';
 import '../../state/session.dart';
 import '../../ui/ui.dart';
 import '../community/buddy_screens.dart';
+import '../explore/venue_detail_screen.dart';
 import '../health/attendance_screen.dart';
 import '../plans/plans_screen.dart';
 
@@ -90,13 +91,17 @@ class _CheckinScreenState extends State<CheckinScreen> with SingleTickerProvider
   Future<void> _handleError(Object e) async {
     HapticFeedback.vibrate();
     if (e is ApiException && e.needsPlan) {
+      // 402: the server explains why (no booking / membership / pass, slot limit used, not enough coins) and what to buy.
+      final venueId = widget.venueId;
       await _showProblem(
         icon: Icons.lock_rounded,
         color: AppColors.amber,
-        title: 'This venue needs a FITKEY Pass',
-        message: '${e.message}. Pick a plan that covers this venue and you can check in right away.',
-        cta: 'See plans',
+        title: 'No access for this visit yet',
+        message: '${e.message}.',
+        cta: 'Get FitKey pass',
         onCta: () => push(context, const PlansScreen()),
+        secondary: venueId == null ? null : 'See centre memberships',
+        onSecondary: venueId == null ? null : () => push(context, VenueDetailScreen(venueId: venueId)),
       );
     } else if (e is ApiException && e.statusCode == 409) {
       await _showProblem(
@@ -119,6 +124,8 @@ class _CheckinScreenState extends State<CheckinScreen> with SingleTickerProvider
     required String message,
     required String cta,
     required VoidCallback onCta,
+    String? secondary,
+    VoidCallback? onSecondary,
   }) async {
     _sheetOpen = true;
     final go = await showAppSheet<bool>(
@@ -137,6 +144,16 @@ class _CheckinScreenState extends State<CheckinScreen> with SingleTickerProvider
             Text(message, textAlign: TextAlign.center, style: const TextStyle(color: AppColors.text2, height: 1.45)),
             const SizedBox(height: 22),
             AppButton(label: cta, onPressed: () => Navigator.pop(ctx, true)),
+            if (secondary != null) ...[
+              const SizedBox(height: 8),
+              OutlinedButton(
+                onPressed: () {
+                  Navigator.pop(ctx, false);
+                  onSecondary?.call();
+                },
+                child: Text(secondary),
+              ),
+            ],
             const SizedBox(height: 4),
             TextButton(
               onPressed: () => Navigator.pop(ctx, false),
@@ -890,7 +907,7 @@ class _CheckinSuccessScreenState extends State<CheckinSuccessScreen> with Single
                         Expanded(child: _Info(icon: Icons.schedule_rounded, label: 'Time', value: formatClock(c.checkedInAt))),
                         Expanded(
                             child: _Info(icon: Icons.today_rounded, label: 'Date', value: formatDayDate(c.checkedInAt))),
-                        Expanded(child: _Info(icon: Icons.key_rounded, label: 'Plan', value: c.planName ?? 'FITKEY Pass')),
+                        Expanded(child: _Info(icon: Icons.key_rounded, label: 'Access', value: c.planName ?? 'FITKEY Pass')),
                       ]),
                     ]),
                   ),

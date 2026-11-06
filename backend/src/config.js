@@ -26,5 +26,7 @@ export const config = {
   openaiApiKey: process.env.OPENAI_API_KEY || '',
   // Model used by Mansi and the meal / label scanner. gpt-4o-mini handles vision well at low cost.
   openaiModel: process.env.OPENAI_MODEL || 'gpt-4o-mini',
+  // YouTube Data API v3 key for the Studio importer (durations, full playlists, embeddable status). Optional.
+  youtubeApiKey: process.env.YOUTUBE_API_KEY || '',
   corsOrigins: (process.env.CORS_ORIGINS ?? '*').split(',').map((s) => s.trim()),
 };

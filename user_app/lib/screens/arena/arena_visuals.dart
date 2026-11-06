@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../ui/ui.dart';
 
-/// Icon, colours and photo for each AI Arena exercise.
+/// Icon, colours and photo for each ProveIt challenge.
 class ArenaVisual {
   const ArenaVisual(this.icon, this.color, this.soft, this.image);
   final IconData icon;

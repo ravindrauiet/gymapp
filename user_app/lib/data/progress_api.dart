@@ -151,6 +151,7 @@ class ProgressReport {
         daysHitProtein = _i(j['nutrition']?['daysHitProtein']),
         breakfastDays = _i(j['nutrition']?['breakfastDays']),
         avgMealsPerDay = _d(j['nutrition']?['avgMealsPerDay']),
+        nutritionIncompleteItems = _i(j['nutrition']?['incompleteItems']),
         water = WaterSummary.fromJson(j['water'] ?? const {}),
         bmi = (j['bmi']?['value'] as num?)?.toDouble(),
         bmiCategory = j['bmi']?['category'],
@@ -174,6 +175,10 @@ class ProgressReport {
   final int daysHitProtein;
   final int breakfastDays;
   final double avgMealsPerDay;
+
+  /// Logged foods whose source lacked some calorie/macro values (food DB "not available") — averages count only
+  /// the known values; show "Some values unavailable" when > 0.
+  final int nutritionIncompleteItems;
   final WaterSummary water;
   final double? bmi;
   final String? bmiCategory;

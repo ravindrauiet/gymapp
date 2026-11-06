@@ -1,4 +1,3 @@
-import 'package:fitkey_core/fitkey_core.dart' show formatDuration;
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
@@ -60,10 +59,20 @@ class _StudioScreenState extends State<StudioScreen> {
 
   Future<_StudioData> _load() async {
     final api = context.read<Session>().api;
-    final r = await Future.wait([api.studioGroups(), api.videos(limit: 30)]);
-    final groups = r[0] as List<StudioGroup>;
+    final groups = await api.studioGroups();
     if (mounted) _groups = groups;
-    return (groups, r[1] as List<Video>);
+    // A few videos per group (one big "latest" page would be all from whichever playlist was imported last),
+    // interleaved so the hero and "Latest classes" rail mix categories.
+    final perGroup = await Future.wait(groups.map((g) => api.studioVideos(group: g.key, limit: 10)));
+    final seen = <String>{};
+    final videos = <Video>[];
+    final longest = perGroup.fold<int>(0, (m, l) => l.length > m ? l.length : m);
+    for (var i = 0; i < longest; i++) {
+      for (final list in perGroup) {
+        if (i < list.length && seen.add(list[i].id)) videos.add(list[i]);
+      }
+    }
+    return (groups, videos);
   }
 
   Future<void> _reload() async {
@@ -173,7 +182,7 @@ class _StudioScreenState extends State<StudioScreen> {
                     return const EmptyView(
                       icon: Icons.video_library_rounded,
                       title: 'No videos yet',
-                      message: 'FITKEY coaches add new classes every week. Pull down to refresh.',
+                      message: 'New classes are added regularly. Pull down to refresh.',
                     );
                   }
                   return _Feed(groups: groups, videos: videos, onOpenGroup: _openGroup);
@@ -214,7 +223,7 @@ class _Header extends StatelessWidget {
             child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
               Text('Studio', style: TextStyle(fontSize: 28, fontWeight: FontWeight.w800, letterSpacing: -0.9, height: 1.1)),
               SizedBox(height: 4),
-              Text('Train with FITKEY coaches, anywhere',
+              Text('Hand-picked workouts from top coaches',
                   style: TextStyle(fontSize: 13, color: AppColors.text2, fontWeight: FontWeight.w500)),
             ]),
           ),
@@ -308,7 +317,7 @@ class _VideoRow extends StatelessWidget {
   Widget build(BuildContext context) {
     final v = video;
     final visual = studioVideoVisual(v);
-    final duration = formatDuration(v.durationSeconds);
+    final duration = studioDurationText(v.durationSeconds);
     return Tap(
       onTap: onTap,
       child: AppCard(
@@ -336,7 +345,7 @@ class _VideoRow extends StatelessWidget {
                   overflow: TextOverflow.ellipsis,
                   style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 14.5, height: 1.25)),
               const SizedBox(height: 4),
-              Text(v.trainerName ?? 'FITKEY Coach',
+              Text(studioCredit(v),
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: const TextStyle(fontSize: 12.5, color: AppColors.text2, fontWeight: FontWeight.w600)),
@@ -378,7 +387,7 @@ class _Feed extends StatelessWidget {
             eyebrow: 'New in studio · ${hero.groupLabel ?? heroVisual.label}',
             // PhotoBanner does not clamp lines, so keep very long titles to ~2 lines.
             title: hero.title.length > 52 ? '${hero.title.substring(0, 50).trimRight()}…' : hero.title,
-            subtitle: [hero.trainerName, formatDuration(hero.durationSeconds), _levelLabel(hero.level)]
+            subtitle: [studioCredit(hero), studioDurationText(hero.durationSeconds), _levelLabel(hero.level)]
                 .whereType<String>()
                 .where((s) => s.isNotEmpty)
                 .join(' · '),
@@ -391,7 +400,7 @@ class _Feed extends StatelessWidget {
             image: AppImages.homeWorkout,
             eyebrow: 'FitKey studio',
             title: 'Your home workout, coached.',
-            subtitle: 'Yoga, strength, dance & more from FITKEY trainers.',
+            subtitle: 'Yoga, strength, dance & more from top coaches.',
             height: 180,
           ),
         if (groups.isNotEmpty) ...[
@@ -411,7 +420,7 @@ class _Feed extends StatelessWidget {
           ),
         ],
         if (videos.isNotEmpty) ...[
-          const SectionTitle('Latest classes', subtitle: 'Fresh from FITKEY coaches'),
+          const SectionTitle('Latest classes', subtitle: 'Hand-picked for every goal'),
           _VideoRail(videos: videos.take(8).toList()),
         ],
         for (final g in groups)
@@ -573,7 +582,7 @@ class _VideoListScreenState extends State<VideoListScreen> {
                 image: visual.image,
                 eyebrow: 'FitKey studio',
                 title: '${c.label} classes',
-                subtitle: '${c.count} video${c.count == 1 ? '' : 's'} by FITKEY coaches',
+                subtitle: '${c.count} video${c.count == 1 ? '' : 's'}',
                 height: 150,
               ),
             );
@@ -677,7 +686,7 @@ class VideoTile extends StatelessWidget {
   Widget build(BuildContext context) {
     final v = video;
     final visual = studioVideoVisual(v);
-    final duration = formatDuration(v.durationSeconds);
+    final duration = studioDurationText(v.durationSeconds);
     return Tap(
       onTap: () => push(context, VideoPlayerScreen(video: v)),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisSize: MainAxisSize.min, children: [
@@ -706,6 +715,7 @@ class VideoTile extends StatelessWidget {
                 top: 10,
                 child: Tag(_levelLabel(v.level).toUpperCase(), color: _levelColor(v.level), solid: true, dense: true),
               ),
+              if (v.isYoutube) const Positioned(left: 10, bottom: 10, child: _YoutubeBadge()),
               if (duration.isNotEmpty)
                 Positioned(
                   right: 10,
@@ -731,10 +741,10 @@ class VideoTile extends StatelessWidget {
             style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 15, height: 1.25, letterSpacing: -0.2)),
         const SizedBox(height: 5),
         Row(children: [
-          PersonAvatar(name: v.trainerName ?? 'FITKEY Coach', size: 20),
+          PersonAvatar(name: v.trainerName ?? v.channelName ?? 'FITKEY Coach', size: 20),
           const SizedBox(width: 6),
           Flexible(
-            child: Text(v.trainerName ?? 'FITKEY Coach',
+            child: Text(studioCredit(v),
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
                 style: const TextStyle(fontSize: 12.5, color: AppColors.text2, fontWeight: FontWeight.w600)),
@@ -742,6 +752,24 @@ class VideoTile extends StatelessWidget {
           Text('  ·  ${v.groupLabel ?? visual.label}',
               maxLines: 1, style: TextStyle(fontSize: 12.5, color: visual.color, fontWeight: FontWeight.w700)),
         ]),
+      ]),
+    );
+  }
+}
+
+/// Small "YouTube" mark on thumbnails of videos that play through the YouTube player (credit + honesty).
+class _YoutubeBadge extends StatelessWidget {
+  const _YoutubeBadge();
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+      decoration: BoxDecoration(color: Colors.black.withValues(alpha: 0.7), borderRadius: BorderRadius.circular(8)),
+      child: const Row(mainAxisSize: MainAxisSize.min, children: [
+        Icon(Icons.smart_display_rounded, color: Color(0xFFFF0033), size: 14),
+        SizedBox(width: 4),
+        Text('YouTube', style: TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.w800)),
       ]),
     );
   }

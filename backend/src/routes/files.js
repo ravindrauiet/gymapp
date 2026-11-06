@@ -6,7 +6,7 @@ import { badRequest, notFound } from '../utils/http.js';
 
 export const FILES_PATH = '/api/v1/files/';
 const MAX_BYTES = 3 * 1024 * 1024;
-// Members also upload short AI Arena proof clips (MP4) and Circle chat voice notes (audio).
+// Members also upload short ProveIt proof clips (MP4) and Circle chat voice notes (audio).
 const MAX_VIDEO_BYTES = 12 * 1024 * 1024;
 const ALLOWED = new Set(['image/jpeg', 'image/png', 'image/webp', 'video/mp4', 'audio/mp4', 'audio/m4a', 'audio/x-m4a', 'audio/aac', 'audio/mpeg', 'audio/webm', 'audio/ogg']);
 

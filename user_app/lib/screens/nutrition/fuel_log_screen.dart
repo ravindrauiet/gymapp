@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 
+import '../../data/food_api.dart';
 import '../../data/models.dart';
 import '../../data/progress_api.dart';
 import '../../state/session.dart';
@@ -104,6 +105,8 @@ Future<bool> showFoodLogSheet(
 class _FuelLogScreenState extends State<FuelLogScreen> {
   late DateTime _date = _day(DateTime.now());
   MealDailySummary? _data;
+  Map<String, MealLogExtra> _extras = const {};
+  int _unavailableItems = 0;
   UserGoal? _goal;
   bool _goalKnown = false;
   Object? _error;
@@ -131,10 +134,12 @@ class _FuelLogScreenState extends State<FuelLogScreen> {
       });
     }
     try {
-      final d = await context.read<Session>().api.dailyMeals(date: _isToday ? null : apiDate(_date));
+      final day = await context.read<Session>().api.fuelDay(date: _isToday ? null : apiDate(_date));
       if (!mounted || id != _req) return;
       setState(() {
-        _data = d;
+        _data = day.summary;
+        _extras = day.extras;
+        _unavailableItems = day.unavailableItems;
         _water = null;
         _removed.clear();
         _loading = false;
@@ -340,6 +345,7 @@ class _FuelLogScreenState extends State<FuelLogScreen> {
           date: _date,
           hasGoal: _goal != null || d.targetsSource != 'default',
           onEditGoal: _openGoal,
+          unavailableItems: _unavailableItems,
         ),
         const SizedBox(height: 14),
         _WaterCard(
@@ -398,6 +404,7 @@ class _FuelLogScreenState extends State<FuelLogScreen> {
           _MealCard(
             meal: m,
             items: items(m.id),
+            extras: _extras,
             onAdd: () => _openAddFood(m.id),
             confirmDelete: _confirmDelete,
             onDeleted: _onDeleted,
@@ -475,12 +482,14 @@ class _CalorieHero extends StatelessWidget {
     required this.date,
     required this.hasGoal,
     required this.onEditGoal,
+    this.unavailableItems = 0,
   });
   final MealDailySummary data;
   final bool isToday;
   final DateTime date;
   final bool hasGoal;
   final VoidCallback onEditGoal;
+  final int unavailableItems;
 
   @override
   Widget build(BuildContext context) {
@@ -567,6 +576,20 @@ class _CalorieHero extends StatelessWidget {
           const SizedBox(width: 14),
           Expanded(child: _MacroBar('Fat', data.totalFatG, data.fatTarget, AppColors.pink)),
         ]),
+        if (unavailableItems > 0) ...[
+          const SizedBox(height: 12),
+          Row(children: [
+            const Icon(Icons.info_outline_rounded, size: 15, color: AppColors.text3),
+            const SizedBox(width: 6),
+            Expanded(
+              child: Text(
+                'Some values unavailable for $unavailableItems item${unavailableItems == 1 ? '' : 's'} '
+                '— totals count only the known values.',
+                style: const TextStyle(fontSize: 11.5, color: AppColors.text3, fontWeight: FontWeight.w600),
+              ),
+            ),
+          ]),
+        ],
       ]),
     );
   }
@@ -808,12 +831,14 @@ class _MealCard extends StatelessWidget {
   const _MealCard({
     required this.meal,
     required this.items,
+    required this.extras,
     required this.onAdd,
     required this.confirmDelete,
     required this.onDeleted,
   });
   final _Meal meal;
   final List<MealLog> items;
+  final Map<String, MealLogExtra> extras;
   final VoidCallback onAdd;
   final Future<bool> Function(MealLog) confirmDelete;
   final ValueChanged<MealLog> onDeleted;
@@ -876,7 +901,13 @@ class _MealCard extends StatelessWidget {
           const Divider(height: 1),
           for (final (i, m) in items.indexed) ...[
             if (i > 0) const Divider(height: 1, indent: 14, endIndent: 14),
-            _LoggedRow(item: m, confirmDelete: confirmDelete, onDeleted: onDeleted, last: i == items.length - 1),
+            _LoggedRow(
+              item: m,
+              extra: extras[m.id],
+              confirmDelete: confirmDelete,
+              onDeleted: onDeleted,
+              last: i == items.length - 1,
+            ),
           ],
         ],
       ]),
@@ -885,15 +916,37 @@ class _MealCard extends StatelessWidget {
 }
 
 class _LoggedRow extends StatelessWidget {
-  const _LoggedRow({required this.item, required this.confirmDelete, required this.onDeleted, required this.last});
+  const _LoggedRow({
+    required this.item,
+    this.extra,
+    required this.confirmDelete,
+    required this.onDeleted,
+    required this.last,
+  });
   final MealLog item;
+  final MealLogExtra? extra;
   final Future<bool> Function(MealLog) confirmDelete;
   final ValueChanged<MealLog> onDeleted;
   final bool last;
 
+  String _qty() {
+    final e = extra;
+    final q = e?.quantity;
+    if (e != null && q != null && e.unit == 'g') return '${formatNumber(q)} g';
+    if (e != null && q != null && e.unit == 'serving') {
+      final unit = e.servingUnit ?? 'serving';
+      return q == 1 ? unit : '${formatNumber(q)} × $unit';
+    }
+    return '${formatNumber(item.servings)} serving';
+  }
+
+  /// "—" for a nutrient the food database doesn't have (never a misleading 0).
+  String _g(String key, double v) => extra?.unavailable.contains(key) == true ? '—' : '${formatNumber(v)}g';
+
   @override
   Widget build(BuildContext context) {
     final radius = last ? const BorderRadius.vertical(bottom: Radius.circular(20)) : BorderRadius.zero;
+    final noKcal = extra?.unavailable.contains('calories') == true;
     return ClipRRect(
       borderRadius: radius,
       child: Dismissible(
@@ -931,7 +984,7 @@ class _LoggedRow extends StatelessWidget {
                     style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 14)),
                 const SizedBox(height: 2),
                 Text(
-                  '${formatNumber(item.servings)} serving · P ${formatNumber(item.proteinG)}g · C ${formatNumber(item.carbsG)}g · F ${formatNumber(item.fatG)}g',
+                  '${_qty()} · P ${_g('proteinG', item.proteinG)} · C ${_g('carbsG', item.carbsG)} · F ${_g('fatG', item.fatG)}',
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: const TextStyle(fontSize: 12, color: AppColors.text2, fontWeight: FontWeight.w500),
@@ -939,7 +992,7 @@ class _LoggedRow extends StatelessWidget {
               ]),
             ),
             const SizedBox(width: 8),
-            Text('${item.calories}', style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 15)),
+            Text(noKcal ? '—' : '${item.calories}', style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 15)),
             const Text(' kcal', style: TextStyle(fontSize: 11.5, color: AppColors.text3, fontWeight: FontWeight.w600)),
           ]),
         ),
@@ -1019,33 +1072,103 @@ class _AddFoodSheet extends StatefulWidget {
 }
 
 class _AddFoodSheetState extends State<_AddFoodSheet> {
+  static const _all = 'All';
+  static const _pageSize = 30;
+  static const _diets = [_all, 'veg', 'egg', 'nonveg'];
+
   final _search = TextEditingController();
   Timer? _debounce;
-  String _category = 'All';
-  List<String> _categories = const ['All'];
-  late Future<List<FoodItem>> _future;
+  String _category = _all;
+  String _diet = _all;
+  List<FoodCategory> _categories = const [];
+  final List<DbFood> _foods = [];
+  bool _ready = false;
+  String? _credit;
+  bool _loading = true;
+  bool _loadingMore = false;
+  bool _hasMore = false;
+  Object? _error;
+  int _req = 0;
 
   @override
   void initState() {
     super.initState();
-    _future = _fetch();
+    _reload(initial: true);
+    _loadCategories();
   }
 
-  Future<List<FoodItem>> _fetch() async {
+  Future<FoodSearchPage> _page(int offset) {
     final q = _search.text.trim();
-    final foods = await context.read<Session>().api.foodEncyclopedia(
+    return context.read<Session>().api.searchFoods(
           q: q.isEmpty ? null : q,
-          category: _category == 'All' ? null : _category,
+          category: _category == _all ? null : _category,
+          diet: _diet == _all ? null : _diet,
+          limit: _pageSize,
+          offset: offset,
         );
-    // Learn the category list from the first unfiltered result set.
-    if (q.isEmpty && _category == 'All' && mounted) {
-      final cats = {for (final f in foods) f.category}.toList()..sort();
-      setState(() => _categories = ['All', ...cats]);
-    }
-    return foods;
   }
 
-  void _reload() => setState(() => _future = _fetch());
+  Future<void> _reload({bool initial = false}) async {
+    final id = ++_req;
+    if (!initial) {
+      setState(() {
+        _loading = true;
+        _error = null;
+      });
+    }
+    try {
+      final page = await _page(0);
+      if (!mounted || id != _req) return;
+      setState(() {
+        _foods
+          ..clear()
+          ..addAll(page.foods);
+        _hasMore = page.hasMore;
+        _ready = page.ready;
+        _credit = page.credit;
+        _loading = false;
+      });
+    } catch (e) {
+      if (!mounted || id != _req) return;
+      setState(() {
+        _error = e;
+        _loading = false;
+      });
+    }
+  }
+
+  Future<void> _more() async {
+    if (_loadingMore || !_hasMore || _loading) return;
+    final id = _req;
+    setState(() => _loadingMore = true);
+    try {
+      // Packaged foods are only appended to the first page, so page by database foods.
+      final page = await _page(_ready ? _foods.where((f) => f.isDb).length : _foods.length);
+      if (!mounted || id != _req) return;
+      setState(() {
+        _foods.addAll(page.foods.where((f) => !_foods.any((x) => x.id == f.id)));
+        _hasMore = page.hasMore;
+        _loadingMore = false;
+      });
+    } catch (e) {
+      if (!mounted || id != _req) return;
+      setState(() {
+        _loadingMore = false;
+        _hasMore = false;
+      });
+      toast(context, friendlyError(e), error: true);
+    }
+  }
+
+  Future<void> _loadCategories() async {
+    try {
+      final cats = await context.read<Session>().api.foodCategories(diet: _diet == _all ? null : _diet);
+      if (!mounted) return;
+      setState(() => _categories = cats);
+    } catch (_) {
+      // Category chips are optional — search still works without them.
+    }
+  }
 
   void _onSearch(String _) {
     _debounce?.cancel();
@@ -1061,10 +1184,20 @@ class _AddFoodSheetState extends State<_AddFoodSheet> {
     super.dispose();
   }
 
-  Future<void> _pick(FoodItem f) async {
-    final logged = await showFoodLogSheet(context, f, mealType: widget.mealType, date: widget.date);
+  Future<void> _pick(DbFood f) async {
+    final logged = f.isDb
+        ? await _showDbFoodLogSheet(context, f, mealType: widget.mealType, date: widget.date, credit: _credit)
+        : await showFoodLogSheet(context, f.toFoodItem(), mealType: widget.mealType, date: widget.date);
     if (logged && mounted) Navigator.pop(context, _AddResult.logged);
   }
+
+  List<String> get _categoryOptions {
+    final seen = <String>{};
+    return [_all, for (final c in _categories) if (seen.add(c.name)) c.name];
+  }
+
+  bool _isRawCategory(String name) => _categories.any((c) => c.name == name && c.type == 'raw') &&
+      !_categories.any((c) => c.name == name && c.type == 'cooked');
 
   @override
   Widget build(BuildContext context) {
@@ -1120,7 +1253,7 @@ class _AddFoodSheetState extends State<_AddFoodSheet> {
         Padding(
           padding: const EdgeInsets.symmetric(horizontal: 16),
           child: RotatingSearchBar(
-            hints: const ["'paneer'", "'eggs'", "'oats'", "'dal'", "'banana'", "'chicken'"],
+            hints: const ["'roti'", "'dal tadka'", "'paneer'", "'idli'", "'ande ka sandwich'", "'poha'"],
             controller: _search,
             onChanged: _onSearch,
             onSubmitted: (_) {
@@ -1129,55 +1262,543 @@ class _AddFoodSheetState extends State<_AddFoodSheet> {
             },
           ),
         ),
-        const SizedBox(height: 12),
-        if (_categories.length > 1)
+        if (_ready) ...[
+          const SizedBox(height: 12),
           ChoiceChips<String>(
-            options: _categories,
-            selected: _category,
-            label: (c) => c,
-            onSelected: (c) {
-              setState(() => _category = c);
+            options: _diets,
+            selected: _diet,
+            label: (d) => switch (d) { 'veg' => 'Veg', 'egg' => 'Egg', 'nonveg' => 'Non-veg', _ => 'All diets' },
+            icon: (d) => d == _all ? Icons.restaurant_menu_rounded : Icons.circle,
+            onSelected: (d) {
+              setState(() => _diet = d);
+              _loadCategories();
               _reload();
             },
           ),
+          if (_categoryOptions.length > 1) ...[
+            const SizedBox(height: 8),
+            ChoiceChips<String>(
+              options: _categoryOptions,
+              selected: _category,
+              label: (c) => c,
+              icon: (c) => c == _all ? null : (_isRawCategory(c) ? Icons.eco_rounded : Icons.restaurant_rounded),
+              onSelected: (c) {
+                setState(() => _category = c);
+                _reload();
+              },
+            ),
+          ],
+          if (_diet == 'veg')
+            const Padding(
+              padding: EdgeInsets.fromLTRB(16, 8, 16, 0),
+              child: Text('Veg tags are based on dish names — check ingredients if you follow a strict diet.',
+                  style: TextStyle(fontSize: 11.5, color: AppColors.text3, fontWeight: FontWeight.w600)),
+            ),
+        ],
         const SizedBox(height: 6),
-        Expanded(
-          child: FutureBuilder<List<FoodItem>>(
-            future: _future,
-            builder: (context, snap) {
-              if (snap.connectionState != ConnectionState.done) {
-                return const SkeletonList(count: 5, itemHeight: 56);
-              }
-              if (snap.hasError) return ErrorView(error: snap.error!, onRetry: _reload);
-              final foods = snap.data!;
-              if (foods.isEmpty) {
-                return SingleChildScrollView(
-                  child: EmptyView(
-                    icon: Icons.search_off_rounded,
-                    title: 'No foods found',
-                    message: 'Try "egg", "paneer" or "oats" — or scan the meal with AI instead.',
-                    action: SizedBox(
-                      width: 200,
-                      child: OutlinedButton.icon(
-                        onPressed: () => Navigator.pop(context, _AddResult.ai),
-                        icon: const Icon(Icons.auto_awesome_rounded),
-                        label: const Text('Scan with AI'),
-                      ),
-                    ),
+        Expanded(child: _list()),
+      ]),
+    );
+  }
+
+  Widget _list() {
+    if (_loading) return const SkeletonList(count: 5, itemHeight: 56);
+    if (_error != null) return ErrorView(error: _error!, onRetry: _reload);
+    if (_foods.isEmpty) {
+      return SingleChildScrollView(
+        child: EmptyView(
+          icon: Icons.search_off_rounded,
+          title: 'No foods found',
+          message: _diet != _all || _category != _all
+              ? 'Try another spelling, or clear the filters.'
+              : 'Try "roti", "dal" or "paneer" — or scan the meal with AI instead.',
+          action: SizedBox(
+            width: 200,
+            child: _diet != _all || _category != _all
+                ? OutlinedButton.icon(
+                    onPressed: () {
+                      setState(() {
+                        _diet = _all;
+                        _category = _all;
+                      });
+                      _loadCategories();
+                      _reload();
+                    },
+                    icon: const Icon(Icons.filter_alt_off_rounded),
+                    label: const Text('Clear filters'),
+                  )
+                : OutlinedButton.icon(
+                    onPressed: () => Navigator.pop(context, _AddResult.ai),
+                    icon: const Icon(Icons.auto_awesome_rounded),
+                    label: const Text('Scan with AI'),
                   ),
-                );
-              }
-              return ListView.separated(
-                padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
-                itemCount: foods.length,
-                separatorBuilder: (_, _) => const Divider(height: 20),
-                itemBuilder: (_, i) => _FoodRow(food: foods[i], onAdd: () => _pick(foods[i])),
-              );
-            },
           ),
+        ),
+      );
+    }
+    return ListView.separated(
+      padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
+      itemCount: _foods.length + 1,
+      separatorBuilder: (_, _) => const Divider(height: 20),
+      itemBuilder: (_, i) {
+        if (i < _foods.length) return _DbFoodRow(food: _foods[i], onAdd: () => _pick(_foods[i]));
+        if (_hasMore) {
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (mounted) _more();
+          });
+          return const Padding(
+            padding: EdgeInsets.symmetric(vertical: 12),
+            child: Center(child: SizedBox(width: 22, height: 22, child: CircularProgressIndicator(strokeWidth: 2.4))),
+          );
+        }
+        return _credit == null ? const SizedBox.shrink() : _CreditLine(_credit!);
+      },
+    );
+  }
+}
+
+/// Source credit for the Indian food database (licence: see the BRD PDF).
+class _CreditLine extends StatelessWidget {
+  const _CreditLine(this.text);
+  final String text;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 8),
+      child: Row(children: [
+        const Icon(Icons.menu_book_rounded, size: 14, color: AppColors.text3),
+        const SizedBox(width: 6),
+        Expanded(
+          child: Text(text, style: const TextStyle(fontSize: 11.5, color: AppColors.text3, fontWeight: FontWeight.w600)),
         ),
       ]),
     );
+  }
+}
+
+/// Indian food-label style diet mark: green (veg), amber (egg), red (non-veg).
+class _DietMark extends StatelessWidget {
+  const _DietMark(this.diet, {this.size = 14});
+  final String? diet;
+  final double size;
+
+  @override
+  Widget build(BuildContext context) {
+    final color = switch (diet) { 'veg' => AppColors.green, 'egg' => AppColors.amber, 'nonveg' => AppColors.red, _ => null };
+    if (color == null) return const SizedBox.shrink();
+    return Tooltip(
+      message: switch (diet) { 'veg' => 'Veg', 'egg' => 'Contains egg', _ => 'Non-veg' },
+      child: Container(
+        width: size,
+        height: size,
+        padding: EdgeInsets.all(size * 0.2),
+        decoration: BoxDecoration(
+          color: AppColors.surface,
+          border: Border.all(color: color, width: 1.4),
+          borderRadius: BorderRadius.circular(3),
+        ),
+        child: DecoratedBox(decoration: BoxDecoration(color: color, shape: BoxShape.circle)),
+      ),
+    );
+  }
+}
+
+String _fmtG(double? v) => v == null ? '—' : '${formatNumber((v * 10).round() / 10)}g';
+String _fmtKcal(double? v) => v == null ? '—' : '${v.round()}';
+
+String _servingLabel(DbFood f) {
+  final w = f.servingWeightG;
+  final unit = f.servingUnit;
+  if (w == null || unit.toLowerCase().replaceAll(' ', '') == '100g') return unit;
+  return '$unit (${formatNumber(w.round())} g)';
+}
+
+class _DbFoodRow extends StatelessWidget {
+  const _DbFoodRow({required this.food, required this.onAdd});
+  final DbFood food;
+  final VoidCallback onAdd;
+
+  @override
+  Widget build(BuildContext context) {
+    final s = food.perServing;
+    return Tap(
+      onTap: onAdd,
+      scale: 0.99,
+      child: Row(children: [
+        Stack(clipBehavior: Clip.none, children: [
+          Container(
+            width: 54,
+            height: 54,
+            alignment: Alignment.center,
+            decoration: BoxDecoration(color: AppColors.surfaceAlt, borderRadius: BorderRadius.circular(16)),
+            child: Text(foodEmoji(food.category, food.name), style: const TextStyle(fontSize: 26)),
+          ),
+          if (food.diet != null) Positioned(right: -3, bottom: -3, child: _DietMark(food.diet)),
+        ]),
+        const SizedBox(width: 12),
+        Expanded(
+          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Text(food.name,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 14.5, height: 1.25)),
+            if (food.localName != null && food.localName!.isNotEmpty)
+              Text(food.localName!,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(fontSize: 12, color: AppColors.text3, fontWeight: FontWeight.w600)),
+            const SizedBox(height: 3),
+            Text(
+              '${_servingLabel(food)} · ${_fmtKcal(s.calories)} kcal${food.type == 'raw' ? ' · Raw' : food.type == 'packaged' ? ' · Packaged' : ''}',
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(fontSize: 12, color: AppColors.text2, fontWeight: FontWeight.w600),
+            ),
+            const SizedBox(height: 6),
+            Wrap(spacing: 6, runSpacing: 4, children: [
+              Tag('P ${_fmtG(s.proteinG)}', color: AppColors.blue, dense: true),
+              Tag('C ${_fmtG(s.carbsG)}', color: AppColors.amber, dense: true),
+              Tag('F ${_fmtG(s.fatG)}', color: AppColors.pink, dense: true),
+            ]),
+          ]),
+        ),
+        const SizedBox(width: 10),
+        QtyStepper(qty: 0, compact: true, onChanged: (_) => onAdd()),
+      ]),
+    );
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Log panel for the Indian food database: servings OR grams, meal, live preview
+// ---------------------------------------------------------------------------
+
+Future<bool> _showDbFoodLogSheet(
+  BuildContext context,
+  DbFood food, {
+  required String mealType,
+  DateTime? date,
+  String? credit,
+}) async {
+  final logged = await showAppSheet<bool>(
+    context,
+    builder: (_) => _DbFoodLogPanel(food: food, initialMeal: mealType, date: date, credit: credit),
+  );
+  return logged == true;
+}
+
+class _DbFoodLogPanel extends StatefulWidget {
+  const _DbFoodLogPanel({required this.food, required this.initialMeal, this.date, this.credit});
+  final DbFood food;
+  final String initialMeal;
+  final DateTime? date;
+  final String? credit;
+
+  @override
+  State<_DbFoodLogPanel> createState() => _DbFoodLogPanelState();
+}
+
+class _DbFoodLogPanelState extends State<_DbFoodLogPanel> {
+  bool _grams = false;
+  double _servings = 1; // default: 1 Serving Unit
+  late final _gramCtrl = TextEditingController(text: '${(widget.food.servingWeightG ?? 100).round()}');
+  late String _meal = widget.initialMeal;
+  bool _busy = false;
+  bool _showMicros = false;
+
+  @override
+  void dispose() {
+    _gramCtrl.dispose();
+    super.dispose();
+  }
+
+  double? get _gramValue {
+    final v = double.tryParse(_gramCtrl.text.trim().replaceAll(',', '.'));
+    return v != null && v >= 1 && v <= 3000 ? v : null;
+  }
+
+  double? get _quantity => _grams ? _gramValue : _servings;
+
+  Future<void> _log() async {
+    final q = _quantity;
+    if (q == null) {
+      toast(context, 'Enter grams between 1 and 3000', error: true);
+      return;
+    }
+    setState(() => _busy = true);
+    try {
+      final date = widget.date;
+      await context.read<Session>().api.logDbFood(
+            mealType: _meal,
+            foodId: widget.food.id,
+            unit: _grams ? 'g' : 'serving',
+            quantity: q,
+            loggedOn: date != null && _day(date) != _day(DateTime.now()) ? apiDate(date) : null,
+          );
+      if (!mounted) return;
+      HapticFeedback.mediumImpact();
+      final what = _grams ? '${formatNumber(q)} g' : '${formatNumber(q)} ×';
+      toast(context, 'Added $what ${widget.food.name} to ${_mealOf(_meal).label}');
+      Navigator.pop(context, true);
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _busy = false);
+      toast(context, friendlyError(e), error: true);
+    }
+  }
+
+  /// Micronutrients for the chosen quantity (scaled from one serving).
+  List<(String, double, String)> _micros() {
+    final f = widget.food;
+    final q = _quantity;
+    if (q == null) return const [];
+    double? factor;
+    if (!_grams) {
+      factor = q;
+    } else if (f.servingWeightG != null && f.servingWeightG! > 0) {
+      factor = q / f.servingWeightG!;
+    }
+    if (factor == null) return const [];
+    const labels = {
+      'ironMg': ('Iron', 'mg'),
+      'calciumMg': ('Calcium', 'mg'),
+      'magnesiumMg': ('Magnesium', 'mg'),
+      'sodiumMg': ('Sodium', 'mg'),
+      'potassiumMg': ('Potassium', 'mg'),
+      'zincMg': ('Zinc', 'mg'),
+      'phosphorusMg': ('Phosphorus', 'mg'),
+      'vitaminAUg': ('Vitamin A', 'µg'),
+      'vitaminCMg': ('Vitamin C', 'mg'),
+      'vitaminDUg': ('Vitamin D', 'µg'),
+      'vitaminB12Ug': ('Vitamin B12', 'µg'),
+      'folateUg': ('Folate', 'µg'),
+      'sugarG': ('Sugar', 'g'),
+      'saturatedFatG': ('Saturated fat', 'g'),
+      'cholesterolMg': ('Cholesterol', 'mg'),
+    };
+    return [
+      for (final e in labels.entries)
+        if (f.microsServing[e.key] != null) (e.value.$1, f.microsServing[e.key]! * factor, e.value.$2),
+    ];
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final f = widget.food;
+    final q = _quantity;
+    final n = q == null ? const FoodNutrients() : f.nutrientsFor(grams: _grams, quantity: q);
+    final missing = q != null && [n.calories, n.proteinG, n.carbsG, n.fatG].any((v) => v == null);
+    final micros = _micros();
+    final kcal = n.calories;
+
+    return SingleChildScrollView(
+      padding: EdgeInsets.fromLTRB(16, 0, 16, 16 + MediaQuery.viewInsetsOf(context).bottom),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisSize: MainAxisSize.min, children: [
+        Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Container(
+            width: 64,
+            height: 64,
+            alignment: Alignment.center,
+            decoration: BoxDecoration(
+              gradient: const LinearGradient(colors: [AppColors.primarySoft, AppColors.amberSoft]),
+              borderRadius: BorderRadius.circular(18),
+            ),
+            child: Text(foodEmoji(f.category, f.name), style: const TextStyle(fontSize: 32)),
+          ),
+          const SizedBox(width: 14),
+          Expanded(
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Text(f.name,
+                  style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w800, letterSpacing: -0.3, height: 1.2)),
+              if (f.localName != null && f.localName!.isNotEmpty) ...[
+                const SizedBox(height: 2),
+                Text(f.localName!,
+                    style: const TextStyle(fontSize: 12.5, color: AppColors.text3, fontWeight: FontWeight.w600)),
+              ],
+              const SizedBox(height: 6),
+              Wrap(spacing: 6, runSpacing: 4, crossAxisAlignment: WrapCrossAlignment.center, children: [
+                if (f.diet != null) _DietMark(f.diet, size: 16),
+                Tag(f.type == 'raw' ? 'Raw ingredient' : 'Cooked dish', color: AppColors.teal, dense: true),
+                Tag(f.category, color: AppColors.text2, dense: true),
+              ]),
+            ]),
+          ),
+        ]),
+        const SizedBox(height: 16),
+        Text('1 serving = ${_servingLabel(f)}'
+            '${f.per100g?.calories != null ? ' · ${f.per100g!.calories!.round()} kcal per 100 g' : ''}',
+            style: const TextStyle(fontSize: 12.5, color: AppColors.text2, fontWeight: FontWeight.w600)),
+        const SizedBox(height: 12),
+        Row(children: [
+          _modeTab('Servings', !_grams, () => setState(() => _grams = false)),
+          const SizedBox(width: 8),
+          _modeTab('Grams', _grams, f.gramsAvailable ? () => setState(() => _grams = true) : null),
+        ]),
+        const SizedBox(height: 14),
+        if (!_grams)
+          Row(children: [
+            Expanded(
+              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                const Text('Servings', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 15)),
+                Text(f.servingUnit,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(fontSize: 12, color: AppColors.text3, fontWeight: FontWeight.w600)),
+              ]),
+            ),
+            _ServingStepper(value: _servings, onChanged: (v) => setState(() => _servings = v)),
+          ])
+        else ...[
+          TextField(
+            controller: _gramCtrl,
+            keyboardType: const TextInputType.numberWithOptions(decimal: true),
+            inputFormatters: [FilteringTextInputFormatter.allow(RegExp(r'[0-9.,]'))],
+            onChanged: (_) => setState(() {}),
+            decoration: InputDecoration(
+              labelText: 'Amount',
+              suffixText: 'g',
+              errorText: _gramValue == null ? 'Enter 1 – 3000 g' : null,
+            ),
+          ),
+          const SizedBox(height: 10),
+          Wrap(spacing: 8, runSpacing: 8, children: [
+            for (final g in {50, 100, 150, 200, if (f.servingWeightG != null) f.servingWeightG!.round()})
+              Tap(
+                onTap: () => setState(() => _gramCtrl.text = '$g'),
+                child: Tag('$g g', color: _gramValue == g ? AppColors.primary : AppColors.text2),
+              ),
+          ]),
+        ],
+        if (!f.gramsAvailable)
+          const Padding(
+            padding: EdgeInsets.only(top: 8),
+            child: Text('Grams are not available for this food — log it in servings.',
+                style: TextStyle(fontSize: 11.5, color: AppColors.text3, fontWeight: FontWeight.w600)),
+          ),
+        const SizedBox(height: 18),
+        const Text('Add to', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 15)),
+        const SizedBox(height: 10),
+        _MealPicker(selected: _meal, onChanged: (m) => setState(() => _meal = m)),
+        const SizedBox(height: 18),
+        Container(
+          padding: const EdgeInsets.all(14),
+          decoration: BoxDecoration(color: AppColors.surfaceAlt, borderRadius: BorderRadius.circular(18)),
+          child: Row(children: [
+            _preview(_fmtKcal(n.calories), 'kcal', AppColors.primary),
+            _preview(n.proteinG == null ? '—' : formatNumber((n.proteinG! * 10).round() / 10), 'protein g', AppColors.blue),
+            _preview(n.carbsG == null ? '—' : formatNumber((n.carbsG! * 10).round() / 10), 'carbs g', AppColors.amber),
+            _preview(n.fatG == null ? '—' : formatNumber((n.fatG! * 10).round() / 10), 'fat g', AppColors.pink),
+          ]),
+        ),
+        if (missing)
+          const Padding(
+            padding: EdgeInsets.only(top: 8),
+            child: Text('— = not available in the source data (not counted as zero).',
+                style: TextStyle(fontSize: 11.5, color: AppColors.text3, fontWeight: FontWeight.w600)),
+          ),
+        if (micros.isNotEmpty || n.fibreG != null) ...[
+          const SizedBox(height: 8),
+          Tap(
+            onTap: () => setState(() => _showMicros = !_showMicros),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(vertical: 8),
+              child: Row(children: [
+                const Text('Fibre, vitamins & minerals', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 13.5)),
+                const Spacer(),
+                Icon(_showMicros ? Icons.expand_less_rounded : Icons.expand_more_rounded, color: AppColors.text2),
+              ]),
+            ),
+          ),
+          AnimatedCrossFade(
+            duration: const Duration(milliseconds: 200),
+            crossFadeState: _showMicros ? CrossFadeState.showSecond : CrossFadeState.showFirst,
+            firstChild: const SizedBox(width: double.infinity),
+            secondChild: Wrap(spacing: 8, runSpacing: 8, children: [
+              if (n.fibreG != null) Tag('Fibre ${_fmtG(n.fibreG)}', color: AppColors.teal),
+              for (final m in micros)
+                Tag('${m.$1} ${formatNumber(m.$2 >= 10 ? m.$2.round() : (m.$2 * 10).round() / 10)}${m.$3}',
+                    color: AppColors.teal),
+            ]),
+          ),
+        ],
+        if (widget.credit != null) _CreditLine(widget.credit!),
+        const SizedBox(height: 12),
+        AppButton(
+          label: kcal == null ? 'Add to ${_mealOf(_meal).label}' : 'Add ${kcal.round()} kcal to ${_mealOf(_meal).label}',
+          icon: Icons.add_task_rounded,
+          busy: _busy,
+          onPressed: q == null ? null : _log,
+        ),
+      ]),
+    );
+  }
+
+  Widget _modeTab(String label, bool selected, VoidCallback? onTap) => Expanded(
+        child: Tap(
+          onTap: onTap,
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 180),
+            padding: const EdgeInsets.symmetric(vertical: 10),
+            alignment: Alignment.center,
+            decoration: BoxDecoration(
+              color: selected ? AppColors.primarySoft : AppColors.surface,
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: selected ? AppColors.primary : AppColors.line, width: selected ? 1.6 : 1),
+            ),
+            child: Text(label,
+                style: TextStyle(
+                    fontWeight: FontWeight.w800,
+                    fontSize: 13.5,
+                    color: onTap == null ? AppColors.text3 : (selected ? AppColors.primary : AppColors.text2))),
+          ),
+        ),
+      );
+
+  Widget _preview(String value, String label, Color color) => Expanded(
+        child: Column(children: [
+          Text(value, style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800, color: color, letterSpacing: -0.4)),
+          const SizedBox(height: 2),
+          Text(label, style: const TextStyle(fontSize: 11, color: AppColors.text2, fontWeight: FontWeight.w600)),
+        ]),
+      );
+}
+
+class _MealPicker extends StatelessWidget {
+  const _MealPicker({required this.selected, required this.onChanged});
+  final String selected;
+  final ValueChanged<String> onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(children: [
+      for (final (i, m) in _meals.indexed) ...[
+        if (i > 0) const SizedBox(width: 8),
+        Expanded(
+          child: Tap(
+            onTap: () => onChanged(m.id),
+            child: AnimatedContainer(
+              duration: const Duration(milliseconds: 180),
+              padding: const EdgeInsets.symmetric(vertical: 10),
+              decoration: BoxDecoration(
+                color: selected == m.id ? m.soft : AppColors.surface,
+                borderRadius: BorderRadius.circular(14),
+                border: Border.all(color: selected == m.id ? m.color : AppColors.line, width: selected == m.id ? 1.6 : 1),
+              ),
+              child: Column(children: [
+                Text(m.emoji, style: const TextStyle(fontSize: 20)),
+                const SizedBox(height: 4),
+                Text(m.label,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                        fontSize: 11.5, fontWeight: FontWeight.w800, color: selected == m.id ? m.color : AppColors.text2)),
+              ]),
+            ),
+          ),
+        ),
+      ],
+    ]);
   }
 }
 
@@ -1210,49 +1831,6 @@ class _ScanTile extends StatelessWidget {
           ),
         ]),
       ),
-    );
-  }
-}
-
-class _FoodRow extends StatelessWidget {
-  const _FoodRow({required this.food, required this.onAdd});
-  final FoodItem food;
-  final VoidCallback onAdd;
-
-  @override
-  Widget build(BuildContext context) {
-    return Tap(
-      onTap: onAdd,
-      scale: 0.99,
-      child: Row(children: [
-        Container(
-          width: 54,
-          height: 54,
-          alignment: Alignment.center,
-          decoration: BoxDecoration(color: AppColors.surfaceAlt, borderRadius: BorderRadius.circular(16)),
-          child: Text(foodEmoji(food.category, food.name), style: const TextStyle(fontSize: 26)),
-        ),
-        const SizedBox(width: 12),
-        Expanded(
-          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Text(food.name,
-                maxLines: 2,
-                overflow: TextOverflow.ellipsis,
-                style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 14.5, height: 1.25)),
-            const SizedBox(height: 3),
-            Text('${food.servingUnit} · ${food.calories} kcal',
-                style: const TextStyle(fontSize: 12, color: AppColors.text2, fontWeight: FontWeight.w600)),
-            const SizedBox(height: 6),
-            Wrap(spacing: 6, runSpacing: 4, children: [
-              Tag('P ${formatNumber(food.proteinG)}g', color: AppColors.blue, dense: true),
-              Tag('C ${formatNumber(food.carbsG)}g', color: AppColors.amber, dense: true),
-              Tag('F ${formatNumber(food.fatG)}g', color: AppColors.pink, dense: true),
-            ]),
-          ]),
-        ),
-        const SizedBox(width: 10),
-        QtyStepper(qty: 0, compact: true, onChanged: (_) => onAdd()),
-      ]),
     );
   }
 }

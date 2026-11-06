@@ -15,6 +15,7 @@ import '../store/order_tracking_screen.dart';
 import '../feed/post_detail_screen.dart';
 import '../trainers/trainer_detail_screen.dart';
 import '../wallet/refer_earn_screen.dart';
+import '../wallet/wallet_screen.dart';
 
 /// Where a notification leads, from the ids in its `data`. Returns null when it has nowhere to go.
 Widget? notificationTarget(AppNotification n) {
@@ -24,6 +25,7 @@ Widget? notificationTarget(AppNotification n) {
   if (s('contestId') != null) return ContestDetailScreen(contestId: s('contestId')!);
   if (s('circleId') != null) return CircleDetailScreen(circleId: s('circleId')!);
   if (s('exerciseId') != null) return ArenaExerciseScreen(exerciseId: s('exerciseId')!);
+  if (n.type.startsWith('wallet_')) return const WalletScreen();
   if (n.type.startsWith('coins') || n.type.startsWith('referral')) return const ReferEarnScreen();
   if (s('orderId') != null) return OrderTrackingScreen(orderId: s('orderId')!);
   if (s('venueId') != null) return VenueDetailScreen(venueId: s('venueId')!);

@@ -5,7 +5,7 @@ import { query, queryOne, withTransaction } from '../db/index.js';
 import { requireAuth } from '../middleware/auth.js';
 import { HttpError, notFound, validate } from '../utils/http.js';
 import { uuidSchema } from '../utils/schemas.js';
-import { creditPlanPurchase, notifyPlanCoins } from './wallet.js';
+import { activateReferralRewards, notifyReferralActivation } from '../utils/wallet.js';
 
 export const plansRouter = Router();
 export const subscriptionsRouter = Router();
@@ -59,8 +59,9 @@ subscriptionsRouter.get('/me', async (req, res) => {
 /**
  * POST /subscriptions { planId } — buys a plan. Renewing the same plan stacks after the current one.
  * PAYMENTS_MODE=mock activates instantly; replace with a Razorpay order + webhook before launch.
- * Also earns FitKey Coins (1 per ₹1 paid), unlocks the welcome coins, and rewards the referrer on a first pass —
- * in the same transaction. When a real gateway lands, move this into the payment-confirmed webhook.
+ * Legacy (category, unlimited-visit) plans: kept for existing members and old app builds. Since wallet v2 a purchase
+ * no longer earns "1 coin per ₹1" (only coin packs credit coins, via POST /wallet/passes); it still counts as a
+ * FitKey pass for activating the welcome / referral coins. When a real gateway lands, move this into the webhook.
  */
 subscriptionsRouter.post('/', async (req, res) => {
   const { planId } = validate(z.object({ planId: uuidSchema }), req.body);
@@ -89,11 +90,14 @@ subscriptionsRouter.post('/', async (req, res) => {
       [req.user.id, planId, startsAt, plan.durationDays, plan.pricePaise, `MOCK-${Date.now()}`],
       client,
     );
-    const credit = await creditPlanPurchase(client, req.user.id, sub);
+    const credit = await activateReferralRewards(client, req.user.id);
     return { subscription: sub, coins: credit, planName: plan.name, buyerName: buyer?.name };
   });
 
-  await notifyPlanCoins(req.user.id, coins, { planName, buyerName });
-  const { referral, ...coinSummary } = coins;
-  res.status(201).json({ subscription, coins: { ...coinSummary, referralRewarded: Boolean(referral) } });
+  await notifyReferralActivation(req.user.id, coins, { buyerName });
+  res.status(201).json({
+    subscription,
+    planName,
+    coins: { earned: 0, unlocked: coins.unlocked, referralRewarded: Boolean(coins.referral) },
+  });
 });

@@ -6,9 +6,11 @@ import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 
 import '../../data/models.dart';
+import '../../data/wallet_api.dart';
 import '../../state/cart.dart';
 import '../../state/session.dart';
 import '../../ui/ui.dart';
+import '../wallet/coins.dart';
 import 'order_tracking_screen.dart';
 
 /// The backend accepts at most 20 units of one product per order line.
@@ -43,6 +45,23 @@ class _CartCheckoutScreenState extends State<CartCheckoutScreen> {
   String _paymentMethod = 'upi';
   bool _submitting = false;
   MarketplaceOrder? _placed;
+  int _placedCoins = 0;
+  int _placedPayable = 0;
+
+  // Coins (BRD §4): ProveIt coins first, then referral coins, max 50% of the order. Never FitKey (visit) coins.
+  Redeemable? _coins;
+  int _coinsForTotal = -1;
+  bool _useCoins = false;
+
+  void _loadCoins(int totalPaise) {
+    if (_coinsForTotal == totalPaise) return;
+    _coinsForTotal = totalPaise;
+    context.read<Session>().api.redeemable('store', totalPaise).then((r) {
+      if (mounted && _coinsForTotal == totalPaise) setState(() => _coins = r);
+    }).catchError((_) {});
+  }
+
+  int get _coinsApplied => _useCoins ? (_coins?.coins ?? 0) : 0;
 
   @override
   void initState() {
@@ -73,7 +92,7 @@ class _CartCheckoutScreenState extends State<CartCheckoutScreen> {
     FocusScope.of(context).unfocus();
     setState(() => _submitting = true);
     try {
-      final order = await context.read<Session>().api.createMarketplaceOrder(
+      final r = await context.read<Session>().api.placeStoreOrder(
             items: cart.items.map((i) => (productId: i.product.id, quantity: i.quantity)).toList(),
             shippingAddress: {
               'fullName': _name.text.trim(),
@@ -83,11 +102,14 @@ class _CartCheckoutScreenState extends State<CartCheckoutScreen> {
               'pincode': _pincode.text.trim(),
             },
             paymentMethod: _paymentMethod,
+            useCoins: _useCoins && _coinsApplied > 0,
           );
       if (!mounted) return;
       HapticFeedback.mediumImpact();
       setState(() {
-        _placed = order;
+        _placed = r.order;
+        _placedCoins = r.coinsRedeemed;
+        _placedPayable = r.payablePaise;
         _submitting = false;
       });
       cart.clear();
@@ -100,9 +122,11 @@ class _CartCheckoutScreenState extends State<CartCheckoutScreen> {
 
   @override
   Widget build(BuildContext context) {
-    if (_placed != null) return _OrderPlacedView(order: _placed!);
+    if (_placed != null) return _OrderPlacedView(order: _placed!, coins: _placedCoins, payablePaise: _placedPayable);
 
     final cart = context.watch<Cart>();
+    if (!cart.isEmpty) _loadCoins(cart.totalPaise);
+    final toPay = cart.totalPaise - _coinsApplied * 100;
     return Scaffold(
       backgroundColor: AppColors.bg,
       appBar: AppBar(
@@ -133,7 +157,11 @@ class _CartCheckoutScreenState extends State<CartCheckoutScreen> {
                   if (cart.savingsPaise > 0) _SavingsBanner(savings: cart.savingsPaise),
                   _ItemsCard(cart: cart),
                   const SectionTitle('Bill details', padding: EdgeInsets.fromLTRB(0, 24, 0, 12)),
-                  _BillCard(cart: cart),
+                  _BillCard(cart: cart, coinsApplied: _coinsApplied),
+                  if (_coins != null && _coins!.coins > 0) ...[
+                    const SizedBox(height: 12),
+                    _CoinsToggle(coins: _coins!, value: _useCoins, onChanged: (v) => setState(() => _useCoins = v)),
+                  ],
                   const SectionTitle('Delivery address',
                       subtitle: 'Where should we send your order?', padding: EdgeInsets.fromLTRB(0, 24, 0, 12)),
                   _addressCard(),
@@ -153,7 +181,7 @@ class _CartCheckoutScreenState extends State<CartCheckoutScreen> {
           ? null
           : BottomActionBar(
               leading: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
-                Text(formatPaise(cart.totalPaise),
+                Text(formatPaise(toPay),
                     style: const TextStyle(fontSize: 19, fontWeight: FontWeight.w800, letterSpacing: -0.3)),
                 const Text('TOTAL', style: TextStyle(fontSize: 11, color: AppColors.text3, fontWeight: FontWeight.w800, letterSpacing: 1)),
               ]),
@@ -362,9 +390,41 @@ class _CartLine extends StatelessWidget {
   }
 }
 
+class _CoinsToggle extends StatelessWidget {
+  const _CoinsToggle({required this.coins, required this.value, required this.onChanged});
+  final Redeemable coins;
+  final bool value;
+  final ValueChanged<bool> onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    final parts = [
+      if (coins.proveit > 0) '${formatCoins(coins.proveit)} ProveIt',
+      if (coins.referral > 0) '${formatCoins(coins.referral)} referral',
+    ].join(' + ');
+    return AppCard(
+      padding: const EdgeInsets.fromLTRB(14, 6, 6, 6),
+      child: Row(children: [
+        const CoinIcon(size: 34),
+        const SizedBox(width: 12),
+        Expanded(
+          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Text('Use ${formatCoins(coins.coins)} coins · save ${formatPaise(coins.coins * 100)}',
+                style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 14)),
+            Text('$parts · up to ${coins.maxPct}% of the order',
+                style: const TextStyle(fontSize: 12, color: AppColors.text2)),
+          ]),
+        ),
+        Switch.adaptive(value: value, activeThumbColor: AppColors.green, onChanged: onChanged),
+      ]),
+    );
+  }
+}
+
 class _BillCard extends StatelessWidget {
-  const _BillCard({required this.cart});
+  const _BillCard({required this.cart, this.coinsApplied = 0});
   final Cart cart;
+  final int coinsApplied;
 
   @override
   Widget build(BuildContext context) {
@@ -397,8 +457,14 @@ class _BillCard extends StatelessWidget {
                 style: const TextStyle(fontWeight: FontWeight.w800, color: AppColors.green)),
             icon: Icons.local_offer_outlined,
           ),
+        if (coinsApplied > 0)
+          row(
+            'FitKey wallet coins',
+            Text('− ${formatPaise(coinsApplied * 100)}', style: const TextStyle(fontWeight: FontWeight.w800, color: AppColors.green)),
+            icon: Icons.toll_rounded,
+          ),
         const Padding(padding: EdgeInsets.symmetric(vertical: 8), child: Divider()),
-        row('To pay', Text(formatPaise(cart.totalPaise), style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 17)),
+        row('To pay', Text(formatPaise(cart.totalPaise - coinsApplied * 100), style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 17)),
             bold: true),
       ]),
     );
@@ -408,8 +474,10 @@ class _BillCard extends StatelessWidget {
 // ---------------------------------------------------------------------------
 
 class _OrderPlacedView extends StatelessWidget {
-  const _OrderPlacedView({required this.order});
+  const _OrderPlacedView({required this.order, this.coins = 0, required this.payablePaise});
   final MarketplaceOrder order;
+  final int coins;
+  final int payablePaise;
 
   @override
   Widget build(BuildContext context) {
@@ -444,8 +512,9 @@ class _OrderPlacedView extends StatelessWidget {
             const SizedBox(height: 8),
             Text(
               cod
-                  ? 'Keep ${formatPaise(order.totalAmountPaise)} ready — you\'ll pay when it arrives.'
-                  : 'We\'ve received ${formatPaise(order.totalAmountPaise)}. Your order is being prepared.',
+                  ? 'Keep ${formatPaise(payablePaise)} ready — you\'ll pay when it arrives.'
+                  : 'We\'ve received ${formatPaise(payablePaise)}. Your order is being prepared.'
+                      '${coins > 0 ? '\n${formatCoins(coins)} coins were applied.' : ''}',
               textAlign: TextAlign.center,
               style: const TextStyle(color: AppColors.text2, fontSize: 14.5, height: 1.45),
             ),

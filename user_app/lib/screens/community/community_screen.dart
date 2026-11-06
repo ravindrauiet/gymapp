@@ -15,7 +15,7 @@ import 'trophy_screen.dart';
 export 'event_widgets.dart' show contestStyle, contestTimeLabel, contestFinished, eventStyle, EventCard, OrgBadgeChip;
 export 'leaderboard_list.dart';
 
-/// Community hub (BRD §3): Events | AI Arena | Circles, one search across all three,
+/// Community hub (BRD §3): Events | ProveIt | Circles, one search across all three,
 /// and the overall points board behind the trophy icon.
 /// Lives inside HomeShell as a bottom-nav tab, so there is no back button.
 class CommunityScreen extends StatefulWidget {
@@ -192,7 +192,7 @@ class _CommunityScreenState extends State<CommunityScreen> {
                   labelPadding: EdgeInsets.zero,
                   splashFactory: NoSplash.splashFactory,
                   overlayColor: const WidgetStatePropertyAll(Colors.transparent),
-                  tabs: const [Tab(text: 'Events'), Tab(text: 'AI Arena'), Tab(text: 'Circles')],
+                  tabs: const [Tab(text: 'Events'), Tab(text: 'ProveIt'), Tab(text: 'Circles')],
                 ),
               ),
             ]),

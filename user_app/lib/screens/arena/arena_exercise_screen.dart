@@ -9,11 +9,15 @@ import '../../state/session.dart';
 import '../../ui/ui.dart';
 import 'arena_camera_screen.dart';
 import 'arena_visuals.dart';
+import 'proveit_share.dart';
 
-/// AI Arena exercise detail: how-to, level picker, Start, leaderboards and my history.
+/// ProveIt challenge detail: Levels / Unlimited, how-to, Start, All India + city leaderboards and my history.
 class ArenaExerciseScreen extends StatefulWidget {
-  const ArenaExerciseScreen({super.key, required this.exerciseId});
+  const ArenaExerciseScreen({super.key, required this.exerciseId, this.startUnlimited = false});
   final String exerciseId;
+
+  /// Open with the Unlimited mode selected.
+  final bool startUnlimited;
 
   @override
   State<ArenaExerciseScreen> createState() => _ArenaExerciseScreenState();
@@ -24,6 +28,7 @@ class _ArenaExerciseScreenState extends State<ArenaExerciseScreen> {
   Future<List<ArenaAttempt>>? _history;
   int _levelIndex = 1;
   bool _levelPicked = false;
+  late bool _unlimited = widget.startUnlimited;
   int _boardKey = 0; // bumps to make the leaderboard reload
 
   Future<ArenaExercise> _load() async {
@@ -31,9 +36,8 @@ class _ArenaExerciseScreenState extends State<ArenaExerciseScreen> {
     _history = api.myArenaAttempts(exerciseId: widget.exerciseId, limit: 10);
     final e = await api.arenaExercise(widget.exerciseId);
     if (!_levelPicked) {
-      // Suggest the first level above my best (or the middle one).
-      final best = e.stats.myBest;
-      final i = best == null ? 0 : e.levels.indexWhere((l) => l.target > best);
+      // Suggest the first level without a badge (or the top one).
+      final i = e.levels.indexWhere((l) => l.badge == null);
       _levelIndex = (i < 0 ? e.levels.length - 1 : i).clamp(0, e.levels.length - 1);
     }
     return e;
@@ -54,7 +58,7 @@ class _ArenaExerciseScreenState extends State<ArenaExerciseScreen> {
     if (!mounted) return;
     final saved = await Navigator.of(context).push<bool>(MaterialPageRoute(
       fullscreenDialog: true,
-      builder: (_) => ArenaCameraScreen(exercise: e, level: e.levels[_levelIndex]),
+      builder: (_) => ArenaCameraScreen(exercise: e, level: _unlimited ? null : e.levels[_levelIndex], unlimited: _unlimited),
     ));
     if (saved == true && mounted) _reload();
   }
@@ -67,14 +71,14 @@ class _ArenaExerciseScreenState extends State<ArenaExerciseScreen> {
         if (snap.connectionState != ConnectionState.done && !snap.hasData) {
           return Scaffold(
             backgroundColor: AppColors.bg,
-            appBar: AppBar(title: const Text('AI Arena')),
+            appBar: AppBar(title: const Text('ProveIt')),
             body: const SkeletonList(count: 5, itemHeight: 110),
           );
         }
         if (snap.hasError) {
           return Scaffold(
             backgroundColor: AppColors.bg,
-            appBar: AppBar(title: const Text('AI Arena')),
+            appBar: AppBar(title: const Text('ProveIt')),
             body: ErrorView(error: snap.error!, onRetry: _reload),
           );
         }
@@ -104,6 +108,21 @@ class _ArenaExerciseScreenState extends State<ArenaExerciseScreen> {
                   ),
                 ),
                 title: Text(e.name, style: const TextStyle(fontSize: 17)),
+                actions: [
+                  if (e.stats.myRank != null)
+                    Padding(
+                      padding: const EdgeInsets.all(8),
+                      child: CircleAvatar(
+                        backgroundColor: Colors.white,
+                        child: IconButton(
+                          tooltip: 'Share my rank',
+                          padding: EdgeInsets.zero,
+                          icon: const Icon(Icons.ios_share_rounded, color: AppColors.ink, size: 20),
+                          onPressed: () => shareProveIt(context, _rankShare(e)),
+                        ),
+                      ),
+                    ),
+                ],
                 flexibleSpace: FlexibleSpaceBar(
                   collapseMode: CollapseMode.parallax,
                   background: Stack(fit: StackFit.expand, children: [
@@ -114,7 +133,7 @@ class _ArenaExerciseScreenState extends State<ArenaExerciseScreen> {
                       right: 16,
                       bottom: 18,
                       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                        Tag('AI Arena · ${e.timed ? 'Timed hold' : 'Rep counter'}', icon: v.icon, color: Colors.white, bg: v.color),
+                        Tag('ProveIt · ${e.timed ? 'Timed hold' : 'Rep counter'}', icon: v.icon, color: Colors.white, bg: v.color),
                         const SizedBox(height: 8),
                         Text(e.name,
                             style: const TextStyle(
@@ -128,7 +147,8 @@ class _ArenaExerciseScreenState extends State<ArenaExerciseScreen> {
                 ),
               ),
               SliverToBoxAdapter(child: _stats(e)),
-              SliverToBoxAdapter(child: _levels(e, v)),
+              SliverToBoxAdapter(child: _modePicker(v)),
+              SliverToBoxAdapter(child: _unlimited ? _unlimitedInfo(e, v) : _levels(e, v)),
               SliverToBoxAdapter(child: _howTo(e, v)),
               SliverToBoxAdapter(child: _Leaderboard(key: ValueKey(_boardKey), exercise: e)),
               SliverToBoxAdapter(child: _historySection(e)),
@@ -137,10 +157,15 @@ class _ArenaExerciseScreenState extends State<ArenaExerciseScreen> {
           ),
           bottomNavigationBar: BottomActionBar(
             leading: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
-              const Text('Target', style: TextStyle(fontSize: 11.5, color: AppColors.text2, fontWeight: FontWeight.w600)),
-              Text(e.format(level.target), style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 15)),
+              Text(_unlimited ? 'Mode' : 'Target',
+                  style: const TextStyle(fontSize: 11.5, color: AppColors.text2, fontWeight: FontWeight.w600)),
+              Text(_unlimited ? 'Unlimited' : e.format(level.target),
+                  style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 15)),
             ]),
-            child: AppButton(label: 'Start AI count', icon: Icons.videocam_rounded, onPressed: () => _start(e)),
+            child: AppButton(
+                label: _unlimited ? 'Start Unlimited' : 'Start level ${level.level}',
+                icon: Icons.videocam_rounded,
+                onPressed: () => _start(e)),
           ),
         );
       },
@@ -154,19 +179,21 @@ class _ArenaExerciseScreenState extends State<ArenaExerciseScreen> {
       child: Row(children: [
         Expanded(
           child: MetricTile(
-              label: 'My best', value: s.myBest == null ? '—' : '${s.myBest}', unit: s.myBest == null ? null : (e.timed ? 's' : 'reps'),
+              label: 'All India Rank', value: s.myRank == null ? '—' : '#${s.myRank}', icon: Icons.flag_rounded, color: AppColors.primary),
+        ),
+        const SizedBox(width: 10),
+        Expanded(
+          child: MetricTile(
+              label: s.myCity == null ? 'City rank' : 'Rank in ${s.myCity}',
+              value: s.myCityRank == null ? '—' : '#${s.myCityRank}',
+              icon: Icons.location_city_rounded,
+              color: AppColors.blue),
+        ),
+        const SizedBox(width: 10),
+        Expanded(
+          child: MetricTile(
+              label: 'Best set', value: s.myBest == null ? '—' : '${s.myBest}', unit: s.myBest == null ? null : (e.timed ? 's' : 'reps'),
               icon: Icons.emoji_events_rounded, color: AppColors.amber),
-        ),
-        const SizedBox(width: 10),
-        Expanded(
-          child: MetricTile(
-              label: 'India rank', value: s.myRank == null ? '—' : '#${s.myRank}', icon: Icons.flag_rounded, color: AppColors.primary),
-        ),
-        const SizedBox(width: 10),
-        Expanded(
-          child: MetricTile(
-              label: 'This week', value: '${s.myWeekTotal}', unit: e.timed ? 's' : 'reps',
-              icon: Icons.calendar_today_rounded, color: AppColors.blue),
         ),
       ]),
     );
@@ -178,8 +205,8 @@ class _ArenaExerciseScreenState extends State<ArenaExerciseScreen> {
     return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
       SectionTitle('Pick your level',
           subtitle: left > 0
-              ? 'Up to $left more points available today'
-              : 'Today\'s ${e.name} points are maxed — sets still count for the leaderboard'),
+              ? 'Badge + coins the first time · up to $left more points today'
+              : 'Today\'s ${e.name} points are maxed — badges and coins still unlock'),
       Padding(
         padding: const EdgeInsets.symmetric(horizontal: 16),
         child: Row(children: [
@@ -189,29 +216,18 @@ class _ArenaExerciseScreenState extends State<ArenaExerciseScreen> {
           ],
         ]),
       ),
-      if (s.top10Threshold != null || s.participants > 0)
-        Padding(
-          padding: const EdgeInsets.fromLTRB(16, 10, 16, 0),
-          child: Row(children: [
-            const Icon(Icons.local_fire_department_rounded, size: 16, color: AppColors.primary),
-            const SizedBox(width: 6),
-            Expanded(
-              child: Text(
-                s.top10Threshold == null
-                    ? 'Fewer than 10 members on this board — any set gets you into the top 10!'
-                    : 'Beat ${e.format(s.top10Threshold!)} in one set to enter the all-India top 10',
-                style: const TextStyle(fontSize: 12.5, color: AppColors.text2, fontWeight: FontWeight.w600),
-              ),
-            ),
-          ]),
-        ),
+      const Padding(
+        padding: EdgeInsets.fromLTRB(16, 10, 16, 0),
+        child: Text('Levels sets do not change your All India Rank — go Unlimited for that.',
+            style: TextStyle(fontSize: 12, color: AppColors.text3)),
+      ),
     ]);
   }
 
   Widget _levelCard(ArenaExercise e, ArenaVisual v, int i) {
     final l = e.levels[i];
     final on = i == _levelIndex;
-    final beaten = (e.stats.myBest ?? 0) >= l.target;
+    final beaten = l.badge != null;
     const names = ['Starter', 'Pro', 'Beast'];
     return Tap(
       onTap: () => setState(() {
@@ -240,9 +256,109 @@ class _ArenaExerciseScreenState extends State<ArenaExerciseScreen> {
             const SizedBox(width: 3),
             Text('${l.points} pts', style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w700)),
           ]),
+          const SizedBox(height: 2),
+          Text(beaten ? 'Badge earned' : '+${l.coins} coins',
+              style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.w700, color: beaten ? AppColors.green : AppColors.amber)),
         ]),
       ),
     );
+  }
+
+  ProveItShareData _rankShare(ArenaExercise e) {
+    final s = e.stats;
+    return ProveItShareData(
+      exerciseId: e.id,
+      exerciseName: e.name,
+      headline: 'All India Rank',
+      value: '#${s.myRank}',
+      unit: 'in India',
+      lines: [
+        if (s.myBest != null) 'Best set ${e.format(s.myBest!)}',
+        if (s.myCityRank != null && s.myCity != null) '#${s.myCityRank} in ${s.myCity}',
+      ],
+    );
+  }
+
+  Widget _modePicker(ArenaVisual v) {
+    Widget option(bool unlimited, IconData icon, String title, String sub) {
+      final on = _unlimited == unlimited;
+      return Expanded(
+        child: Tap(
+          onTap: () => setState(() => _unlimited = unlimited),
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 180),
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: on ? AppColors.ink : AppColors.surface,
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(color: on ? AppColors.ink : AppColors.line),
+            ),
+            child: Row(children: [
+              Icon(icon, color: on ? AppColors.lime : AppColors.text2, size: 22),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  Text(title, style: TextStyle(fontWeight: FontWeight.w800, color: on ? Colors.white : AppColors.text)),
+                  Text(sub,
+                      style: TextStyle(fontSize: 11.5, color: on ? Colors.white.withValues(alpha: 0.7) : AppColors.text2)),
+                ]),
+              ),
+            ]),
+          ),
+        ),
+      );
+    }
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
+      child: Row(children: [
+        option(false, Icons.workspace_premium_rounded, 'Levels', 'Badges & coins'),
+        const SizedBox(width: 10),
+        option(true, Icons.all_inclusive_rounded, 'Unlimited', 'All India Rank'),
+      ]),
+    );
+  }
+
+  Widget _unlimitedInfo(ArenaExercise e, ArenaVisual v) {
+    final s = e.stats;
+    return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      const SectionTitle('Unlimited — one set, no target'),
+      Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 16),
+        child: AppCard(
+          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Row(children: [
+              IconBubble(Icons.timer_outlined, color: v.color, bg: v.soft, size: 38, iconSize: 20),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Text(
+                  e.timed
+                      ? 'Hold as long as you can. The timer pauses on bad form and the set ends when you break the hold.'
+                      : 'Go until you can\'t. The set ends by itself 5 seconds after your last full rep.',
+                  style: const TextStyle(height: 1.4, fontSize: 13.5),
+                ),
+              ),
+            ]),
+            const SizedBox(height: 12),
+            Row(children: [
+              const Icon(Icons.local_fire_department_rounded, size: 16, color: AppColors.primary),
+              const SizedBox(width: 6),
+              Expanded(
+                child: Text(
+                  s.top10Threshold == null
+                      ? 'Fewer than 10 members ranked — any set puts you in the All India top 10!'
+                      : 'Beat ${e.format(s.top10Threshold!)} in one set to enter the All India top 10',
+                  style: const TextStyle(fontSize: 12.5, color: AppColors.text2, fontWeight: FontWeight.w600),
+                ),
+              ),
+            ]),
+            const SizedBox(height: 6),
+            const Text('Your best Unlimited set is your All India Rank. Unlimited earns no coins.',
+                style: TextStyle(fontSize: 12, color: AppColors.text3)),
+          ]),
+        ),
+      ),
+    ]);
   }
 
   Widget _howTo(ArenaExercise e, ArenaVisual v) {
@@ -360,7 +476,8 @@ class _HistoryRow extends StatelessWidget {
             Text(
               [
                 formatDateTime(a.createdAt),
-                if (a.level != null) a.completed ? 'level ${a.level} done' : 'level ${a.level}',
+                if (a.mode == 'unlimited') 'Unlimited',
+                if (a.mode != 'unlimited' && a.level != null) a.completed ? '${exercise.format(a.level!)} level done' : '${exercise.format(a.level!)} level',
                 if (a.partialReps > 0) exercise.timed ? '${a.partialReps} form breaks' : '${a.partialReps} not counted',
               ].join(' · '),
               style: const TextStyle(color: AppColors.text2, fontSize: 12),
@@ -379,7 +496,7 @@ class _HistoryRow extends StatelessWidget {
   }
 }
 
-/// Leaderboards: All India / my city × best single set / this week's total.
+/// All India Rank board (best Unlimited single set), filterable by city.
 class _Leaderboard extends StatefulWidget {
   const _Leaderboard({super.key, required this.exercise});
   final ArenaExercise exercise;
@@ -389,16 +506,24 @@ class _Leaderboard extends StatefulWidget {
 }
 
 class _LeaderboardState extends State<_Leaderboard> {
-  String _board = 'best';
+  final String _board = 'best';
   String? _city; // null = All India
   late Future<ArenaBoard> _future = _load();
+  List<String> _cities = const [];
+
+  @override
+  void initState() {
+    super.initState();
+    context.read<Session>().api.arenaCities(widget.exercise.id).then((c) {
+      if (mounted) setState(() => _cities = c.map((x) => x.city).toList());
+    }).catchError((Object _) {});
+  }
 
   Future<ArenaBoard> _load() =>
       context.read<Session>().api.arenaLeaderboard(widget.exercise.id, board: _board, city: _city);
 
-  void _set({String? board, String? city, bool cityChanged = false}) {
+  void _set({String? city, bool cityChanged = false}) {
     setState(() {
-      if (board != null) _board = board;
       if (cityChanged) _city = city;
       _future = _load();
     });
@@ -409,18 +534,15 @@ class _LeaderboardState extends State<_Leaderboard> {
     final myCity = context.watch<Session>().user?.city;
     final e = widget.exercise;
     return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-      SectionTitle('Leaderboard',
-          subtitle: _board == 'best' ? 'Most ${e.timed ? 'seconds held' : 'reps'} in one set' : 'Total ${e.timed ? 'seconds' : 'reps'} this week (Mon–Sun)'),
-      ChoiceChips<String>(
-        options: const ['best', 'weekly'],
-        selected: _board,
-        label: (b) => b == 'best' ? 'Best set' : 'This week',
-        icon: (b) => b == 'best' ? Icons.emoji_events_rounded : Icons.calendar_view_week_rounded,
-        onSelected: (b) => _set(board: b),
-      ),
-      const SizedBox(height: 8),
+      SectionTitle('All India Rank',
+          subtitle: 'Most ${e.timed ? 'seconds held' : 'reps'} in one Unlimited set'),
       ChoiceChips<String?>(
-        options: [null, if (myCity != null && myCity.isNotEmpty) myCity],
+        options: [
+          null,
+          if (myCity != null && myCity.isNotEmpty) myCity,
+          for (final c in _cities)
+            if (myCity == null || c.toLowerCase() != myCity.toLowerCase()) c,
+        ],
         selected: _city,
         label: (c) => c ?? 'All India',
         icon: (c) => c == null ? Icons.public_rounded : Icons.location_city_rounded,
@@ -438,7 +560,7 @@ class _LeaderboardState extends State<_Leaderboard> {
           if (b.entries.isEmpty) {
             return EmptyView(
               icon: Icons.leaderboard_rounded,
-              title: _board == 'best' ? 'No sets yet' : 'No sets this week',
+              title: 'No Unlimited sets yet',
               message: _city == null ? 'Be the first name on the all-India board.' : 'Be the first in $_city.',
             );
           }

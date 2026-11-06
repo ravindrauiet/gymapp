@@ -1,10 +1,12 @@
 import 'dart:async';
 
-import 'package:fitkey_core/fitkey_core.dart' show formatDuration, resolveMediaUrl;
+import 'package:fitkey_core/fitkey_core.dart' show resolveMediaUrl;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
+import 'package:url_launcher/url_launcher.dart';
 import 'package:video_player/video_player.dart';
+import 'package:youtube_player_iframe/youtube_player_iframe.dart';
 
 import '../../data/models.dart';
 import '../../data/studio_api.dart';
@@ -12,16 +14,35 @@ import '../../state/session.dart';
 import '../../ui/ui.dart';
 import 'studio_screen.dart';
 
-class VideoPlayerScreen extends StatefulWidget {
+class VideoPlayerScreen extends StatelessWidget {
   const VideoPlayerScreen({super.key, required this.video});
 
   final Video video;
 
+  /// YouTube videos play in the official YouTube embedded player; uploads / direct URLs in video_player.
   @override
-  State<VideoPlayerScreen> createState() => _VideoPlayerScreenState();
+  Widget build(BuildContext context) => video.isYoutube ? _YoutubeVideoScreen(video: video) : _NativeVideoScreen(video: video);
 }
 
-class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
+class _NativeVideoScreen extends StatefulWidget {
+  const _NativeVideoScreen({required this.video});
+
+  final Video video;
+
+  @override
+  State<_NativeVideoScreen> createState() => _VideoPlayerScreenState();
+}
+
+class _YoutubeVideoScreen extends StatefulWidget {
+  const _YoutubeVideoScreen({required this.video});
+
+  final Video video;
+
+  @override
+  State<_YoutubeVideoScreen> createState() => _YoutubePlayerState();
+}
+
+class _VideoPlayerScreenState extends State<_NativeVideoScreen> {
   VideoPlayerController? _controller;
   bool _failed = false;
   bool _controls = true;
@@ -33,10 +54,7 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
   void initState() {
     super.initState();
     _init();
-    final api = context.read<Session>().api;
-    final group = widget.video.groupKey;
-    _related = (group != null ? api.studioVideos(group: group, limit: 12) : api.videos(category: widget.video.category, limit: 12))
-        .then((list) => list.where((v) => v.id != widget.video.id).toList());
+    _related = _relatedFor(context, widget.video);
   }
 
   void _init() {
@@ -355,11 +373,174 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
     );
   }
 
-  Widget _details() {
-    final video = widget.video;
+  Widget _details() => _VideoDetails(video: widget.video, related: _related);
+}
+
+/// Other videos of the same Studio group (or legacy category).
+Future<List<Video>> _relatedFor(BuildContext context, Video video) {
+  final api = context.read<Session>().api;
+  final group = video.groupKey;
+  return (group != null ? api.studioVideos(group: group, limit: 12) : api.videos(category: video.category, limit: 12))
+      .then((list) => list.where((v) => v.id != video.id).toList());
+}
+
+// ---------------------------------------------------------------------------
+// YouTube videos — official YouTube IFrame player (youtube_player_iframe), Android + web.
+// The video is streamed by YouTube; nothing is downloaded or re-hosted.
+// ---------------------------------------------------------------------------
+
+class _YoutubePlayerState extends State<_YoutubeVideoScreen> {
+  late final YoutubePlayerController _yt;
+  late final Future<List<Video>> _related;
+  StreamSubscription<YoutubePlayerValue>? _sub;
+  YoutubeError _error = YoutubeError.none;
+
+  @override
+  void initState() {
+    super.initState();
+    _yt = YoutubePlayerController.fromVideoId(
+      videoId: widget.video.youtubeId!,
+      autoPlay: true,
+      params: const YoutubePlayerParams(
+        showFullscreenButton: true,
+        strictRelatedVideos: true,
+        showVideoAnnotations: false,
+      ),
+    );
+    _sub = _yt.stream.listen((v) {
+      if (mounted && v.error != _error) setState(() => _error = v.error);
+    });
+    _related = _relatedFor(context, widget.video);
+  }
+
+  @override
+  void dispose() {
+    _sub?.cancel();
+    _yt.close();
+    super.dispose();
+  }
+
+  Future<void> _openOnYoutube() async {
+    final ok = await launchUrl(Uri.parse('https://www.youtube.com/watch?v=${widget.video.youtubeId}'),
+            mode: LaunchMode.externalApplication)
+        .catchError((_) => false);
+    if (!ok && mounted) toast(context, 'Could not open YouTube', error: true);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final blocked = _error != YoutubeError.none;
+    return AnnotatedRegion<SystemUiOverlayStyle>(
+      value: SystemUiOverlayStyle.light,
+      child: Scaffold(
+        backgroundColor: AppColors.bg,
+        body: Column(children: [
+          Container(
+            color: Colors.black,
+            padding: EdgeInsets.only(top: MediaQuery.paddingOf(context).top),
+            child: Column(children: [
+              SizedBox(
+                height: 44,
+                child: Row(children: [
+                  IconButton(
+                    tooltip: 'Back',
+                    icon: const Icon(Icons.arrow_back_rounded, color: Colors.white),
+                    onPressed: () => Navigator.maybePop(context),
+                  ),
+                  Expanded(
+                    child: Text(widget.video.title,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w700, fontSize: 14)),
+                  ),
+                  IconButton(
+                    tooltip: 'Open in YouTube',
+                    icon: const Icon(Icons.open_in_new_rounded, color: Colors.white, size: 20),
+                    onPressed: _openOnYoutube,
+                  ),
+                ]),
+              ),
+              AspectRatio(
+                aspectRatio: 16 / 9,
+                child: blocked ? _blockedView() : YoutubePlayer(controller: _yt, backgroundColor: Colors.black),
+              ),
+            ]),
+          ),
+          Expanded(child: _VideoDetails(video: widget.video, related: _related)),
+        ]),
+      ),
+    );
+  }
+
+  Widget _blockedView() {
+    final notFound = _error == YoutubeError.videoNotFound || _error == YoutubeError.cannotFindVideo;
+    final noEmbed = _error == YoutubeError.notEmbeddable ||
+        _error == YoutubeError.sameAsNotEmbeddable ||
+        _error == YoutubeError.sameAsNotEmbeddable2;
+    final message = notFound
+        ? 'This video was removed or made private on YouTube.'
+        : noEmbed
+            ? 'The owner only allows this video to be watched on YouTube.'
+            : 'YouTube could not play this video right now.';
+    return Stack(fit: StackFit.expand, children: [
+      NetImage(widget.video.thumbnailUrl, fallback: studioVideoVisual(widget.video).image),
+      Container(color: Colors.black.withValues(alpha: 0.75)),
+      Center(
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 24),
+          child: Column(mainAxisSize: MainAxisSize.min, children: [
+            const Icon(Icons.videocam_off_rounded, color: Colors.white, size: 32),
+            const SizedBox(height: 8),
+            Text(message,
+                textAlign: TextAlign.center,
+                style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w700, fontSize: 14)),
+            if (!notFound) ...[
+              const SizedBox(height: 12),
+              FilledButton.icon(
+                style: FilledButton.styleFrom(
+                  minimumSize: const Size(0, 40),
+                  backgroundColor: Colors.white,
+                  foregroundColor: AppColors.ink,
+                  padding: const EdgeInsets.symmetric(horizontal: 16),
+                ),
+                onPressed: _openOnYoutube,
+                icon: const Icon(Icons.open_in_new_rounded, size: 18),
+                label: const Text('Watch on YouTube', style: TextStyle(fontSize: 14)),
+              ),
+            ],
+          ]),
+        ),
+      ),
+    ]);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Details below the player (shared by both players)
+// ---------------------------------------------------------------------------
+
+class _VideoDetails extends StatelessWidget {
+  const _VideoDetails({required this.video, required this.related});
+
+  final Video video;
+  final Future<List<Video>> related;
+
+  Future<void> _openChannel(BuildContext context) async {
+    final url = video.channelUrl;
+    if (url == null) return;
+    final ok = await launchUrl(Uri.parse(url), mode: LaunchMode.externalApplication).catchError((_) => false);
+    if (!ok && context.mounted) toast(context, 'Could not open the channel', error: true);
+  }
+
+  @override
+  Widget build(BuildContext context) {
     final visual = studioVideoVisual(video);
-    final duration = formatDuration(video.durationSeconds);
-    final level = video.level.isEmpty ? '' : video.level[0].toUpperCase() + video.level.substring(1);
+    final duration = studioDurationText(video.durationSeconds);
+    final level = studioLevelLabel(video.level);
+    final channel = video.channelName;
+    final trainer = video.trainerName;
+    // A real trainer is set when it differs from the channel name (the server falls back to the channel).
+    final hasTrainer = trainer != null && trainer.isNotEmpty && trainer.toLowerCase() != channel?.toLowerCase();
     return ListView(
       padding: const EdgeInsets.fromLTRB(16, 18, 16, 32),
       children: [
@@ -367,34 +548,69 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
           Tag(visual.label, icon: visual.icon, color: visual.color),
           if (level.isNotEmpty) Tag(level, icon: Icons.signal_cellular_alt_rounded, color: AppColors.text2),
           if (duration.isNotEmpty) Tag(duration, icon: Icons.schedule_rounded, color: AppColors.text2),
+          if (video.equipment != null)
+            Tag(studioEquipmentLabel(video.equipment!), icon: Icons.fitness_center_rounded, color: AppColors.text2),
         ]),
         const SizedBox(height: 12),
         Text(video.title,
             style: const TextStyle(fontSize: 22, fontWeight: FontWeight.w800, letterSpacing: -0.5, height: 1.2)),
         const SizedBox(height: 16),
-        AppCard(
-          padding: const EdgeInsets.all(14),
-          child: Row(children: [
-            PersonAvatar(name: video.trainerName ?? 'FITKEY Coach', size: 46),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                const Text('YOUR COACH',
-                    style: TextStyle(fontSize: 11, letterSpacing: 1.3, fontWeight: FontWeight.w800, color: AppColors.text3)),
-                const SizedBox(height: 2),
-                Text(video.trainerName ?? 'FITKEY Coach',
-                    style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 15.5)),
+        if (hasTrainer || channel == null)
+          AppCard(
+            padding: const EdgeInsets.all(14),
+            child: Row(children: [
+              PersonAvatar(name: trainer ?? 'FITKEY Coach', size: 46),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  const Text('YOUR COACH',
+                      style: TextStyle(fontSize: 11, letterSpacing: 1.3, fontWeight: FontWeight.w800, color: AppColors.text3)),
+                  const SizedBox(height: 2),
+                  Text(trainer ?? 'FITKEY Coach', style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 15.5)),
+                ]),
+              ),
+              const IconBubble(Icons.verified_rounded, color: AppColors.blue, size: 36),
+            ]),
+          ),
+        if (hasTrainer && channel != null) const SizedBox(height: 10),
+        if (channel != null)
+          Tap(
+            onTap: video.channelUrl == null ? null : () => _openChannel(context),
+            child: AppCard(
+              padding: const EdgeInsets.all(14),
+              child: Row(children: [
+                PersonAvatar(name: channel, size: 46),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                    const Text('VIDEO BY',
+                        style: TextStyle(fontSize: 11, letterSpacing: 1.3, fontWeight: FontWeight.w800, color: AppColors.text3)),
+                    const SizedBox(height: 2),
+                    Text(channel,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 15.5)),
+                    const SizedBox(height: 2),
+                    Text(
+                        video.playlistTitle != null
+                            ? 'YouTube channel · from "${video.playlistTitle}"'
+                            : 'YouTube channel',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(fontSize: 12.5, color: AppColors.text2)),
+                  ]),
+                ),
+                if (video.channelUrl != null)
+                  const IconBubble(Icons.smart_display_rounded, color: AppColors.red, size: 36),
               ]),
             ),
-            const IconBubble(Icons.verified_rounded, color: AppColors.blue, size: 36),
-          ]),
-        ),
+          ),
         if (video.description != null && video.description!.isNotEmpty) ...[
           const SectionTitle('About this class', padding: EdgeInsets.fromLTRB(0, 24, 0, 10)),
           Text(video.description!, style: const TextStyle(height: 1.55, color: AppColors.text2, fontSize: 14.5)),
         ],
         FutureBuilder<List<Video>>(
-          future: _related,
+          future: related,
           builder: (context, snap) {
             final list = snap.data;
             if (list == null || list.isEmpty) return const SizedBox.shrink();

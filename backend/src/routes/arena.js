@@ -2,36 +2,38 @@ import { Router } from 'express';
 import rateLimit from 'express-rate-limit';
 import { z } from 'zod';
 import { config } from '../config.js';
-import { query, queryOne } from '../db/index.js';
+import { query, queryOne, withTransaction } from '../db/index.js';
 import { requireAuth } from '../middleware/auth.js';
 import { notify } from '../utils/notify.js';
 import { badRequest, conflict, forbidden, notFound, validate } from '../utils/http.js';
+import { creditCoins } from '../utils/wallet.js';
 import { FILES_PATH } from './files.js';
 
 /**
- * AI Arena (BRD §3.2). Reps are counted on-device by pose estimation; the server ranks attempts and awards points.
+ * ProveIt — "Only real reps count" (BRD §1; formerly "ProveIt", internal ids /arena and arena_* are kept).
+ * Reps are counted on-device by pose estimation; the server ranks sets and awards badges, points and coins.
  *
- * Leaderboards
- *  - best:   one row per member, their best single set (max reps / seconds). Ties go to whoever set it first.
- *  - weekly: total reps (seconds for plank) this week, Monday-based in APP_TZ.
+ * Modes
+ *  - levels:    pick a target (25/50/100 reps, plank 30/60/120 s). Completing it earns level points (capped per
+ *               exercise per day) and, the FIRST time per exercise + level, a badge and ProveIt coins (10/25/50,
+ *               arena_exercises.level_coins). Levels sets never affect rank.
+ *  - unlimited: one continuous set with no target (the app ends it 5 s after the last rep / when a plank breaks).
+ *               Earns no points or coins: it is only for the All India Rank.
  *
- * Points (read by the overall points board from arena_attempts.points)
- *  - Each exercise has levels with points, e.g. pushups 25/50/100 reps → 10/25/60 points.
- *  - A set earns the points of the highest level its reps reach, whatever level was picked.
- *  - Per exercise per day (APP_TZ) a member can earn at most the top level's points: a set only earns the
- *    difference between its level points and what that exercise already paid today. Repeating easy sets farms nothing.
+ * All India Rank (AIR): each member's best single UNLIMITED set (ties: whoever set it first). City rank = the same
+ * board filtered to the member's city. Weekly board: total unlimited reps this week (Monday-based, APP_TZ).
  *
- * Anti-cheat
- *  - The app only counts full-range reps; partial reps are reported separately.
- *  - Server checks: reps ≤ the exercise's plausible single-set max, reps ≤ duration × plausible rate,
- *    sets cannot overlap in time with the previous set, and submissions are rate-limited.
- *  - A set that enters the all-India top 10 is marked clip_status='pending' and the app uploads a short proof clip
- *    (or reports 'unavailable' when the device cannot record).
+ * Coins go through utils/wallet.js creditCoins (idempotent per ref). If the wallet is unavailable (e.g. 501 while
+ * it is being built) the badge is stored with coins_status='pending' and the credit is retried on later requests.
+ *
+ * Anti-cheat: the app only counts full-range reps; the server checks plausible single-set max and rate, that sets
+ * do not overlap in time, rate-limits submissions, and asks for a proof clip for new all-India top-10 sets.
  */
 const router = Router();
 router.use(requireAuth('user'));
 
-const EXERCISE_IDS = ['pushups', 'pullups', 'squats', 'plank', 'burpees'];
+const EXERCISE_IDS = ['pushups', 'pullups', 'squats', 'plank', 'burpees']; // burpees: data kept, hidden in v1
+const MODES = ['levels', 'unlimited'];
 const TOP_N = 10;
 
 const submitLimiter = rateLimit({
@@ -48,49 +50,66 @@ const citySchema = z.object({ city: z.string().trim().min(1).max(80).optional() 
 
 async function getExercise(id) {
   const parsed = exerciseIdSchema.safeParse(id);
-  if (!parsed.success) throw notFound('Exercise not found');
-  const ex = await queryOne(`SELECT * FROM arena_exercises WHERE id = $1`, [parsed.data]);
-  if (!ex) throw notFound('Exercise not found');
+  if (!parsed.success) throw notFound('Challenge not found');
+  const ex = await queryOne(`SELECT * FROM arena_exercises WHERE id = $1 AND active IS NOT FALSE`, [parsed.data]);
+  if (!ex) throw notFound('This ProveIt challenge is not available');
   return ex;
 }
 
-const publicExercise = (ex) => ({
+const levelCoins = (ex, i) => (ex.levelCoins ?? [10, 25, 50])[i] ?? 0;
+
+const publicExercise = (ex, badges = []) => ({
   id: ex.id,
   name: ex.name,
   unit: ex.unit,
-  levels: ex.levels.map((reps, i) => ({ target: reps, points: ex.levelPoints[i] ?? 0 })),
+  levels: ex.levels.map((target, i) => {
+    const b = badges.find((x) => x.exerciseId === ex.id && x.levelNo === i + 1);
+    return {
+      level: i + 1,
+      target,
+      points: ex.levelPoints[i] ?? 0,
+      coins: levelCoins(ex, i),
+      badge: b ? { earnedAt: b.createdAt, coins: b.coins, coinsStatus: b.coinsStatus } : null,
+    };
+  }),
   dailyPointsCap: Math.max(0, ...ex.levelPoints),
   tagline: ex.tagline,
   howTo: ex.howTo,
   tips: ex.tips,
 });
 
-/** SQL yielding each member's best set for $1 (exercise), with an all-India ROW_NUMBER rank. */
+/** Each member's best UNLIMITED set for $1 (exercise) with the all-India ROW_NUMBER rank. */
 const BEST_SQL = `
   WITH best AS (
     SELECT DISTINCT ON (a.user_id) a.user_id, a.id AS attempt_id, a.reps, a.created_at, a.clip_url, a.clip_status,
            COALESCE(a.city, u.city) AS city
     FROM arena_attempts a JOIN users u ON u.id = a.user_id
-    WHERE a.exercise_id = $1 AND u.role = 'user'
+    WHERE a.exercise_id = $1 AND a.mode = 'unlimited' AND u.role = 'user'
     ORDER BY a.user_id, a.reps DESC, a.created_at ASC
   )
-  SELECT b.*, ROW_NUMBER() OVER (ORDER BY b.reps DESC, b.created_at ASC) AS rank FROM best b`;
+  SELECT b.*, ROW_NUMBER() OVER (ORDER BY b.reps DESC, b.created_at ASC) AS rank,
+         ROW_NUMBER() OVER (PARTITION BY lower(b.city) ORDER BY b.reps DESC, b.created_at ASC) AS city_rank
+  FROM best b`;
 
-/** Start of the current week (Monday 00:00 in APP_TZ) as a timestamptz expression using parameter `tzParam`. */
 const weekStart = (tzParam) => `(date_trunc('week', now() AT TIME ZONE ${tzParam}) AT TIME ZONE ${tzParam})`;
 const dayStart = (tzParam) => `(date_trunc('day', now() AT TIME ZONE ${tzParam}) AT TIME ZONE ${tzParam})`;
 
-/** Stats shown on exercise cards and the detail header for one member. */
+/** Stats shown on challenge cards and the detail header for one member. */
 async function myStats(exerciseId, userId) {
   const row = await queryOne(
-    `WITH ranked AS (${BEST_SQL})
+    `WITH ranked AS (${BEST_SQL}), me AS (SELECT * FROM ranked WHERE user_id = $2),
+          my_city AS (SELECT COALESCE((SELECT city FROM me), (SELECT city FROM users WHERE id = $2)) AS city)
      SELECT
        (SELECT COUNT(*) FROM ranked) AS participants,
        (SELECT reps FROM ranked WHERE rank = ${TOP_N}) AS top10_threshold,
-       (SELECT reps FROM ranked WHERE user_id = $2) AS my_best,
-       (SELECT rank FROM ranked WHERE user_id = $2) AS my_rank,
+       (SELECT reps FROM me) AS my_best,
+       (SELECT rank FROM me) AS my_rank,
+       (SELECT city_rank FROM me) AS my_city_rank,
+       (SELECT city FROM my_city) AS my_city,
+       (SELECT COUNT(*) FROM ranked WHERE lower(city) = lower((SELECT city FROM my_city))) AS city_participants,
+       (SELECT MAX(reps) FROM arena_attempts WHERE exercise_id = $1 AND user_id = $2 AND mode = 'levels') AS levels_best,
        (SELECT COALESCE(SUM(reps), 0) FROM arena_attempts
-          WHERE exercise_id = $1 AND user_id = $2 AND created_at >= ${weekStart('$3')}) AS my_week_total,
+          WHERE exercise_id = $1 AND user_id = $2 AND mode = 'unlimited' AND created_at >= ${weekStart('$3')}) AS my_week_total,
        (SELECT COALESCE(SUM(points), 0) FROM arena_attempts
           WHERE exercise_id = $1 AND user_id = $2 AND created_at >= ${dayStart('$3')}) AS points_today,
        (SELECT COUNT(*) FROM arena_attempts WHERE exercise_id = $1 AND user_id = $2) AS my_attempts`,
@@ -99,15 +118,19 @@ async function myStats(exerciseId, userId) {
   return {
     participants: row.participants,
     top10Threshold: row.top10Threshold, // null while fewer than 10 members have a set → any set qualifies
-    myBest: row.myBest,
-    myRank: row.myRank,
+    myBest: row.myBest, // best unlimited set = the score behind the AIR
+    myRank: row.myRank, // All India Rank
+    myCityRank: row.myCityRank,
+    myCity: row.myCity,
+    cityParticipants: row.cityParticipants,
+    levelsBest: row.levelsBest,
     myWeekTotal: row.myWeekTotal,
     pointsToday: row.pointsToday,
     myAttempts: row.myAttempts,
   };
 }
 
-/** Rank a set of `reps` would take on the all-India best board, and whether it would be a new board entry. */
+/** AIR a set of `reps` would take, and whether it would be a new board entry for this member. */
 async function wouldRank(exerciseId, userId, reps) {
   const row = await queryOne(
     `WITH ranked AS (${BEST_SQL})
@@ -119,9 +142,54 @@ async function wouldRank(exerciseId, userId, reps) {
   return { rank: row.rank, myBest: row.myBest, improves, qualifies: reps > 0 && improves && row.rank <= TOP_N };
 }
 
+async function myBadges(userId) {
+  return query(
+    `SELECT exercise_id, level_no, target, attempt_id, coins, coins_status, created_at FROM proveit_badges
+     WHERE user_id = $1 ORDER BY created_at DESC`,
+    [userId],
+  );
+}
+
+/**
+ * Credits coins for badges still marked 'pending' (wallet unavailable when earned). Never throws: a wallet error
+ * just leaves the badge pending for the next try. Returns the number of coins credited now.
+ */
+async function settlePendingCoins(userId) {
+  const pending = await query(
+    `SELECT b.exercise_id, b.level_no, b.coins, e.name FROM proveit_badges b
+     JOIN arena_exercises e ON e.id = b.exercise_id
+     WHERE b.user_id = $1 AND b.coins_status = 'pending'`,
+    [userId],
+  );
+  let credited = 0;
+  for (const b of pending) {
+    try {
+      await withTransaction(async (client) => {
+        if (b.coins > 0) {
+          await creditCoins(client, userId, b.coins, {
+            kind: 'proveit',
+            ref: `proveit:${userId}:${b.exerciseId}:L${b.levelNo}`,
+            title: `ProveIt badge: ${b.name} level ${b.levelNo}`,
+          });
+        }
+        await client.query(
+          `UPDATE proveit_badges SET coins_status = $4 WHERE user_id = $1 AND exercise_id = $2 AND level_no = $3`,
+          [userId, b.exerciseId, b.levelNo, b.coins > 0 ? 'credited' : 'none'],
+        );
+      });
+      credited += b.coins;
+    } catch (e) {
+      if (e?.status !== 501) console.warn('ProveIt: coin credit failed, will retry', e?.message ?? e);
+      break; // wallet not available: try again on a later request
+    }
+  }
+  return credited;
+}
+
 const attemptOut = (a) => ({
   id: a.id,
   exerciseId: a.exerciseId,
+  mode: a.mode,
   level: a.level,
   reps: a.reps,
   completed: a.completed,
@@ -134,22 +202,70 @@ const attemptOut = (a) => ({
   createdAt: a.createdAt,
 });
 
-/** GET /arena/exercises — all exercises with my best, my rank and board stats. */
+const activeExercises = () =>
+  query(`SELECT * FROM arena_exercises WHERE id = ANY($1) AND active IS NOT FALSE ORDER BY sort, id`, [EXERCISE_IDS]);
+
+/** GET /arena/exercises — the v1 challenges with my AIR, city rank, best, and level badges. */
 router.get('/exercises', async (req, res) => {
-  const exercises = await query(`SELECT * FROM arena_exercises WHERE id = ANY($1) ORDER BY sort, id`, [EXERCISE_IDS]);
+  await settlePendingCoins(req.user.id);
+  const [exercises, badges] = await Promise.all([activeExercises(), myBadges(req.user.id)]);
   const out = await Promise.all(
-    exercises.map(async (ex) => ({ ...publicExercise(ex), stats: await myStats(ex.id, req.user.id) })),
+    exercises.map(async (ex) => ({ ...publicExercise(ex, badges), stats: await myStats(ex.id, req.user.id) })),
   );
   res.json({ exercises: out });
 });
 
-/** GET /arena/exercises/:id — exercise detail with my stats. */
+/** GET /arena/exercises/:id — challenge detail with my stats. */
 router.get('/exercises/:id', async (req, res) => {
   const ex = await getExercise(req.params.id);
-  res.json({ exercise: { ...publicExercise(ex), stats: await myStats(ex.id, req.user.id) } });
+  const badges = await myBadges(req.user.id);
+  res.json({ exercise: { ...publicExercise(ex, badges), stats: await myStats(ex.id, req.user.id) } });
 });
 
-/** GET /arena/exercises/:id/leaderboard?board=best|weekly&city= */
+/** GET /arena/me — my ProveIt summary: badges, coins from ProveIt, AIR per challenge. */
+router.get('/me', async (req, res) => {
+  await settlePendingCoins(req.user.id);
+  const [exercises, badges] = await Promise.all([activeExercises(), myBadges(req.user.id)]);
+  const names = Object.fromEntries(exercises.map((e) => [e.id, e]));
+  const ranks = await Promise.all(
+    exercises.map(async (ex) => {
+      const s = await myStats(ex.id, req.user.id);
+      return { exerciseId: ex.id, name: ex.name, unit: ex.unit, best: s.myBest, rank: s.myRank, cityRank: s.myCityRank,
+        city: s.myCity, participants: s.participants };
+    }),
+  );
+  const visible = badges.filter((b) => names[b.exerciseId]);
+  res.json({
+    badges: visible.map((b) => ({
+      exerciseId: b.exerciseId,
+      name: names[b.exerciseId].name,
+      unit: names[b.exerciseId].unit,
+      level: b.levelNo,
+      target: b.target,
+      coins: b.coins,
+      coinsStatus: b.coinsStatus,
+      earnedAt: b.createdAt,
+    })),
+    coinsEarned: visible.filter((b) => b.coinsStatus === 'credited').reduce((s, b) => s + b.coins, 0),
+    coinsPending: visible.filter((b) => b.coinsStatus === 'pending').reduce((s, b) => s + b.coins, 0),
+    badgesTotal: exercises.reduce((s, e) => s + e.levels.length, 0),
+    ranks,
+  });
+});
+
+/** GET /arena/exercises/:id/cities — cities on this AIR board, most members first (for the city filter). */
+router.get('/exercises/:id/cities', async (req, res) => {
+  const ex = await getExercise(req.params.id);
+  const rows = await query(
+    `WITH ranked AS (${BEST_SQL})
+     SELECT initcap(lower(city)) AS city, COUNT(*)::int AS members FROM ranked
+     WHERE city IS NOT NULL AND city <> '' GROUP BY lower(city) ORDER BY members DESC, lower(city) LIMIT 30`,
+    [ex.id],
+  );
+  res.json({ cities: rows });
+});
+
+/** GET /arena/exercises/:id/leaderboard?board=best|weekly&city= — Unlimited sets only. */
 router.get('/exercises/:id/leaderboard', async (req, res) => {
   const ex = await getExercise(req.params.id);
   const { board, city } = validate(
@@ -159,7 +275,7 @@ router.get('/exercises/:id/leaderboard', async (req, res) => {
 
   let rows;
   if (board === 'best') {
-    // City boards re-rank members by their best set within that city; all-India rank is kept as `indiaRank`.
+    // City boards re-rank members by their best set within that city; the All India Rank is kept as `indiaRank`.
     rows = await query(
       `WITH ranked AS (${BEST_SQL})
        SELECT r.user_id, u.name, r.city, u.avatar_url, r.reps AS score, r.attempt_id, r.created_at AS set_at,
@@ -176,7 +292,7 @@ router.get('/exercises/:id/leaderboard', async (req, res) => {
       `WITH totals AS (
          SELECT a.user_id, SUM(a.reps)::int AS score, COUNT(*)::int AS sets, MIN(a.created_at) AS first_at
          FROM arena_attempts a
-         WHERE a.exercise_id = $1 AND a.created_at >= ${weekStart('$3')}
+         WHERE a.exercise_id = $1 AND a.mode = 'unlimited' AND a.created_at >= ${weekStart('$3')}
          GROUP BY a.user_id
        )
        SELECT t.user_id, u.name, u.city, u.avatar_url, t.score, t.sets,
@@ -198,7 +314,7 @@ router.get('/exercises/:id/leaderboard', async (req, res) => {
   });
 });
 
-/** GET /arena/exercises/:id/qualifies?reps=N — would a set of N enter the all-India top 10? */
+/** GET /arena/exercises/:id/qualifies?reps=N — would an Unlimited set of N enter the all-India top 10? */
 router.get('/exercises/:id/qualifies', async (req, res) => {
   const ex = await getExercise(req.params.id);
   const { reps } = validate(z.object({ reps: z.coerce.number().int().min(0).max(100000) }), req.query);
@@ -206,19 +322,24 @@ router.get('/exercises/:id/qualifies', async (req, res) => {
   res.json({ reps, rank: r.rank, qualifies: r.qualifies, myBest: r.myBest, top: TOP_N });
 });
 
-const submitSchema = z.object({
-  exerciseId: exerciseIdSchema,
-  level: z.number().int().positive().nullable().optional(),
-  reps: z.number().int().min(1, 'No reps were counted — nothing to save').max(100000),
-  durationSec: z.number().int().min(3, 'That set was too short to save').max(3600),
-  partialReps: z.number().int().min(0).max(100000).default(0),
-});
+const submitSchema = z
+  .object({
+    exerciseId: exerciseIdSchema,
+    mode: z.enum(MODES).default('levels'),
+    level: z.number().int().positive().nullable().optional(), // the level's target (reps / seconds)
+    reps: z.number().int().min(1, 'No reps were counted — nothing to save').max(100000),
+    durationSec: z.number().int().min(3, 'That set was too short to save').max(3600),
+    partialReps: z.number().int().min(0).max(100000).default(0),
+  })
+  .refine((b) => b.mode !== 'levels' || b.level != null, { message: 'Pick a level for a Levels challenge', path: ['level'] })
+  .refine((b) => b.mode !== 'unlimited' || b.level == null, { message: 'Unlimited sets have no level', path: ['level'] });
 
 /** POST /arena/attempts — save an AI-counted set. */
 router.post('/attempts', submitLimiter, async (req, res) => {
   const body = validate(submitSchema, req.body);
   const ex = await getExercise(body.exerciseId);
-  if (body.level != null && !ex.levels.includes(body.level)) throw badRequest('Unknown level for this exercise');
+  const levelIdx = body.level == null ? -1 : ex.levels.indexOf(body.level);
+  if (body.mode === 'levels' && levelIdx < 0) throw badRequest('Unknown level for this challenge');
 
   // --- sanity checks against obvious cheating -------------------------------------------------------------
   const unitWord = ex.unit === 'seconds' ? 'seconds' : 'reps';
@@ -236,11 +357,16 @@ router.post('/attempts', submitLimiter, async (req, res) => {
     throw conflict('This set overlaps your previous one — sets must be done one after another');
   }
 
-  // --- points: highest level reached, capped per exercise per day -----------------------------------------
+  const unlimited = body.mode === 'unlimited';
+  const completed = !unlimited && body.reps >= body.level;
+
+  // --- points (Levels only): highest level reached, capped per exercise per day -----------------------------
   let reachedIdx = -1;
-  ex.levels.forEach((target, i) => {
-    if (body.reps >= target) reachedIdx = i;
-  });
+  if (!unlimited) {
+    ex.levels.forEach((target, i) => {
+      if (body.reps >= target) reachedIdx = i;
+    });
+  }
   const levelPoints = reachedIdx >= 0 ? ex.levelPoints[reachedIdx] ?? 0 : 0;
   const today = await queryOne(
     `SELECT COALESCE(SUM(points), 0) AS pts FROM arena_attempts
@@ -248,17 +374,18 @@ router.post('/attempts', submitLimiter, async (req, res) => {
     [req.user.id, ex.id, config.tz],
   );
   const points = Math.max(0, levelPoints - today.pts);
-  const completed = body.level != null ? body.reps >= body.level : reachedIdx >= 0;
 
-  const before = await wouldRank(ex.id, req.user.id, body.reps);
+  const before = unlimited ? await wouldRank(ex.id, req.user.id, body.reps) : null;
   const user = await queryOne(`SELECT name, city FROM users WHERE id = $1`, [req.user.id]);
 
   const attempt = await queryOne(
-    `INSERT INTO arena_attempts (user_id, exercise_id, level, reps, completed, points, city, duration_sec, partial_reps, clip_status)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) RETURNING *`,
+    `INSERT INTO arena_attempts (user_id, exercise_id, mode, level, reps, completed, points, city, duration_sec,
+                                 partial_reps, clip_status)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11) RETURNING *`,
     [
       req.user.id,
       ex.id,
+      body.mode,
       body.level ?? null,
       body.reps,
       completed,
@@ -266,40 +393,75 @@ router.post('/attempts', submitLimiter, async (req, res) => {
       user?.city ?? null,
       body.durationSec,
       body.partialReps,
-      before.qualifies ? 'pending' : 'none',
+      before?.qualifies ? 'pending' : 'none',
     ],
   );
 
-  const personalBest = before.improves && before.myBest != null;
+  // --- badge + coins: first completion of this exercise + level -------------------------------------------
+  let badge = null;
+  if (completed) {
+    const coins = levelCoins(ex, levelIdx);
+    const row = await queryOne(
+      `INSERT INTO proveit_badges (user_id, exercise_id, level_no, target, attempt_id, coins, coins_status)
+       VALUES ($1, $2, $3, $4, $5, $6, $7) ON CONFLICT DO NOTHING RETURNING *`,
+      [req.user.id, ex.id, levelIdx + 1, body.level, attempt.id, coins, coins > 0 ? 'pending' : 'none'],
+    );
+    if (row) {
+      await settlePendingCoins(req.user.id);
+      const now = await queryOne(
+        `SELECT coins, coins_status FROM proveit_badges WHERE user_id = $1 AND exercise_id = $2 AND level_no = $3`,
+        [req.user.id, ex.id, levelIdx + 1],
+      );
+      badge = { level: levelIdx + 1, target: body.level, coins: now.coins, coinsStatus: now.coinsStatus };
+      await notify(req.user.id, {
+        type: 'arena_badge',
+        title: `ProveIt badge unlocked: ${ex.name} level ${levelIdx + 1}`,
+        body:
+          coins > 0
+            ? now.coinsStatus === 'credited'
+              ? `${body.level}${ex.unit === 'seconds' ? 's' : ' reps'} done — +${coins} ProveIt coins added to your wallet.`
+              : `${body.level}${ex.unit === 'seconds' ? 's' : ' reps'} done — your ${coins} ProveIt coins will be added shortly.`
+            : `${body.level}${ex.unit === 'seconds' ? 's' : ' reps'} done. Only real reps count!`,
+        data: { exerciseId: ex.id, attemptId: attempt.id },
+      });
+    }
+  }
+
+  // --- rank notifications (Unlimited only) ------------------------------------------------------------------
   const unit = ex.unit === 'seconds' ? 's' : ' reps';
-  if (before.qualifies) {
+  if (before?.qualifies) {
     await notify(req.user.id, {
       type: 'arena_top10',
-      title: `You're #${before.rank} in India for ${ex.name}!`,
-      body: `${body.reps}${unit} in one set puts you in the all-India top ${TOP_N}.`,
+      title: `ProveIt: you're AIR #${before.rank} for ${ex.name}!`,
+      body: `${body.reps}${unit} in one set puts you in the All India top ${TOP_N}.`,
       data: { exerciseId: ex.id, attemptId: attempt.id },
     });
-  } else if (personalBest) {
+  } else if (before?.improves && before.myBest != null) {
     await notify(req.user.id, {
       type: 'arena_pb',
-      title: `New ${ex.name} personal best: ${body.reps}${unit}`,
-      body: `You beat your previous best of ${before.myBest}${unit}. You're #${before.rank} in India.`,
+      title: `ProveIt: new ${ex.name} best — ${body.reps}${unit}`,
+      body: `You beat your previous best of ${before.myBest}${unit}. Your All India Rank is now #${before.rank}.`,
       data: { exerciseId: ex.id, attemptId: attempt.id },
     });
   }
 
+  const after = unlimited ? await myStats(ex.id, req.user.id) : null;
   res.status(201).json({
     attempt: attemptOut(attempt),
+    mode: body.mode,
     pointsAwarded: points,
     levelPoints,
-    // Points this exercise had already paid today (the reason pointsAwarded can be below levelPoints).
     earnedTodayBefore: today.pts,
-    dailyCapReached: today.pts + points >= Math.max(0, ...ex.levelPoints),
-    rank: before.improves ? before.rank : null,
-    previousBest: before.myBest,
-    personalBest: before.improves,
-    qualifiesTop10: before.qualifies,
-    clipRequired: before.qualifies,
+    dailyCapReached: !unlimited && today.pts + points >= Math.max(0, ...ex.levelPoints),
+    badge, // new badge from this set (Levels), with coins and whether they are credited yet
+    rank: before?.improves ? before.rank : null, // AIR of this set when it became my best (Unlimited)
+    myRank: after?.myRank ?? null,
+    myCityRank: after?.myCityRank ?? null,
+    myCity: after?.myCity ?? null,
+    previousBest: before?.myBest ?? null,
+    personalBest: Boolean(before?.improves),
+    qualifiesTop10: Boolean(before?.qualifies),
+    clipRequired: Boolean(before?.qualifies),
   });
 });
 
@@ -341,21 +503,23 @@ router.post('/attempts/:id/clip', async (req, res) => {
   res.json({ attempt: attemptOut(updated) });
 });
 
-/** GET /arena/attempts/me?exerciseId=&limit=&before= — my history, newest first. */
+/** GET /arena/attempts/me?exerciseId=&mode=&limit=&before= — my history, newest first. */
 router.get('/attempts/me', async (req, res) => {
   const q = validate(
     z.object({
       exerciseId: exerciseIdSchema.optional(),
+      mode: z.enum(MODES).optional(),
       limit: z.coerce.number().int().min(1).max(100).default(30),
       before: z.string().datetime({ offset: true }).optional(),
     }),
     req.query,
   );
   const rows = await query(
-    `SELECT * FROM arena_attempts
-     WHERE user_id = $1 AND ($2::text IS NULL OR exercise_id = $2) AND ($3::timestamptz IS NULL OR created_at < $3)
-     ORDER BY created_at DESC LIMIT $4`,
-    [req.user.id, q.exerciseId ?? null, q.before ?? null, q.limit],
+    `SELECT a.* FROM arena_attempts a JOIN arena_exercises e ON e.id = a.exercise_id
+     WHERE a.user_id = $1 AND e.active IS NOT FALSE AND ($2::text IS NULL OR a.exercise_id = $2)
+       AND ($3::text IS NULL OR a.mode = $3) AND ($4::timestamptz IS NULL OR a.created_at < $4)
+     ORDER BY a.created_at DESC LIMIT $5`,
+    [req.user.id, q.exerciseId ?? null, q.mode ?? null, q.before ?? null, q.limit],
   );
   res.json({ attempts: rows.map(attemptOut) });
 });

@@ -548,6 +548,15 @@ class _HealthReportScreenState extends State<HealthReportScreen> with SingleTick
           textAlign: TextAlign.center,
           style: const TextStyle(color: AppColors.text2, fontSize: 12.5, fontWeight: FontWeight.w600),
         ),
+        if (r.nutritionIncompleteItems > 0)
+          Padding(
+            padding: const EdgeInsets.only(top: 4),
+            child: Text(
+              'Some values unavailable for ${r.nutritionIncompleteItems} logged items — averages count only known values.',
+              textAlign: TextAlign.center,
+              style: const TextStyle(fontSize: 11.5, color: AppColors.text3, fontWeight: FontWeight.w600),
+            ),
+          ),
         SectionTitle('Macros',
             subtitle: g.targetsSource == 'custom' ? 'Daily average vs your custom targets' : 'Daily average vs your targets',
             action: 'Edit targets',

@@ -224,7 +224,12 @@ class Video {
         groupLabel = j['groupLabel'],
         types = ((j['types'] as List?) ?? const []).cast<String>(),
         groups = ((j['groups'] as List?) ?? const []).cast<String>(),
-        equipment = j['equipment'];
+        equipment = j['equipment'],
+        source = j['source'] ?? 'upload',
+        youtubeId = j['youtubeId'],
+        channelName = j['channelName'],
+        channelUrl = j['channelUrl'],
+        playlistTitle = j['playlistTitle'];
 
   final String id;
   final String category;
@@ -248,6 +253,21 @@ class Video {
 
   /// none | dumbbells | gym (null when not tagged).
   final String? equipment;
+
+  /// 'youtube' (plays in the official YouTube embedded player) or 'upload' (file / direct video URL).
+  final String source;
+
+  /// 11-character YouTube video id (YouTube videos only).
+  final String? youtubeId;
+
+  /// YouTube channel — credited on video cards and in the player.
+  final String? channelName;
+  final String? channelUrl;
+
+  /// YouTube playlist the video was imported from, if any.
+  final String? playlistTitle;
+
+  bool get isYoutube => youtubeId != null && youtubeId!.isNotEmpty;
 }
 
 class BuddyPost {

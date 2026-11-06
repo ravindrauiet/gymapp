@@ -120,7 +120,7 @@ class _ContestDetailScreenState extends State<ContestDetailScreen> {
         'attendance' =>
           'Register here, then on the event day check in at ${e.venue?.name ?? 'the venue'} with its QR code — your attendance is marked automatically.',
         'arena_reps' =>
-          'Do your set in the AI Arena (${_exerciseName(e.arenaExercise)}). The camera counts only clean, full-range reps — your best set counts.',
+          'Do your set in the ProveIt (${_exerciseName(e.arenaExercise)}). The camera counts only clean, full-range reps — your best set counts.',
         _ => 'Check in at any FITKEY venue. Each day you check in counts once.',
       };
 
@@ -130,7 +130,7 @@ class _ContestDetailScreenState extends State<ContestDetailScreen> {
         'squats' => 'Squats',
         'plank' => 'Plank',
         'burpees' => 'Burpees',
-        null => 'AI Arena',
+        null => 'ProveIt',
         _ => id[0].toUpperCase() + id.substring(1),
       };
 
@@ -408,7 +408,7 @@ class _ContestDetailScreenState extends State<ContestDetailScreen> {
     final Widget? action = switch (e.metric) {
       'running_km' => AppButton(label: 'Log a run', icon: Icons.directions_run_rounded, color: AppColors.ink, onPressed: _logRun),
       'arena_reps' when e.arenaExercise != null && !e.upcoming => AppButton(
-          label: 'Go to AI Arena', icon: Icons.auto_awesome_rounded, color: AppColors.ink, onPressed: () => _openArena(e)),
+          label: 'Go to ProveIt', icon: Icons.auto_awesome_rounded, color: AppColors.ink, onPressed: () => _openArena(e)),
       'attendance' when !e.attended && e.eventDate != null && DateUtils.dateOnly(e.eventDate!) == today => AppButton(
           label: 'Check in now', icon: Icons.qr_code_scanner_rounded, color: AppColors.ink, onPressed: () => _checkIn(e)),
       _ => null,

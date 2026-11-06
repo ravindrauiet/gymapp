@@ -355,7 +355,8 @@ router.get('/report', async (req, res) => {
       `SELECT logged_on::text AS date, COUNT(*) AS items, COUNT(DISTINCT meal_type) AS slots,
               BOOL_OR(meal_type = 'breakfast') AS breakfast,
               COALESCE(SUM(calories), 0) AS calories, COALESCE(SUM(protein_g), 0) AS protein_g,
-              COALESCE(SUM(carbs_g), 0) AS carbs_g, COALESCE(SUM(fat_g), 0) AS fat_g
+              COALESCE(SUM(carbs_g), 0) AS carbs_g, COALESCE(SUM(fat_g), 0) AS fat_g,
+              COUNT(*) FILTER (WHERE unavailable && ARRAY['calories','proteinG','carbsG','fatG']) AS incomplete_items
        FROM meal_logs WHERE user_id = $1 AND logged_on > ${since} GROUP BY logged_on ORDER BY logged_on`,
       params,
     ),
@@ -653,6 +654,9 @@ router.get('/report', async (req, res) => {
       daysHitProtein,
       breakfastDays: mealRows.filter((r) => r.breakfast).length,
       avgMealsPerDay: mealDays ? round1(mealRows.reduce((a, r) => a + +r.slots, 0) / mealDays) : 0,
+      // Logged foods whose source lacked some nutrient values (food DB NULL = "not available"): averages sum only
+      // the available values, so the app shows a "some values unavailable" note when this is > 0.
+      incompleteItems: mealRows.reduce((a, r) => a + (+r.incompleteItems || 0), 0),
       series: nutritionSeries,
       baselines: {
         dailyCalories: t.calories,

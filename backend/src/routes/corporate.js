@@ -1006,7 +1006,7 @@ router.delete('/orgs/:orgId/events/:id', hr('admin'), async (req, res) => {
   res.status(204).end();
 });
 
-/** Detects the AI Arena attempts table (built by another feature) and its column names, if it exists yet. */
+/** Detects the ProveIt attempts table (built by another feature) and its column names, if it exists yet. */
 async function arenaTable() {
   const t = await queryOne(`SELECT to_regclass('public.arena_attempts') IS NOT NULL AS ok`);
   if (!t.ok) return null;
@@ -1134,7 +1134,7 @@ router.get('/orgs/:orgId/events/:id', hr(), async (req, res) => {
     leaderboard,
     invites,
     memberCount: members.n,
-    ...(arenaReady ? {} : { notice: 'AI Arena scores will appear once the Arena feature records attempts.' }),
+    ...(arenaReady ? {} : { notice: 'ProveIt scores will appear once the Arena feature records attempts.' }),
   });
 });
 

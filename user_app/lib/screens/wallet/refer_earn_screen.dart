@@ -11,6 +11,7 @@ import '../../state/session.dart';
 import '../../ui/ui.dart';
 import '../plans/plans_screen.dart';
 import 'coins.dart';
+import 'wallet_screen.dart';
 
 typedef _WalletData = ({CoinWallet wallet, List<CoinEntry> ledger, ReferralInfo referrals});
 
@@ -41,7 +42,14 @@ class _ReferEarnScreenState extends State<ReferEarnScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Refer & Earn')),
+      appBar: AppBar(title: const Text('Refer & Earn'), actions: [
+        TextButton.icon(
+          onPressed: () => push(context, const WalletScreen()),
+          icon: const Icon(Icons.account_balance_wallet_rounded, size: 18),
+          label: const Text('Wallet'),
+        ),
+        const SizedBox(width: 6),
+      ]),
       body: FutureBuilder<_WalletData>(
         future: _future,
         builder: (context, snap) {
@@ -70,18 +78,24 @@ class _ReferEarnScreenState extends State<ReferEarnScreen> {
                     subtitle: d.referrals.invited == 0
                         ? null
                         : '${d.referrals.invited} invited · ${d.referrals.passBought} bought a pass · '
-                            '${formatCoins(d.referrals.coinsEarned)} coins earned'),
+                            '${formatCoins(d.referrals.coinsEarned)} coins active'
+                            '${d.referrals.coinsLocked > 0 ? ' · ${formatCoins(d.referrals.coinsLocked)} locked' : ''}'),
                 _ReferralList(info: d.referrals),
-                const SectionTitle('Coin history'),
-                _Ledger(entries: d.ledger),
+                const SectionTitle('Referral coin history'),
+                CoinLedger(
+                  entries: d.ledger.where((e) => e.wallet == 'referral').toList(),
+                  emptyTitle: 'No referral coins yet',
+                  emptyMessage: 'Invite a friend — you both get coins when they sign up with your code.',
+                ),
                 const SizedBox(height: 18),
                 const Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
                   Icon(Icons.info_outline_rounded, size: 16, color: AppColors.text3),
                   SizedBox(width: 8),
                   Expanded(
                     child: Text(
-                      'Coins are saved safely in your FitKey wallet. You earn 1 coin for every ₹1 you pay for a pass, '
-                      'plus a reward for every friend who buys their first pass. We\'ll notify you when coins can be redeemed.',
+                      'Referral coins (welcome bonus + referral rewards) stay locked until you buy your first FitKey pass. '
+                      'Then use them on Store orders and FitKey pass checkout — up to 50% of the price. They can\'t pay for '
+                      'visits. One reward per new member; self-referrals and repeat devices don\'t count.',
                       style: TextStyle(fontSize: 12, color: AppColors.text3, height: 1.45),
                     ),
                   ),
@@ -125,16 +139,16 @@ class _Hero extends StatelessWidget {
                 style: TextStyle(color: AppColors.lime, fontWeight: FontWeight.w800, fontSize: 11, letterSpacing: 1.6)),
             const SizedBox(height: 10),
             Row(crossAxisAlignment: CrossAxisAlignment.end, children: [
-              Text(formatCoins(wallet.available),
+              Text(formatCoins(wallet.referralCoins),
                   style: const TextStyle(color: Colors.white, fontSize: 38, fontWeight: FontWeight.w800, letterSpacing: -1.2, height: 1)),
               const SizedBox(width: 8),
               Padding(
                 padding: const EdgeInsets.only(bottom: 4),
-                child: Text('available', style: TextStyle(color: Colors.white.withValues(alpha: 0.65), fontWeight: FontWeight.w600)),
+                child: Text('referral coins', style: TextStyle(color: Colors.white.withValues(alpha: 0.65), fontWeight: FontWeight.w600)),
               ),
             ]),
             const SizedBox(height: 14),
-            if (wallet.locked > 0)
+            if (wallet.referralLocked > 0)
               Tap(
                 onTap: () => push(context, const PlansScreen()),
                 child: Container(
@@ -148,7 +162,7 @@ class _Hero extends StatelessWidget {
                     const Icon(Icons.lock_rounded, size: 16, color: AppColors.amber),
                     const SizedBox(width: 8),
                     Expanded(
-                      child: Text('${formatCoins(wallet.locked)} coins unlock with your first pass',
+                      child: Text('${formatCoins(wallet.referralLocked)} coins activate with your first FitKey pass',
                           style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w700, fontSize: 13)),
                     ),
                     const Text('Get pass', style: TextStyle(color: AppColors.lime, fontWeight: FontWeight.w800, fontSize: 12.5)),
@@ -157,15 +171,15 @@ class _Hero extends StatelessWidget {
                 ),
               )
             else
-              Text('${formatCoins(wallet.totalEarned)} coins earned so far',
+              Text('Use them in the Store and on FitKey pass checkout',
                   style: TextStyle(color: Colors.white.withValues(alpha: 0.7), fontWeight: FontWeight.w600, fontSize: 13)),
             const SizedBox(height: 16),
             Container(height: 1, color: Colors.white.withValues(alpha: 0.1)),
             const SizedBox(height: 14),
-            Text('Invite friends, earn $reward coins each',
+            Text('Invite friends — you both get $reward coins',
                 style: const TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.w800, letterSpacing: -0.4)),
             const SizedBox(height: 4),
-            Text('You get $reward coins when a friend you invite buys their first FitKey Pass.',
+            Text('Added (locked) when your friend signs up with your code, active as soon as they buy a FitKey pass.',
                 style: TextStyle(color: Colors.white.withValues(alpha: 0.65), fontSize: 12.5, height: 1.4)),
           ]),
         ),
@@ -327,7 +341,7 @@ class _HaveACode extends StatelessWidget {
           child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
             Text('Got a friend\'s code?', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 14.5)),
             SizedBox(height: 2),
-            Text('Add it before your first pass so your friend gets rewarded',
+            Text('Add it before your first pass — you both get coins',
                 style: TextStyle(fontSize: 12, color: AppColors.text2)),
           ]),
         ),
@@ -397,7 +411,7 @@ class _ApplyCodeSheetState extends State<_ApplyCodeSheet> {
         child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
           const Text('Enter referral code', style: TextStyle(fontSize: 20, fontWeight: FontWeight.w800, letterSpacing: -0.4)),
           const SizedBox(height: 6),
-          const Text('Your friend earns coins when you buy your first FitKey Pass.',
+          const Text('You and your friend both get coins — they activate when you buy your first FitKey pass.',
               style: TextStyle(color: AppColors.text2, height: 1.4)),
           const SizedBox(height: 16),
           TextField(
@@ -452,8 +466,10 @@ class _HowItWorks extends StatelessWidget {
   Widget build(BuildContext context) {
     final steps = [
       (Icons.send_rounded, AppColors.blue, 'Share your code', 'Send your link on WhatsApp, Instagram or anywhere.'),
-      (Icons.person_add_alt_1_rounded, AppColors.purple, 'Friend joins FITKEY', 'They install the app and sign up with your code.'),
-      (Icons.key_rounded, AppColors.green, 'They buy a pass, you earn', 'You get $reward coins in your wallet, instantly.'),
+      (Icons.person_add_alt_1_rounded, AppColors.purple, 'Friend joins FITKEY',
+          'They sign up with your code — you both get $reward coins (locked).'),
+      (Icons.key_rounded, AppColors.green, 'They buy a pass, coins go live',
+          'When they buy any FitKey pass (coins or sessions), both rewards become active.'),
     ];
     return AppCard(
       child: Column(children: [
@@ -520,82 +536,16 @@ class _ReferralList extends StatelessWidget {
                     : const Tag('Signed up', color: AppColors.amber, icon: Icons.hourglass_top_rounded, dense: true),
                 if (info.referrals[i].coins > 0) ...[
                   const SizedBox(height: 4),
-                  Text('+${formatCoins(info.referrals[i].coins)} coins',
-                      style: const TextStyle(color: AppColors.green, fontWeight: FontWeight.w800, fontSize: 12)),
+                  Text('+${formatCoins(info.referrals[i].coins)} coins${info.referrals[i].locked ? ' · locked' : ''}',
+                      style: TextStyle(
+                          color: info.referrals[i].locked ? AppColors.amber : AppColors.green,
+                          fontWeight: FontWeight.w800,
+                          fontSize: 12)),
                 ],
               ]),
             ]),
           ),
           if (i < info.referrals.length - 1) const Divider(indent: 66, height: 1),
-        ],
-      ]),
-    );
-  }
-}
-
-class _Ledger extends StatelessWidget {
-  const _Ledger({required this.entries});
-  final List<CoinEntry> entries;
-
-  (IconData, Color) _visual(CoinEntry e) => switch (e.kind) {
-        'welcome_bonus' => (Icons.card_giftcard_rounded, AppColors.purple),
-        'plan_purchase' => (Icons.key_rounded, AppColors.primary),
-        'referral_reward' => (Icons.group_rounded, AppColors.green),
-        _ => (Icons.toll_rounded, AppColors.amber),
-      };
-
-  @override
-  Widget build(BuildContext context) {
-    if (entries.isEmpty) {
-      return const AppCard(
-        child: EmptyView(
-          icon: Icons.toll_rounded,
-          color: AppColors.amber,
-          title: 'No coins yet',
-          message: 'Buy a FitKey Pass or invite a friend to start earning.',
-        ),
-      );
-    }
-    return AppCard(
-      padding: EdgeInsets.zero,
-      child: Column(children: [
-        for (var i = 0; i < entries.length; i++) ...[
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-            child: Row(children: [
-              IconBubble(_visual(entries[i]).$1, color: _visual(entries[i]).$2, size: 38, iconSize: 19),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                  Text(entries[i].title,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 14)),
-                  Text(
-                    [formatShortDate(entries[i].createdAt), ?entries[i].subtitle].join(' · '),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(fontSize: 12, color: AppColors.text3),
-                  ),
-                ]),
-              ),
-              const SizedBox(width: 8),
-              Column(crossAxisAlignment: CrossAxisAlignment.end, children: [
-                Text('${entries[i].amount > 0 ? '+' : ''}${formatCoins(entries[i].amount)}',
-                    style: TextStyle(
-                        fontWeight: FontWeight.w800,
-                        fontSize: 15,
-                        color: entries[i].locked ? AppColors.text3 : (entries[i].amount > 0 ? AppColors.green : AppColors.red))),
-                if (entries[i].locked)
-                  const Row(mainAxisSize: MainAxisSize.min, children: [
-                    Icon(Icons.lock_rounded, size: 11, color: AppColors.amber),
-                    SizedBox(width: 3),
-                    Text('Locked', style: TextStyle(fontSize: 11, color: AppColors.amber, fontWeight: FontWeight.w700)),
-                  ]),
-              ]),
-            ]),
-          ),
-          if (i < entries.length - 1) const Divider(indent: 64, height: 1),
         ],
       ]),
     );

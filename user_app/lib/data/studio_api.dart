@@ -1,5 +1,6 @@
 import 'dart:convert';
 
+import 'package:fitkey_core/fitkey_core.dart' show formatDuration;
 import 'package:flutter/material.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
@@ -92,6 +93,23 @@ String studioDurationLabel(String bucket) => switch (bucket) {
       '30' => '30+ min',
       _ => bucket,
     };
+
+/// Duration for cards / player: '' when unknown (never "0 min"), seconds for YouTube Shorts-length clips.
+String studioDurationText(int? seconds) {
+  if (seconds == null || seconds <= 0) return '';
+  if (seconds < 60) return '$seconds sec';
+  return formatDuration(seconds);
+}
+
+/// Who to credit on a card: the trainer, plus the YouTube channel when it is a different name.
+/// (The server already falls back to the channel when no trainer is known.)
+String studioCredit(Video v) {
+  final trainer = v.trainerName?.trim();
+  final channel = v.channelName?.trim();
+  if (trainer == null || trainer.isEmpty) return channel ?? 'FITKEY Coach';
+  if (channel != null && channel.isNotEmpty && channel.toLowerCase() != trainer.toLowerCase()) return '$trainer · $channel';
+  return trainer;
+}
 
 String studioEquipmentLabel(String e) => switch (e) {
       'none' => 'No equipment',

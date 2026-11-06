@@ -13,6 +13,7 @@ import '../goals/goal_selection_screen.dart';
 import '../health/attendance_screen.dart';
 import '../health/health_report_screen.dart';
 import '../healthstop/healthstop_screen.dart';
+import '../memberships/my_memberships_screen.dart';
 import '../nutrition/ai_food_scanner.dart';
 import '../nutrition/fuel_log_screen.dart';
 import '../plans/plans_screen.dart';
@@ -20,6 +21,7 @@ import '../store/store_screen.dart';
 import '../trainers/trainers_screen.dart';
 import '../wallet/coins.dart';
 import '../wallet/refer_earn_screen.dart';
+import '../wallet/wallet_screen.dart';
 
 class ProfileScreen extends StatelessWidget {
   const ProfileScreen({super.key});
@@ -84,17 +86,17 @@ class ProfileScreen extends StatelessWidget {
               const SizedBox(width: 14),
               Expanded(
                 child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                  Text(sub?.planName ?? 'No active FitKey Pass',
+                  Text(sub?.planName ?? 'FitKey Pass',
                       style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w800, fontSize: 16)),
                   const SizedBox(height: 2),
-                  Text(sub == null ? 'Get a pass to start checking in' : 'Valid till ${formatDate(sub.endsAt)} · ${sub.daysLeft} days left',
+                  Text(sub == null ? 'Coins (pay per visit) or a session plan' : 'Valid till ${formatDate(sub.endsAt)} · ${sub.daysLeft} days left',
                       style: TextStyle(color: Colors.white.withValues(alpha: 0.65), fontSize: 12.5)),
                 ]),
               ),
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
                 decoration: BoxDecoration(color: AppColors.lime, borderRadius: BorderRadius.circular(10)),
-                child: Text(sub == null ? 'Get pass' : 'Manage',
+                child: Text(sub == null ? 'Plans' : 'Manage',
                     style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 12.5, color: AppColors.ink)),
               ),
             ]),
@@ -122,8 +124,13 @@ class ProfileScreen extends StatelessWidget {
               () => push(context, const ActivityLogScreen())),
         ]),
         _Group(title: 'Bookings & orders', items: [
-          _Item(Icons.receipt_long_rounded, 'Passes & payments', 'Your FitKey Pass history', AppColors.ink,
-              () => push(context, const MySubscriptionsScreen())),
+          _Item(Icons.account_balance_wallet_rounded, 'Wallet & passes', 'Coins, sessions, validity & purchases', AppColors.ink,
+              () => push(context, const WalletScreen())),
+          _Item(Icons.card_membership_rounded, 'My memberships', 'Direct centre memberships', AppColors.purple,
+              () => push(context, const MyMembershipsScreen())),
+          if (sub != null)
+            _Item(Icons.receipt_long_rounded, 'Earlier pass history', 'Your legacy FitKey Pass plans', AppColors.text2,
+                () => push(context, const MySubscriptionsScreen())),
           _Item(Icons.sports_rounded, 'Trainer sessions', 'Find trainers & your bookings', AppColors.blue,
               () => push(context, const TrainersScreen())),
           _Item(Icons.shopping_bag_rounded, 'Store & orders', 'Shop and track orders', AppColors.pink,
@@ -150,7 +157,7 @@ class ProfileScreen extends StatelessWidget {
   }
 }
 
-/// BRD §9 — Refer & Earn entry with the member's coin balance (available / locked), right below the pass card.
+/// Wallet entry (FitKey coins, sessions, referral / ProveIt coins) + Refer & Earn, right below the pass card.
 class _ReferEarnCard extends StatefulWidget {
   const _ReferEarnCard({super.key});
 
@@ -185,8 +192,8 @@ class _ReferEarnCardState extends State<_ReferEarnCard> {
     }
   }
 
-  Future<void> _open() async {
-    await push(context, const ReferEarnScreen());
+  Future<void> _open(Widget screen) async {
+    await push(context, screen);
     if (mounted) _load();
   }
 
@@ -194,7 +201,7 @@ class _ReferEarnCardState extends State<_ReferEarnCard> {
   Widget build(BuildContext context) {
     final w = _wallet;
     return AppCard(
-      onTap: _open,
+      onTap: () => _open(const WalletScreen()),
       padding: EdgeInsets.zero,
       child: Column(children: [
         Padding(
@@ -204,7 +211,7 @@ class _ReferEarnCardState extends State<_ReferEarnCard> {
             const SizedBox(width: 12),
             Expanded(
               child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                const Text('FitKey Coins',
+                const Text('Wallet · FitKey coins',
                     style: TextStyle(fontSize: 12, color: AppColors.text2, fontWeight: FontWeight.w700)),
                 const SizedBox(height: 2),
                 if (_loading && w == null)
@@ -221,40 +228,44 @@ class _ReferEarnCardState extends State<_ReferEarnCard> {
                 else
                   Text.rich(TextSpan(children: [
                     TextSpan(
-                        text: formatCoins(w.available),
+                        text: formatCoins(w.fitkeyCoins),
                         style: const TextStyle(fontSize: 22, fontWeight: FontWeight.w800, letterSpacing: -0.5)),
-                    const TextSpan(
-                        text: '  available',
-                        style: TextStyle(fontSize: 12.5, color: AppColors.text2, fontWeight: FontWeight.w600)),
+                    TextSpan(
+                        text: '  coins · ${w.sessionsLeft} ${w.sessionsLeft == 1 ? 'session' : 'sessions'}',
+                        style: const TextStyle(fontSize: 12.5, color: AppColors.text2, fontWeight: FontWeight.w600)),
                   ])),
               ]),
             ),
-            if (w != null && w.locked > 0)
+            if (w != null && w.referralLocked > 0)
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 6),
                 decoration: BoxDecoration(color: AppColors.amberSoft, borderRadius: BorderRadius.circular(10)),
                 child: Row(mainAxisSize: MainAxisSize.min, children: [
                   const Icon(Icons.lock_rounded, size: 13, color: AppColors.amber),
                   const SizedBox(width: 4),
-                  Text('${formatCoins(w.locked)} locked',
+                  Text('${formatCoins(w.referralLocked)} locked',
                       style: const TextStyle(color: Color(0xFFB86E00), fontWeight: FontWeight.w800, fontSize: 12)),
                 ]),
               ),
           ]),
         ),
-        if (w != null && w.locked > 0)
+        if (w != null && (w.referralCoins > 0 || w.proveitCoins > 0 || w.referralLocked > 0))
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
             child: Row(children: [
               const Icon(Icons.info_outline_rounded, size: 14, color: AppColors.text3),
               const SizedBox(width: 6),
               Expanded(
-                child: Text('${formatCoins(w.locked)} coins unlock with your first pass',
+                child: Text(
+                    'Referral ${formatCoins(w.referralCoins)}${w.referralLocked > 0 ? ' (+${formatCoins(w.referralLocked)} locked until your first pass)' : ''}'
+                    ' · ProveIt ${formatCoins(w.proveitCoins)}',
                     style: const TextStyle(fontSize: 12, color: AppColors.text2, fontWeight: FontWeight.w600)),
               ),
             ]),
           ),
-        Container(
+        Tap(
+          onTap: () => _open(const ReferEarnScreen()),
+          child: Container(
           padding: const EdgeInsets.fromLTRB(16, 12, 14, 12),
           decoration: const BoxDecoration(
             gradient: AppColors.primaryGradient,
@@ -266,12 +277,13 @@ class _ReferEarnCardState extends State<_ReferEarnCard> {
             Expanded(
               child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                 Text('Refer & Earn', style: TextStyle(color: Colors.white, fontWeight: FontWeight.w800, fontSize: 15)),
-                Text('Get 100 coins for every friend who buys a pass',
+                Text('You and your friend both get 100 coins',
                     style: TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.w500)),
               ]),
             ),
             Icon(Icons.chevron_right_rounded, color: Colors.white),
           ]),
+        ),
         ),
       ]),
     );

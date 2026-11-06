@@ -1,0 +1,7 @@
+Food ID,Food Name,Local / Other Name,Category,Type,Veg Tag,Serving Unit,Serving Weight (g),Calories per serving (kcal),Protein per serving (g),Carbs per serving (g),Fat per serving (g),Fibre per serving (g),Calories per 100 g (kcal),Protein per 100 g (g),Carbs per 100 g (g),Fat per 100 g (g),Fibre per 100 g (g),Iron per 100 g (mg),Calcium per 100 g (mg),Data Note
+TEST001,TEST Roti,TEST chapati phulka,TEST Breads,Cooked dish,Veg,1 roti,40,120,4,20,3,2,300,10,50,7.5,5,2,30,
+TEST002,TEST Egg Sandwich,TEST ande ka sandwich,TEST Sandwiches,Cooked dish,Egg,1 sandwich,150,300,15,30,12,,200,10,20,8,,1.5,60,
+TEST003,TEST Chicken Curry,,TEST Curries,Cooked dish,Non-veg,1 bowl,,250,20,8,15,1,125,10,4,7.5,0.5,1,20,
+TEST004,TEST Whole Biryani Pot,TEST biryani,TEST Rice Dishes,Cooked dish,Non-veg,1 serving,1000,1500,60,180,55,6,150,6,18,5.5,0.6,0.8,25,"Serving above 1,200 kcal - probably whole recipe"
+TEST005,TEST Wheat Flour,TEST atta,TEST Cereals,Raw ingredient,Veg,100 g,,340,12,70,2,11,340,12,70,2,11,4,40,
+TEST006,TEST Paneer Raw,TEST cottage cheese,TEST Dairy,Raw ingredient,Veg,100 g,100,265,18,1.2,21,tr,265,18,1.2,21,tr,NA,480,

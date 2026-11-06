@@ -165,7 +165,7 @@ class RatingsPage {
 enum EventFormat {
   virtual('Virtual', 'Members compete from anywhere — check-ins, running or streaks'),
   onground('On-ground', 'At your venue on the day — attendance via your front-desk QR'),
-  ai('AI-verified', 'Reps counted by the FitKey AI Arena camera');
+  ai('AI-verified', 'Reps counted by the FitKey ProveIt camera');
 
   const EventFormat(this.label, this.blurb);
   final String label;
@@ -182,7 +182,7 @@ const eventMetricLabels = <String, String>{
   'arena_reps': 'Best AI-counted set',
 };
 
-/// AI Arena exercises (ids from backend routes/arena.js).
+/// ProveIt exercises (ids from backend routes/arena.js).
 const arenaExercises = <String, String>{
   'pushups': 'Push-ups',
   'squats': 'Squats',

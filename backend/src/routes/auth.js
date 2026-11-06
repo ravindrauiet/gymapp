@@ -123,14 +123,14 @@ router.post('/otp/verify', otpLimiter, async (req, res) => {
       await notify(user.id, {
         type: 'coins_welcome',
         title: `Welcome to FITKEY! ${WELCOME_BONUS} coins added 🎁`,
-        body: 'Your welcome coins unlock with your first FitKey Pass. Invite friends to earn more.',
+        body: 'Your welcome coins activate with your first FitKey pass (coins or sessions). Invite friends to earn more.',
       });
     }
     if (referralCode) {
       try {
         const r = await withTransaction((client) => applyReferral(client, user.id, { code: referralCode, deviceId }));
-        await notifyReferralSignup(r, user.name);
-        referral = { applied: true, referrerName: r.referrerName };
+        await notifyReferralSignup(r, user.name, user.id);
+        referral = { applied: true, referrerName: r.referrerName, reward: r.reward, locked: true };
       } catch (err) {
         if (!(err instanceof HttpError)) throw err;
         referral = { applied: false, error: err.message };

@@ -34,6 +34,8 @@ import pointsRouter from './routes/points.js';
 import ratingsRouter from './routes/ratings.js';
 import walletRouter from './routes/wallet.js';
 import corporateRouter from './routes/corporate.js';
+import bookingsRouter from './routes/bookings.js';
+import membershipsRouter from './routes/memberships.js';
 
 export function createApp() {
   const app = express();
@@ -85,11 +87,13 @@ export function createApp() {
   api.use('/notifications', notificationsRouter);
   api.use('/feed', feedRouter); // FitFeed
   api.use('/events', eventsRouter); // Events (org verification, filters) — contests stay at /contests
-  api.use('/arena', arenaRouter); // AI Arena
+  api.use('/arena', arenaRouter); // ProveIt
   api.use('/circles', circlesRouter); // Circles
   api.use('/points', pointsRouter); // Trophy: overall points board
   api.use('/ratings', ratingsRouter); // Venue & trainer ratings
   api.use('/wallet', walletRouter); // Coins & Refer-and-Earn
+  api.use('/bookings', bookingsRouter); // Slot booking + visit charging
+  api.use('/memberships', membershipsRouter); // Direct centre memberships (member, partner, admin)
   // Venue owner & vendor/trainer (Partner app)
   api.use('/partner', partnerRouter);
   api.use('/partner/vendor', partnerVendorRouter);
