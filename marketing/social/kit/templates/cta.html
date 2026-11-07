@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>FITKEY · cta</title>
+<link rel="stylesheet" href="../kit.css">
+<style>
+  /* CTA — app icon, headline, in-house store button (wording from LAUNCH_STATE in kit.js), handle.
+     accent picks the colour block: primary/ember (default) | lime | mansi/purple | ink/dark.
+     visual photo:* becomes a darkened full-bleed backdrop; screen:* a phone peeking from below. */
+  .cta .main { display: flex; flex-direction: column; justify-content: center; }
+  .cta .stack { align-items: center; text-align: center; gap: 36px; }
+  .cta .eyebrow { align-self: center; }
+  .cta .h { text-align: center; }
+  .cta .body { text-align: center; max-width: 860px; }
+  .cta .appicon { position: relative; }
+  .cta .appicon .mark { box-shadow: 0 26px 50px rgba(17,18,24,.38), 0 0 60px rgba(200,243,29,.18); }
+  .cta .rings { position: absolute; left: 50%; top: 50%; width: 1500px; height: 1500px; transform: translate(-50%, -50%); z-index: 0; pointer-events: none;
+    background: repeating-radial-gradient(circle, var(--s-faint) 0 2px, transparent 2px 120px); opacity: .55;
+    -webkit-mask: radial-gradient(circle, #000 20%, transparent 60%); mask: radial-gradient(circle, #000 20%, transparent 60%); }
+  .cta .handle-row { display: inline-flex; align-items: center; gap: 14px; font-weight: 800; font-size: 30px; color: var(--s-fg); letter-spacing: -.01em; }
+  .cta .handle-row small { font-weight: 600; font-size: 24px; color: var(--s-muted); letter-spacing: .1em; text-transform: uppercase; }
+  .t-dark.cta .storebtn { background: var(--lime); color: var(--ink); box-shadow: 0 22px 50px rgba(200,243,29,.22); }
+  .t-dark.cta .storebtn .sb-ic { background: var(--ink); color: var(--lime); }
+  .cta .photo img { filter: saturate(1.05) brightness(.9); }
+  .cta .pscrim { position: absolute; inset: 0; z-index: 1; background:
+    linear-gradient(180deg, rgba(17,18,24,.74) 0%, rgba(17,18,24,.7) 40%, rgba(17,18,24,.9) 100%); }
+  .cta .peek { position: absolute; z-index: 1; left: 50%; bottom: -480px; transform: translateX(-50%) rotate(-5deg); opacity: .96; }
+  .fmt-story .cta .peek { bottom: -560px; }
+</style></head>
+<body>
+<script src="../kit.js"></script>
+<script>
+Kit.mount((s, c) => {
+  const v = Kit.parseVisual(s.visual);
+  const a = Kit.normAccent(s.accent);
+  let theme = { lime: 'lime', purple: 'mansi', mansi: 'mansi', ink: 'dark', pink: 'mansi' }[a] || 'ember';
+  if (v.kind === 'photo') theme = 'dark';
+  const icon = { post: 210, square: 160, story: 250 }[c.format];
+  const H = { post: 112, square: 84, story: 128 }[c.format];
+  const B = { post: 32, square: 28, story: 38 }[c.format];
+  // button wording follows Kit.LAUNCH_STATE ('coming' | 'live'), not the plan's cta string
+  // a phone peeking from below only when there is room (not on square, not when a story sticker needs the space)
+  const peek = false; // a peeking phone crowds the CTA and breaks the no-edge rule
+  return Kit.shell(s, c, { theme, cls: 'cta', inner: `
+    ${v.kind === 'photo' ? `${Kit.photo(v, s.focus || 'center')}<div class="pscrim"></div>` : '<div class="rings"></div>'}
+    ${peek ? `<div class="peek">${Kit.phone(v, 400)}</div>` : ''}
+    <div class="frame">
+      ${Kit.hdr(c, { right: '<span></span>' })}
+      <div class="main box" data-box="cta" style="${peek ? 'margin-bottom:300px' : ''}"><div class="stack">
+        <div class="appicon">${Kit.mark(icon)}</div>
+        ${Kit.eyebrow(s)}
+        <h2 class="h" data-fit="${H},52">${Kit.headline(s)}</h2>
+        ${s.body ? `<p class="body" data-fit="${B},22" data-order="1">${Kit.rich(s.body)}</p>` : ''}
+        ${Kit.storeBtn()}
+        <div class="handle-row"><small>Follow</small>${Kit.esc(s.handle || Kit.CFG.handle)}</div>
+      </div></div>
+      ${Kit.ftr(c)}
+    </div>` });
+}, {
+  slide: { type: 'cta', eyebrow: 'One key. Every workout.', headline: 'Find your next workout.', body: 'Gyms, pools & studios near you.', accent: 'primary', cta: 'Download on Google Play' },
+  ctx: { kind: 'carousel', index: 5, total: 6, format: 'post' },
+});
+</script>
+</body></html>

@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>FITKEY · stat-free-bullets</title>
+<link rel="stylesheet" href="../kit.css">
+<style>
+  /* STAT-FREE BULLETS — headline + icon list. Deliberately no numerals or counters. */
+  .bl .main { display: flex; flex-direction: column; justify-content: center; }
+  .bl .stack { gap: 44px; }
+  .bl .list { display: flex; flex-direction: column; font-size: 40px; }
+  .bl .li { display: flex; align-items: center; gap: .7em; padding: .62em 0; border-top: 2px solid var(--card-line); }
+  .bl .li:last-child { border-bottom: 2px solid var(--card-line); }
+  .bl .li .itile { width: 2.3em; height: 2.3em; border-radius: .7em; background: var(--tile); }
+  .bl .li .itile svg { stroke-width: 2.3; }
+  .bl .li .tx { display: flex; flex-direction: column; gap: .18em; min-width: 0; }
+  .bl .li b { font-weight: 800; letter-spacing: -.025em; line-height: 1.08; color: var(--s-fg); }
+  .bl .li span { font-weight: 500; font-size: .66em; line-height: 1.35; color: var(--s-muted); }
+  .t-dark.bl .li:first-child .itile { color: var(--ink); }
+  .bl .side-mark { position: absolute; z-index: 1; right: -150px; top: 70px; width: 520px; height: 520px; color: var(--s-faint); opacity: .55; transform: rotate(-24deg); }
+  .bl .side-mark svg { width: 100%; height: 100%; stroke-width: 1.2; }
+</style></head>
+<body>
+<script src="../kit.js"></script>
+<script>
+Kit.mount((s, c) => {
+  const v = Kit.parseVisual(s.visual);
+  const theme = Kit.THEMES.includes(s.theme) ? s.theme : 'dark';
+  const accent = Kit.accentColor(s.accent);
+  // first tile carries the slide accent (lime on dark), the rest rotate through the brand palette
+  const pal = [theme === 'dark' ? (Kit.normAccent(s.accent) === 'ember' ? '#C8F31D' : accent) : accent, '#7C5CFF', '#1BA672', '#3D7BFF', '#FF4F9A', '#FFA41B'];
+  const list = Kit.items(s.bullets).map((b, i) => `<div class="li"><div class="itile" style="--tile:${pal[i % pal.length]}${i === 0 && pal[0] === '#C8F31D' ? ';color:#1A1B25' : ''}">${Kit.icon(b.icon)}</div>
+      <div class="tx"><b>${Kit.rich(b.title)}</b>${b.text ? `<span>${Kit.rich(b.text)}</span>` : ''}</div></div>`).join('');
+  if (/\d/.test((s.bullets || []).map((b) => typeof b === 'string' ? b : `${b.title} ${b.text || ''}`).join(' ')))
+    Kit.warn('stat-free-bullets contains digits — this layout is meant to be number-free');
+  const H = { post: 96, square: 74, story: 116 }[c.format];
+  const L = { post: 40, square: 34, story: 46 }[c.format];
+  return Kit.shell(s, c, { theme: 'dark', cls: 'bl', inner: `
+    <div class="side-mark">${Kit.icon(v.kind === 'icon' ? v.name : 'key')}</div>
+    <div class="frame">
+      ${Kit.hdr(c)}
+      <div class="main box" data-box="bullets"><div class="stack">
+        ${Kit.eyebrow(s)}
+        <h2 class="h" data-fit="${H},50">${Kit.headline(s)}</h2>
+        ${s.body ? `<p class="body" data-fit="${c.format === 'story' ? 36 : 30},22" data-order="2">${Kit.rich(s.body)}</p>` : ''}
+        <div class="list" data-fit="${L},24" data-order="1" style="font-size:${L}px">${list}</div>
+      </div></div>
+      ${Kit.ftr(c)}
+    </div>` });
+}, {
+  slide: { type: 'stat-free-bullets', eyebrow: 'Why FitKey', headline: 'Everything your *fitness* needs.', bullets: ['Gyms, pools & studios|One pass, near you', 'Mansi, your AI coach|Diet and training answers, any hour', 'ProveIt|Your camera counts every clean rep', 'Your circle|Walks, yoga and laughter clubs nearby'], accent: 'ember' },
+  ctx: { kind: 'carousel', index: 3, total: 6, format: 'post' },
+});
+</script>
+</body></html>

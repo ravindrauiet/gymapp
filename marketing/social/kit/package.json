@@ -1,0 +1,13 @@
+{
+  "name": "fitkey-social-kit",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "description": "FITKEY social-media design kit + PNG renderer",
+  "scripts": {
+    "samples": "node render.mjs sample_plan.json samples"
+  },
+  "dependencies": {
+    "puppeteer-core": "^23.11.1"
+  }
+}

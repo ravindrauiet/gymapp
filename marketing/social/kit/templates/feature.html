@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>FITKEY · feature</title>
+<link rel="stylesheet" href="../kit.css">
+<style>
+  /* FEATURE — headline + body + bullets beside a phone mockup */
+  .feature .main { display: flex; gap: 52px; align-items: stretch; }
+  .feature .txt { flex: 1 1 auto; min-width: 0; justify-content: center; }
+  .feature .stack { gap: 34px; }
+  .feature .stage { flex: none; position: relative; align-self: stretch; display: flex; align-items: center; justify-content: center; }
+  .feature .blob { position: absolute; z-index: 0; border-radius: 64px; background: var(--accent);
+    left: 50%; top: 50%; transform: translate(-50%, -50%) rotate(-7deg); width: 94%; height: 62%; }
+  .t-dark.feature .blob { background: color-mix(in srgb, var(--glow) 80%, #000); }
+  .feature .blob::after { content: ""; position: absolute; inset: 0; border-radius: inherit;
+    background: radial-gradient(circle at 30% 20%, rgba(255,255,255,.35), transparent 60%); }
+  .feature .stage .phone { z-index: 2; }
+  .feature .pcard { position: relative; z-index: 2; border-radius: 40px; overflow: hidden; box-shadow: 0 30px 60px rgba(26,27,37,.25); }
+  .feature .pcard img { width: 100%; height: 100%; object-fit: cover; }
+  .feature .bigicon { position: relative; z-index: 2; display: grid; place-items: center; border-radius: 64px; background: #fff; color: var(--accent); box-shadow: 0 30px 60px rgba(26,27,37,.18); }
+  .t-dark.feature .bigicon { background: var(--ink-2); color: var(--lime); }
+
+  .fmt-post .feature .stage   { width: 404px; }
+  .fmt-square .feature .stage { width: 330px; }
+  /* story: headline full-width on top, phone + copy row below */
+  .fmt-story .feature .main { flex-direction: column; gap: 56px; }
+  .fmt-story .feature .head { flex: none; max-height: 520px; }
+  .fmt-story .feature .row { flex: 1 1 0; min-height: 0; display: flex; gap: 48px; align-items: center; }
+  .fmt-story .feature .stage { width: 400px; height: 100%; }
+  .fmt-story .feature .txt { height: 100%; }
+  /* wide: long headlines span the full width (no 5-line stacks / widows); visual sits beside the body below */
+  .wide .main { display: flex; flex-direction: column; gap: 40px; }
+  .wide .head { flex: none; }
+  .wide .row { flex: 1 1 0; min-height: 0; display: flex; gap: 52px; align-items: stretch; position: relative; }
+  .wide .txt { flex: 1 1 auto; min-width: 0; justify-content: flex-start; }
+  .wide .stage { width: 404px; order: 2; }
+  .wide.single .stage { margin-bottom: -84px; } /* single posts: footer right is empty, let the visual use it */
+  .wide .h { text-wrap: balance; }
+  /* photo card + inset phone (visual "photo:x + screen:y"): the phone overlaps the card's lower-left corner */
+  .feature .finset { position: absolute; z-index: 4; left: -170px; bottom: 120px; transform: rotate(-6deg); }
+  .feature .finset .phone { box-shadow: 0 0 0 2px rgba(255,255,255,.08) inset, 0 30px 70px rgba(17,18,24,.35); }
+</style></head>
+<body>
+<script src="../kit.js"></script>
+<script>
+Kit.mount((s, c) => {
+  const v = Kit.parseVisual(s.visual);
+  const pw = { post: 392, square: 312, story: 384 }[c.format];
+  let device;
+  if (v.kind === 'photo') device = `<div class="pcard" style="width:${pw}px;height:${Math.round(pw * 1.6)}px">${Kit.photo(v, s.focus || 'center').replace('class="photo"', 'class="photo" style="position:absolute;inset:0"')}</div>${v.inset && v.inset.kind === 'screen' ? `<div class="finset">${Kit.phone(v.inset, 220)}</div>` : ''}`;
+  else if (v.kind === 'icon') device = `<div class="bigicon" style="width:${pw}px;height:${pw}px">${Kit.icon(v.name, `style="width:52%;height:52%"`)}</div>`;
+  else device = Kit.phone(v, pw, '', true);
+  const stage = `<div class="stage"><div class="blob"></div>${device}</div>`;
+  const H = { post: 96, square: 76, story: 110 }[c.format];
+  // wide layout (see below) gives the body its own column, so it can run larger
+  const B = c.format === 'post' && String(s.headline || '').replace(/[*]/g, '').length > 28 ? 37 : { post: 32, square: 28, story: 38 }[c.format];
+  const head = `${Kit.eyebrow(s)}<h2 class="h" data-fit="${H},48">${Kit.headline(s)}</h2>`;
+  const rest = `${s.body ? `<p class="body" data-fit="${B},24" data-order="1">${Kit.rich(s.body)}</p>` : ''}
+    ${s.bullets && s.bullets.length ? `<div data-fit="${B},24" data-order="2" style="font-size:${B}px">${Kit.ticks(s.bullets).replace('class="ticks"', 'class="ticks" style="font-size:inherit"')}</div>` : ''}`;
+  const wide = c.format === 'post' && String(s.headline || '').replace(/[*]/g, '').length > 28;
+  const main = c.format === 'story' || wide
+    ? `<div class="main" style="display:flex">
+         <div class="head box" data-box="head"><div class="stack">${head}</div></div>
+         <div class="row">${stage}<div class="txt box" data-box="copy"><div class="stack">${rest}</div></div></div>
+       </div>`
+    : `<div class="main">
+         <div class="txt box" data-box="feature"><div class="stack">${head}${rest}</div></div>
+         ${stage}
+       </div>`;
+  if (wide && v.kind === 'photo') Kit.afterFit(() => {
+    const st = document.querySelector('.stage'), card = st.querySelector('.pcard');
+    card.style.height = Math.min(st.clientHeight - 20, 760) + 'px'; card.style.width = '404px';
+    const fi = st.querySelector('.finset'), body = document.querySelector('.txt .stack');
+    if (fi && body) { // tuck the inset phone under the body copy, never over it
+      const top = body.getBoundingClientRect().bottom + 44 - st.getBoundingClientRect().top;
+      fi.style.bottom = 'auto'; fi.style.top = Math.round(top) + 'px';
+    }
+  });
+  return Kit.shell(s, c, { theme: 'light', cls: 'feature' + (wide ? ' wide' + (c.kind === 'post' ? ' single' : '') : ''), inner: `<div class="frame">${Kit.hdr(c)}${main}${Kit.ftr(c)}</div>` });
+}, {
+  slide: { type: 'feature', eyebrow: 'FitKey Pass', headline: 'Walk into *any* partner gym.', body: 'Scan the QR at the desk. That’s the whole check-in.', bullets: ['Gyms, pools, yoga & MMA', 'Pay per visit or go monthly', 'No joining fees'], visual: 'screen:checkin', accent: 'ember' },
+  ctx: { kind: 'carousel', index: 1, total: 6, format: 'post' },
+});
+</script>
+</body></html>

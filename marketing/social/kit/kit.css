@@ -1,0 +1,254 @@
+/* =====================================================================
+   FITKEY social kit — shared visual system
+   Brand tokens mirror user_app/lib/ui/theme.dart (AppColors).
+   ===================================================================== */
+
+/* Plus Jakarta Sans, straight from the app bundle (relative to this file). */
+@font-face { font-family: "PJS"; font-weight: 400; src: url("../../../user_app/assets/fonts/PlusJakartaSans-Regular.ttf") format("truetype"); }
+@font-face { font-family: "PJS"; font-weight: 500; src: url("../../../user_app/assets/fonts/PlusJakartaSans-Medium.ttf") format("truetype"); }
+@font-face { font-family: "PJS"; font-weight: 600; src: url("../../../user_app/assets/fonts/PlusJakartaSans-SemiBold.ttf") format("truetype"); }
+@font-face { font-family: "PJS"; font-weight: 700; src: url("../../../user_app/assets/fonts/PlusJakartaSans-Bold.ttf") format("truetype"); }
+@font-face { font-family: "PJS"; font-weight: 800; src: url("../../../user_app/assets/fonts/PlusJakartaSans-ExtraBold.ttf") format("truetype"); }
+
+:root {
+  --ember: #FF5A36;
+  --ember-deep: #E5431F;
+  --ember-soft: #FFEEE9;
+  --ember-grad: linear-gradient(135deg, #FF7A45 0%, #FF4B2B 100%);
+  --ink: #1A1B25;
+  --ink-2: #23252F;
+  --ink-3: #111218;
+  --text2: #5C5F6E;
+  --text3: #9396A5;
+  --bg: #F5F6FA;
+  --surface: #FFFFFF;
+  --line: #E9EAF0;
+  --lime: #C8F31D;
+  --green: #1BA672;
+  --purple: #7C5CFF;
+  --pink: #FF4F9A;
+  --blue: #3D7BFF;
+  --amber: #FFA41B;
+  --teal: #14B8A6;
+  --mansi-grad: linear-gradient(135deg, #7C5CFF 0%, #FF4F9A 55%, #FF8A3D 100%);
+  --pass-grad: linear-gradient(135deg, #23252F 0%, #111218 100%);
+
+  /* geometry (overridden per format below) */
+  --W: 1080px; --H: 1350px;
+  --mx: 80px;          /* side margin */
+  --pt: 72px;          /* top padding (story: Instagram safe zone) */
+  --pb: 72px;          /* bottom padding */
+  --gap: 40px;
+  --radius: 44px;
+  --body: 34px;
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html, body { width: var(--W); height: var(--H); overflow: hidden; background: #000; }
+body { font-family: "PJS", system-ui, sans-serif; -webkit-font-smoothing: antialiased; text-rendering: geometricPrecision; font-feature-settings: "ss01" 0; }
+img { display: block; }
+
+/* ---------- formats ---------- */
+.fmt-post   { --W: 1080px; --H: 1350px; --mx: 80px; --pt: 72px;  --pb: 72px;  --body: 34px; }
+.fmt-square { --W: 1080px; --H: 1080px; --mx: 72px; --pt: 64px;  --pb: 60px;  --body: 31px; --gap: 32px; }
+.fmt-story  { --W: 1080px; --H: 1920px; --mx: 84px; --pt: 260px; --pb: 260px; --body: 38px; --gap: 48px; }
+
+/* ---------- slide + themes ---------- */
+.slide {
+  position: relative; width: var(--W); height: var(--H); overflow: hidden;
+  background: var(--s-bg); color: var(--s-fg);
+}
+.slide > .grain {
+  position: absolute; inset: 0; pointer-events: none; z-index: 50;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='240' height='240'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='3' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 .5  0 0 0 0 .5  0 0 0 0 .5  0 0 0 1.2 -.1'/></filter><rect width='100%' height='100%' filter='url(%23n)'/></svg>");
+  background-size: 240px 240px; mix-blend-mode: overlay; opacity: var(--grain, .22);
+}
+
+.t-dark  { --s-bg: var(--ink);  --s-fg: #fff; --s-muted: rgba(255,255,255,.74); --s-faint: rgba(255,255,255,.14); --hl: var(--lime); --hl-ink: var(--ink); --chip-bg: rgba(255,255,255,.08); --chip-fg: #fff; --card: rgba(255,255,255,.06); --card-line: rgba(255,255,255,.10); --accent: var(--lime); --accent-fg: var(--ink); }
+.t-light { --s-bg: var(--bg);   --s-fg: var(--ink); --s-muted: var(--text2); --s-faint: rgba(26,27,37,.10); --hl: var(--ember); --hl-ink: #fff; --chip-bg: #fff; --chip-fg: var(--ink); --card: #fff; --card-line: var(--line); --accent: var(--ember); --accent-fg: #fff; --grain: .12; }
+.t-ember { --s-bg: var(--ember); --s-fg: #fff; --s-muted: rgba(255,255,255,.88); --s-faint: rgba(255,255,255,.22); --hl: var(--ink); --hl-ink: #fff; --chip-bg: rgba(26,27,37,.16); --chip-fg: #fff; --card: rgba(255,255,255,.14); --card-line: rgba(255,255,255,.22); --accent: var(--ink); --accent-fg: var(--lime); }
+.t-lime  { --s-bg: var(--lime); --s-fg: var(--ink); --s-muted: rgba(26,27,37,.76); --s-faint: rgba(26,27,37,.14); --hl: var(--ink); --hl-ink: var(--lime); --chip-bg: rgba(26,27,37,.08); --chip-fg: var(--ink); --card: rgba(26,27,37,.06); --card-line: rgba(26,27,37,.14); --accent: var(--ink); --accent-fg: var(--lime); --grain: .16; }
+.t-mansi { --s-bg: var(--purple); --s-fg: #fff; --s-muted: rgba(255,255,255,.86); --s-faint: rgba(255,255,255,.22); --hl: var(--ink); --hl-ink: #fff; --chip-bg: rgba(26,27,37,.18); --chip-fg: #fff; --card: rgba(255,255,255,.14); --card-line: rgba(255,255,255,.24); --accent: var(--ink); --accent-fg: #fff; }
+
+/* theme backdrops: never a flat fill */
+.t-dark  .bgfx { background:
+  radial-gradient(900px 700px at 105% -5%, color-mix(in srgb, var(--glow, var(--ember)) 34%, transparent), transparent 70%),
+  radial-gradient(800px 600px at -15% 110%, color-mix(in srgb, var(--glow2, var(--purple)) 22%, transparent), transparent 70%),
+  var(--pass-grad); }
+.t-light .bgfx { background:
+  radial-gradient(760px 620px at 108% -6%, color-mix(in srgb, var(--glow, var(--ember)) 16%, transparent), transparent 70%),
+  radial-gradient(700px 520px at -10% 108%, color-mix(in srgb, var(--glow2, var(--purple)) 9%, transparent), transparent 70%),
+  var(--bg); }
+.t-ember .bgfx { background:
+  radial-gradient(900px 700px at 100% 0%, rgba(255,170,90,.55), transparent 65%),
+  radial-gradient(900px 800px at 0% 100%, rgba(200,30,20,.35), transparent 70%),
+  var(--ember-grad); }
+.t-lime  .bgfx { background:
+  radial-gradient(900px 700px at 100% 0%, rgba(255,255,255,.45), transparent 65%),
+  radial-gradient(900px 800px at 0% 100%, rgba(120,160,0,.25), transparent 70%),
+  var(--lime); }
+.t-mansi .bgfx { background:
+  radial-gradient(900px 700px at 100% 0%, rgba(255,255,255,.20), transparent 60%),
+  var(--mansi-grad); }
+.bgfx { position: absolute; inset: 0; z-index: 0; }
+
+/* ---------- frame: header / main / footer ---------- */
+.frame {
+  position: absolute; z-index: 10;
+  left: var(--mx); right: var(--mx); top: var(--pt); bottom: var(--pb);
+  display: flex; flex-direction: column;
+}
+.hdr { display: flex; align-items: center; justify-content: space-between; height: 64px; flex: none; }
+.ftr { display: flex; align-items: center; justify-content: space-between; height: 56px; flex: none; margin-top: 28px; }
+.main { flex: 1 1 auto; min-height: 0; position: relative; margin-top: 36px; }
+.fmt-story .main { margin-top: 48px; }
+
+.handle { font-weight: 700; font-size: 26px; letter-spacing: .01em; color: var(--s-muted); }
+
+/* lockup (matches BrandLockup: mark + tracked ExtraBold wordmark) */
+.lockup { display: inline-flex; align-items: center; gap: 16px; }
+.lockup .word { font-weight: 800; font-size: 31px; letter-spacing: .145em; color: var(--s-fg); line-height: 1; margin-right: -.145em; }
+/* real app icon tile: ~22% corner radius; faint lime glow on dark, soft dark shadow on light */
+.mark { display: block; flex: none; width: var(--ms); height: var(--ms); border-radius: 22%; object-fit: cover;
+  box-shadow: 0 0 0 1px rgba(200,243,29,.22), 0 0 calc(var(--ms) * .35) rgba(200,243,29,.22), 0 calc(var(--ms) * .08) calc(var(--ms) * .2) rgba(0,0,0,.35); }
+.t-light .mark, .t-lime .mark, .t-ember .mark, .t-mansi .mark { box-shadow: 0 calc(var(--ms) * .06) calc(var(--ms) * .18) rgba(17,18,24,.28), 0 1px 2px rgba(17,18,24,.2); }
+
+/* carousel dots */
+.dots { display: flex; gap: 12px; align-items: center; }
+.dots i { width: 14px; height: 14px; border-radius: 99px; background: var(--s-faint); display: block; }
+.dots i.on { width: 46px; background: var(--hl); }
+.t-light .dots i.on { background: var(--hl); }
+
+.next { width: 56px; height: 56px; border-radius: 99px; display: grid; place-items: center; background: var(--chip-bg); color: var(--s-fg); border: 2px solid var(--card-line); }
+.next svg { width: 26px; height: 26px; }
+.swipe { display: inline-flex; align-items: center; gap: 14px; height: 64px; padding: 0 30px 0 34px; border-radius: 99px; background: var(--lime); color: var(--ink); font-weight: 800; font-size: 27px; letter-spacing: .02em; box-shadow: 0 12px 30px rgba(200,243,29,.25); }
+.swipe svg { width: 28px; height: 28px; }
+
+/* ---------- type ---------- */
+.eyebrow {
+  display: inline-flex; align-items: center; gap: 14px; align-self: flex-start;
+  height: 52px; padding: 0 24px 0 20px; border-radius: 99px;
+  background: var(--chip-bg); color: var(--chip-fg); border: 2px solid var(--card-line);
+  font-weight: 800; font-size: 22px; letter-spacing: .16em; text-transform: uppercase; white-space: nowrap;
+}
+.eyebrow::before { content: ""; width: 12px; height: 12px; border-radius: 99px; background: var(--hl); box-shadow: 0 0 0 5px color-mix(in srgb, var(--hl) 22%, transparent); }
+.t-light .eyebrow { box-shadow: 0 4px 14px rgba(26,27,37,.05); }
+
+.h {
+  font-weight: 800; letter-spacing: -.045em; word-spacing: .06em; line-height: .96; color: var(--s-fg);
+  text-wrap: balance; overflow-wrap: normal; word-break: normal; hyphens: none;
+}
+.h em { font-style: normal; color: var(--hl); }
+.h .pt { margin-left: -.06em; } /* PJS punctuation carries wide side-bearings at display sizes */
+/* marker highlight variant (used on ember/lime/mansi where colour alone is weak) */
+.t-ember .h em, .t-lime .h em, .t-mansi .h em {
+  color: var(--hl-ink); padding: 0 .1em; margin: 0 .02em; border-radius: .14em;
+  /* band, not full content box, so tight leading never lets the marker cover the line above */
+  background: linear-gradient(180deg, transparent 13%, var(--hl) 13%, var(--hl) 91%, transparent 91%);
+  -webkit-box-decoration-break: clone; box-decoration-break: clone;
+}
+.body { font-weight: 500; font-size: var(--body); line-height: 1.38; color: var(--s-muted); letter-spacing: -.005em; text-wrap: pretty; }
+.body b, .body strong { color: var(--s-fg); font-weight: 700; }
+.body em { font-style: normal; color: var(--s-fg); font-weight: 700; }
+
+/* check bullets */
+.ticks { list-style: none; display: flex; flex-direction: column; gap: .62em; font-size: var(--body); }
+.ticks li { display: flex; gap: .55em; align-items: flex-start; font-weight: 700; line-height: 1.25; color: var(--s-fg); letter-spacing: -.01em; }
+.ticks li .tk { flex: none; width: 1.18em; height: 1.18em; border-radius: 99px; background: var(--accent); color: var(--accent-fg); display: grid; place-items: center; margin-top: .02em; }
+.ticks li .tk svg { width: .74em; height: .74em; }
+.t-dark .ticks li .tk { background: var(--lime); color: var(--ink); }
+
+/* stack: inner content block measured by the auto-fitter */
+.box { position: relative; display: flex; flex-direction: column; overflow: hidden; min-height: 0; }
+.stack { display: flex; flex-direction: column; gap: var(--gap); flex: none; }
+
+/* ---------- photos ---------- */
+.photo { position: absolute; inset: 0; overflow: hidden; background: var(--ink); }
+.photo img { width: 100%; height: 100%; object-fit: cover; filter: saturate(1.08) contrast(1.06); }
+
+/* ---------- phone mockup ---------- */
+.phone {
+  --pw: 400px; width: var(--pw); aspect-ratio: 9 / 19.5; position: relative; flex: none;
+  border-radius: calc(var(--pw) * .15); padding: calc(var(--pw) * .032);
+  background: linear-gradient(145deg, #3a3d4a 0%, #15161d 40%, #0b0c10 100%);
+  box-shadow:
+    0 0 0 2px rgba(255,255,255,.08) inset,
+    0 calc(var(--pw) * .09) calc(var(--pw) * .2) rgba(10,10,20,.38),
+    0 calc(var(--pw) * .02) calc(var(--pw) * .05) rgba(10,10,20,.25);
+}
+.phone::before { /* side button */
+  content: ""; position: absolute; right: calc(var(--pw) * -.008); top: 26%; width: calc(var(--pw) * .012); height: 11%;
+  background: #2a2c35; border-radius: 0 4px 4px 0;
+}
+.phone .scr { position: relative; width: 100%; height: 100%; border-radius: calc(var(--pw) * .12); overflow: hidden; background: #fff; }
+.phone .scr > img { width: 100%; height: 100%; object-fit: cover; object-position: top center; }
+/* drawn status bar; the screenshot starts below it so nothing hides under the island */
+.phone .sbar { position: absolute; z-index: 3; left: 0; right: 0; top: 0; height: calc(var(--pw) * .128); background: var(--sbar-bg, #fff); color: var(--sbar-fg, #111218);
+  display: flex; align-items: center; justify-content: space-between; padding: calc(var(--pw) * .012) calc(var(--pw) * .085) 0 calc(var(--pw) * .1); }
+.phone .sb-time { font-weight: 700; font-size: calc(var(--pw) * .041); letter-spacing: -.01em; line-height: 1; }
+.phone .sb-ic svg { display: block; width: calc(var(--pw) * .15); height: auto; }
+.phone .app { position: absolute; left: 0; right: 0; top: calc(var(--pw) * .128); bottom: 0; overflow: hidden; }
+.phone .app > img { width: 100%; height: auto; display: block; }
+.phone .app > .ph { position: absolute; inset: 0; }
+.phone .homebar { position: absolute; z-index: 4; left: 50%; bottom: calc(var(--pw) * .022); transform: translateX(-50%); width: 34%; height: calc(var(--pw) * .012); border-radius: 99px; background: rgba(17,18,24,.82); }
+.phone .island { position: absolute; z-index: 5; top: calc(var(--pw) * .028); left: 50%; transform: translateX(-50%); width: 30%; height: calc(var(--pw) * .075); border-radius: 99px; background: #0b0c10; }
+
+/* launch pill: compact store state line ("Coming soon to Google Play") */
+.lpill { display: inline-flex; align-items: center; gap: 14px; align-self: flex-start; height: 64px; padding: 0 28px 0 12px; border-radius: 99px;
+  background: var(--ink); color: #fff; font-weight: 800; font-size: 25px; letter-spacing: -.005em; white-space: nowrap; box-shadow: 0 14px 30px rgba(17,18,24,.22); }
+.lpill .lp-ic { width: 42px; height: 42px; border-radius: 99px; background: var(--lime); color: var(--ink); display: grid; place-items: center; flex: none; }
+.lpill .lp-ic svg { width: 24px; height: 24px; }
+.t-dark .lpill, .t-mansi .lpill, .t-ember .lpill { background: #fff; color: var(--ink); }
+.t-dark .lpill .lp-ic { background: var(--ink); color: var(--lime); }
+.phone .glare { position: absolute; inset: 0; z-index: 4; border-radius: inherit; pointer-events: none; background: linear-gradient(115deg, rgba(255,255,255,.16) 0%, rgba(255,255,255,0) 32%); }
+
+/* placeholder screen (when screens/<name>.png is missing) */
+.ph { position: absolute; inset: 0; background: var(--bg); font-size: calc(var(--pw) * .01); display: flex; flex-direction: column; color: var(--ink); }
+.ph .ph-top { height: 37%; background: var(--ember-grad); padding: 15em 7em 0; color: #fff; position: relative; overflow: hidden; }
+.ph .ph-top::after { content: ""; position: absolute; width: 60em; height: 60em; right: -22em; top: -26em; border-radius: 99em; background: rgba(255,255,255,.14); }
+.ph .ph-k { font-weight: 800; font-size: 3em; letter-spacing: .18em; text-transform: uppercase; opacity: .85; }
+.ph .ph-name { font-weight: 800; font-size: 8.4em; letter-spacing: -.04em; line-height: 1; margin-top: .35em; overflow-wrap: anywhere; }
+.ph .ph-body { flex: 1; padding: 6em 6em; display: flex; flex-direction: column; gap: 4.2em; margin-top: -9em; position: relative; }
+.ph .ph-card { background: #fff; border-radius: 6em; padding: 5em; box-shadow: 0 2em 6em rgba(26,27,37,.08); display: flex; gap: 4em; align-items: center; }
+.ph .ph-dot { width: 13em; height: 13em; border-radius: 4em; flex: none; }
+.ph .ph-lines { flex: 1; display: flex; flex-direction: column; gap: 2.4em; }
+.ph .ph-lines i { display: block; height: 2.8em; border-radius: 99em; background: #E9EAF0; }
+.ph .ph-lines i:first-child { width: 78%; background: #D7D9E2; }
+.ph .ph-lines i:last-child { width: 52%; }
+.ph .ph-tag { margin-top: auto; align-self: center; font-weight: 700; font-size: 2.7em; color: var(--text3); letter-spacing: .12em; text-transform: uppercase; padding-bottom: 2em; }
+
+/* glow behind floating phones */
+.glow { position: absolute; border-radius: 50%; filter: blur(70px); opacity: .55; z-index: 0; }
+
+/* floating chip */
+.chip {
+  display: inline-flex; align-items: center; gap: 16px; padding: 18px 26px 18px 18px; border-radius: 26px;
+  background: #fff; color: var(--ink); font-weight: 800; font-size: 27px; letter-spacing: -.01em; line-height: 1.15;
+  box-shadow: 0 18px 40px rgba(10,10,20,.28), 0 2px 6px rgba(10,10,20,.12); white-space: nowrap;
+}
+.chip .ic { width: 52px; height: 52px; border-radius: 16px; display: grid; place-items: center; background: var(--ember); color: #fff; flex: none; }
+.chip .ic svg { width: 30px; height: 30px; }
+
+/* icon tile */
+.itile { display: grid; place-items: center; flex: none; color: #fff; }
+.itile svg { width: 56%; height: 56%; }
+
+/* in-house store button (no third-party artwork) */
+.storebtn {
+  display: inline-flex; align-items: center; gap: 22px; height: 112px; padding: 0 48px 0 30px; border-radius: 30px;
+  background: var(--ink); color: #fff; box-shadow: 0 22px 50px rgba(26,27,37,.35);
+}
+.storebtn .sb-ic { width: 62px; height: 62px; border-radius: 18px; background: var(--lime); color: var(--ink); display: grid; place-items: center; }
+.storebtn .sb-ic svg { width: 36px; height: 36px; }
+.storebtn .sb-t { display: flex; flex-direction: column; line-height: 1.05; }
+.storebtn .sb-t small { font-weight: 600; font-size: 21px; letter-spacing: .08em; text-transform: uppercase; opacity: .7; }
+.storebtn .sb-t b { font-weight: 800; font-size: 40px; letter-spacing: -.02em; }
+
+/* stories carrying a native IG sticker (poll / link / question): keep a clear band above the bottom safe zone */
+.fmt-story.has-sticker { --pb: 520px; }
+.t-ember .h:has(em), .t-lime .h:has(em), .t-mansi .h:has(em) { line-height: 1.02 !important; }
+
+/* photo collage (visual "photo:a,b,c,d") */
+.photo.collage { display: grid; gap: 6px; background: #fff; grid-template-columns: 1fr 1fr; }
+.photo.collage.n3 > img:first-child { grid-row: span 2; }
+.photo.collage > img { width: 100%; height: 100%; object-fit: cover; min-height: 0; }

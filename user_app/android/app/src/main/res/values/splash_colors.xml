@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- FITKEY brand ink (AppColors.ink); background of the native launch screen. -->
+    <color name="fitkey_ink">#1A1B25</color>
+</resources>

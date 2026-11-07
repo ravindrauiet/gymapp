@@ -1,0 +1,110 @@
+{
+  "carousels": [
+    {
+      "id": "demo-one-pass",
+      "format": "1080x1350",
+      "slides": [
+        {
+          "type": "cover",
+          "eyebrow": "FITKEY PASS",
+          "headline": "Ab gym ka ek hi pass.",
+          "body": "Gyms, pools, yoga, dance, MMA and sports. One pass, one app, near you.",
+          "visual": "photo:gym_floor",
+          "accent": "primary",
+          "badge": "Now on Google Play",
+          "alt": "A busy gym floor with the headline 'Ab gym ka ek hi pass.'"
+        },
+        {
+          "type": "feature",
+          "eyebrow": "CHECK-IN",
+          "headline": "Book. Scan. Sweat.",
+          "body": "Pick a slot, walk in, scan the QR at the desk. That's the whole check-in.",
+          "bullets": ["Gyms, pools & studios near you", "Cancel before the slot, get it back", "Coins or sessions, your call"],
+          "visual": "screen:booking",
+          "accent": "primary",
+          "alt": "FITKEY slot-booking screen in a phone frame."
+        },
+        {
+          "type": "screenshot",
+          "eyebrow": "PROVEIT",
+          "headline": "Only real reps count.",
+          "bullets": ["Counts every clean rep", "Pauses on bad form", "Your All India Rank"],
+          "visual": "screen:proveit",
+          "accent": "lime",
+          "alt": "ProveIt camera screen counting pushups."
+        },
+        {
+          "type": "stat-free-bullets",
+          "eyebrow": "ONE APP",
+          "headline": "Everything your fitness needs.",
+          "bullets": [
+            "Gyms, pools & studios|One pass, partner venues near you",
+            "Mansi, your AI coach|Diet and training answers, any hour",
+            "ProveIt|Your camera counts the clean reps",
+            "Your circle|Park walks, yoga and laughter clubs"
+          ],
+          "visual": "icon:key",
+          "accent": "primary",
+          "alt": "List of four FITKEY features with icons."
+        },
+        {
+          "type": "vs",
+          "eyebrow": "THIS VS THAT",
+          "headline": "Same gym, same rut?",
+          "left": { "label": "The old way", "items": ["One gym, every day", "Long lock-in contracts", "Pay for the days you skip"] },
+          "right": { "label": "With FITKEY", "items": ["Gym, pool, yoga, MMA", "Coins or sessions, your pick", "Cancel a slot, get it back"] },
+          "accent": "primary",
+          "alt": "Two columns comparing a single gym membership with the FITKEY pass."
+        },
+        {
+          "type": "cta",
+          "eyebrow": "ONE KEY. EVERY WORKOUT.",
+          "headline": "Find your next workout.",
+          "body": "Gyms, pools & studios near you. Download FITKEY on Google Play.",
+          "visual": "screen:home",
+          "accent": "primary",
+          "cta": "Download on Google Play",
+          "alt": "FITKEY app icon with a Get it on Google Play button."
+        }
+      ]
+    }
+  ],
+  "posts": [
+    {
+      "id": "demo-oneliner",
+      "format": "1080x1350",
+      "type": "oneliner",
+      "eyebrow": "ONLY REAL REPS COUNT",
+      "headline": "Sweat. Unlock. Repeat.",
+      "body": "FITKEY — your key to fitness everywhere.",
+      "accent": "lime",
+      "alt": "Lime poster reading 'Sweat. Unlock. Repeat.'"
+    },
+    {
+      "id": "demo-split-square",
+      "format": "1080x1080",
+      "type": "split",
+      "eyebrow": "MIX IT UP",
+      "headline": "Monday gym. Wednesday pool.",
+      "body": "Saturday yoga, Sunday football. One pass across partner venues near you.",
+      "visual": "photo:swimming",
+      "accent": "blue",
+      "alt": "A swimmer mid-stroke beside the line 'Monday gym. Wednesday pool.'"
+    }
+  ],
+  "stories": [
+    {
+      "id": "demo-story-mansi",
+      "format": "1080x1920",
+      "type": "feature",
+      "eyebrow": "MEET MANSI",
+      "headline": "Ask your AI coach anything.",
+      "body": "Snap your thali, a label or your form. Mansi answers in seconds.",
+      "bullets": ["Indian, budget-friendly meals", "Knows your goal & targets", "An AI coach, not a doctor"],
+      "visual": "screen:mansi",
+      "accent": "purple",
+      "sticker": "question box + link sticker",
+      "alt": "Mansi AI coach chat screen in a phone frame."
+    }
+  ]
+}

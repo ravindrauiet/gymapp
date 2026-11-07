@@ -1,0 +1,110 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>FITKEY · split</title>
+<link rel="stylesheet" href="../kit.css">
+<style>
+  /* SPLIT: visual panel on top (rounded seam) + text block anchored to the bottom.
+     The text is fitted first, then the panel grows to fill everything above it, so there is never a dead band.
+     visual variants: photo:x | screen:x | icon:x | "photo:x + screen:y" (photo with inset phone)
+                      "a vs b" (two-up comparison; the slide's two bullets become the labels). Square: visual left. */
+  .split { --ph: 640px; --mh: 600px; }
+  .split .panel { position: absolute; z-index: 1; left: 0; right: 0; top: 0; height: var(--ph); overflow: hidden;
+    border-radius: 0 0 64px 64px; background: var(--ink); }
+  .split .panel .photo { border-radius: inherit; }
+  .split .panel::after { content: ""; position: absolute; inset: 0; z-index: 2; border-radius: inherit; pointer-events: none;
+    background: linear-gradient(180deg, rgba(17,18,24,.82) 0%, rgba(17,18,24,.35) 14%, rgba(17,18,24,0) 30%, rgba(17,18,24,0) 72%, rgba(17,18,24,.28) 100%); }
+  .split .panel.scr { background:
+    radial-gradient(70% 80% at 50% 100%, color-mix(in srgb, var(--glow) 70%, transparent), transparent 70%),
+    radial-gradient(60% 60% at 100% 0%, color-mix(in srgb, var(--glow) 30%, transparent), transparent 70%), var(--pass-grad); }
+  .split .panel.scr::after { background: linear-gradient(180deg, rgba(17,18,24,.5) 0%, rgba(17,18,24,0) 18%); }
+  .split .panel .phone { position: absolute; z-index: 1; left: 50%; transform: translateX(-50%) rotate(-4deg); }
+  .split .panel .bigicon { position: absolute; z-index: 1; inset: 0; display: grid; place-items: center; color: var(--lime); }
+  .split .panel .bigicon svg { width: 300px; height: 300px; }
+  .split .hdr { position: relative; z-index: 3; }
+  .split .hdr .word, .split .hdr .handle { color: #fff; text-shadow: 0 2px 12px rgba(0,0,0,.35); }
+  .split .frame { z-index: 10; }
+  .split .main { margin-top: auto; flex: none; height: var(--mh); display: flex; flex-direction: column; justify-content: flex-end; }
+  .split .stack { gap: 28px; }
+  .split .h { line-height: .98; }
+
+  /* inset phone over a photo panel */
+  .split .inset { position: absolute; z-index: 3; right: 64px; top: 150px; transform: rotate(6deg); }
+  .split .inset .phone { position: relative; left: auto; transform: none; box-shadow: 0 0 0 2px rgba(255,255,255,.1) inset, -24px 40px 80px rgba(0,0,0,.5); }
+
+  /* two-up comparison */
+  .split .pair { position: absolute; inset: 0; display: grid; grid-template-columns: 1fr 1fr; gap: 10px; background: var(--s-bg); border-radius: inherit; overflow: hidden; }
+  .split .half { position: relative; overflow: hidden; background: var(--ink); }
+  .split .half .photo { border-radius: 0; }
+  .split .half.scr { background:
+    radial-gradient(80% 70% at 50% 100%, color-mix(in srgb, var(--glow) 70%, transparent), transparent 75%), var(--pass-grad); }
+  .split .half .phone { position: absolute; left: 50%; transform: translateX(-50%) rotate(4deg); }
+  .split .half.old .photo img { filter: grayscale(.85) contrast(1.05) brightness(.8); }
+  .split .lab { position: absolute; z-index: 5; left: 50%; bottom: 44px; transform: translateX(-50%); white-space: nowrap;
+    display: inline-flex; align-items: center; gap: 12px; height: 62px; padding: 0 26px 0 12px; border-radius: 99px;
+    font-weight: 800; font-size: 25px; letter-spacing: -.01em; box-shadow: 0 14px 30px rgba(0,0,0,.35); }
+  .split .lab i { width: 40px; height: 40px; border-radius: 99px; display: grid; place-items: center; flex: none; }
+  .split .lab i svg { width: 22px; height: 22px; stroke-width: 3; }
+  .split .old .lab { background: rgba(255,255,255,.94); color: var(--ink); }
+  .split .old .lab i { background: #E9EAF0; color: var(--text2); }
+  .split .new .lab { background: var(--lime); color: var(--ink); }
+  .split .new .lab i { background: var(--ink); color: var(--lime); }
+  .split .vsb { position: absolute; z-index: 6; left: 50%; top: 50%; transform: translate(-50%, -50%) rotate(-8deg);
+    width: 116px; height: 116px; border-radius: 50%; background: var(--ember); color: #fff; display: grid; place-items: center;
+    font-weight: 800; font-size: 40px; letter-spacing: -.03em; border: 8px solid var(--s-bg); box-shadow: 0 14px 30px rgba(0,0,0,.3); }
+  .t-dark .split .pair, .t-dark.split .pair { background: var(--ink); }
+
+  /* square: side by side (legacy) */
+  .fmt-square .split .panel { right: auto; bottom: 0; width: 47%; height: auto; border-radius: 0 56px 56px 0; }
+  .fmt-square .split .frame { left: calc(47% + 60px); }
+  .fmt-square .split .hdr .word { color: var(--s-fg); text-shadow: none; }
+  .fmt-square .split .hdr .handle { display: none; }
+  .fmt-square .split .main { margin-top: 36px; height: auto; flex: 1 1 auto; justify-content: center; }
+</style></head>
+<body>
+<script src="../kit.js"></script>
+<script>
+Kit.mount((s, c) => {
+  const v = Kit.parseVisual(s.visual);
+  const sq = c.format === 'square';
+  const pw = { post: 360, square: 330, story: 420 }[c.format];
+  const phoneTop = sq ? 'top:50%;margin-top:-358px' : 'top:168px';
+  const one = (x, focus) => x.kind === 'photo' ? Kit.photo(x, focus || 'center 40%')
+    : x.kind === 'screen' ? Kit.phone(x, pw, phoneTop)
+    : `<div class="bigicon">${Kit.icon(x.name || 'key')}</div>`;
+  const labels = (s.bullets || []).slice(0, 2);
+  let panel, useBullets = s.bullets && s.bullets.length;
+  if (v.pair && !sq) {
+    const half = (x, cls, lab, ic) => `<div class="half ${cls} ${x.kind !== 'photo' ? 'scr' : ''}">${x.kind === 'screen' ? Kit.phone(x, 330, 'top:150px') : one(x, x.focus)}
+      ${lab ? `<span class="lab"><i>${Kit.icon(ic)}</i>${Kit.rich(lab)}</span>` : ''}</div>`;
+    panel = `<div class="panel"><div class="pair">${half(v.pair.left, 'old', labels[0], 'x')}${half(v.pair.right, 'new', labels[1], 'check')}<div class="vsb">VS</div></div></div>`;
+    if (labels.length === 2 && s.bullets.length === 2) useBullets = false; // the labels carry the bullets
+  } else {
+    const inset = v.inset && v.inset.kind === 'screen' && !sq ? `<div class="inset">${Kit.phone(v.inset, 300)}</div>` : '';
+    panel = `<div class="panel ${v.kind === 'photo' ? '' : 'scr'}">${one(v, s.focus)}${inset}</div>`;
+  }
+  const H = { post: 116, square: 66, story: 108 }[c.format];
+  const B = { post: 33, square: 27, story: 38 }[c.format];
+  if (!sq) Kit.afterFit(() => {
+    // shrink the text block to its content, then let the panel fill the space above it
+    const main = document.querySelector('.split .main'), stack = main.querySelector('.stack');
+    main.style.height = stack.offsetHeight + 'px';
+    const ph = Math.round(main.getBoundingClientRect().top - 60);
+    document.querySelector('.split').style.setProperty('--ph', ph + 'px');
+  });
+  return Kit.shell(s, c, { theme: 'light', cls: 'split', inner: `
+    ${panel}
+    <div class="frame">
+      ${Kit.hdr(c)}
+      <div class="main box" data-box="split"><div class="stack">
+        ${Kit.eyebrow(s)}
+        <h2 class="h" data-fit="${H},52">${Kit.headline(s)}</h2>
+        ${s.body ? `<p class="body" data-fit="${B},24" data-order="1">${Kit.rich(s.body)}</p>` : ''}
+        ${useBullets ? `<div data-fit="${B},22" data-order="2" style="font-size:${B}px">${Kit.ticks(s.bullets).replace('class="ticks"', 'class="ticks" style="font-size:inherit"')}</div>` : ''}
+      </div></div>
+      ${Kit.ftr(c)}
+    </div>` });
+}, {
+  slide: { type: 'split', eyebrow: 'Mix it up', headline: 'Monday gym. Wednesday pool.', body: 'Saturday yoga, Sunday football. One pass across partner gyms, pools & studios near you.', visual: 'photo:swimming', accent: 'blue' },
+  ctx: { kind: 'carousel', index: 2, total: 6, format: 'post' },
+});
+</script>
+</body></html>

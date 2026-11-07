@@ -19,31 +19,23 @@ Future<void> _fonts() async {
   await icons.load();
 }
 
-/// The mark: lime tile with F + key, and an ember PARTNER band. [scale] shrinks it for the adaptive safe zone.
+late ui.Image _tile;
+
+/// The mark: the real FITKEY app tile (assets/icon/app_icon_tile.png) with an ember PARTNER band.
+/// [scale] shrinks it for the adaptive safe zone.
 Widget _mark(double scale, {required bool background}) => Container(
       width: 1024,
       height: 1024,
-      color: background ? AppColors.ink : Colors.transparent,
+      color: background ? const Color(0xFF151619) : Colors.transparent,
       alignment: Alignment.center,
       child: Transform.scale(
         scale: scale,
         child: Column(mainAxisSize: MainAxisSize.min, children: [
-          Container(
-            width: 560,
-            height: 560,
-            decoration: BoxDecoration(
-              color: AppColors.lime,
-              borderRadius: BorderRadius.circular(150),
-              boxShadow: [BoxShadow(color: AppColors.lime.withValues(alpha: 0.45), blurRadius: 90)],
-            ),
-            child: const Stack(alignment: Alignment.center, children: [
-              Text('F',
-                  style: TextStyle(
-                      fontFamily: kFont, fontSize: 380, fontWeight: FontWeight.w800, color: AppColors.ink, height: 1)),
-              Positioned(right: 64, bottom: 64, child: Icon(Icons.key_rounded, size: 170, color: AppColors.ink)),
-            ]),
+          ClipRRect(
+            borderRadius: BorderRadius.circular(140),
+            child: SizedBox(width: 600, height: 600, child: RawImage(image: _tile, fit: BoxFit.cover)),
           ),
-          const SizedBox(height: 44),
+          const SizedBox(height: 40),
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 46, vertical: 14),
             decoration: BoxDecoration(color: AppColors.primary, borderRadius: BorderRadius.circular(40)),
@@ -76,6 +68,10 @@ void main() {
   testWidgets('make launcher icons', (tester) async {
     tester.view.physicalSize = const Size(1024, 1024);
     tester.view.devicePixelRatio = 1;
+    await tester.runAsync(() async {
+      final codec = await ui.instantiateImageCodec(File('assets/icon/app_icon_tile.png').readAsBytesSync());
+      _tile = (await codec.getNextFrame()).image;
+    });
     // Full icon (legacy launchers, iOS, Play Store listing).
     await _save(tester, _mark(0.82, background: true), 'assets/icon/app_icon.png');
     // Adaptive foreground: content inside the central ~60% safe zone, transparent around it.

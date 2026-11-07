@@ -1,0 +1,1006 @@
+{
+  "version": "1.0",
+  "campaign": "FITKEY launch — Ab gym ka ek hi pass",
+  "brand": {
+    "name": "FITKEY",
+    "tagline": "Your key to fitness everywhere.",
+    "campaign_line": "Ab gym ka ek hi pass.",
+    "secondary_lines": [
+      "One key. Every workout.",
+      "Sweat. Unlock. Repeat.",
+      "Only real reps count."
+    ],
+    "cta": "Download on Google Play",
+    "store_url": "https://play.google.com/store/apps/details?id=com.fitkey.fitkey_user",
+    "platform_note": "Android only. Never show an App Store badge or say 'iOS'.",
+    "voice": [
+      "Confident, warm, a little cheeky. A gym friend who hypes you up, not a guru who lectures.",
+      "Short lines. Read every headline aloud; if it needs a breath, cut it.",
+      "Hinglish only where it lands harder than English (ek hi pass, ghar ka khana, Mummy-Papa, rank dekh lo). Never force it into feature explanations.",
+      "Premium but not snobby: real Indian life — parks, societies, thalis, office leaderboards.",
+      "Show the product doing the work: camera counts reps, Mansi reads the photo, QR checks you in."
+    ],
+    "truth_rules": [
+      "No user, venue, download, rating or result numbers. Say 'gyms, pools & studios near you'.",
+      "No testimonials, reviews, press logos, celebrity or influencer names unless signed and real.",
+      "No medical claims or guaranteed weight loss. Mansi is 'an AI coach, not a doctor'.",
+      "Avoid the word 'free'. The pass is paid. Studio videos and Mansi are 'in the app'. Coin rewards are real but conditional (see refer rules).",
+      "Meal-scan values are 'AI estimates'. Say 'estimated', never 'exact'.",
+      "Never name or imply a competitor."
+    ],
+    "fact_sheet": {
+      "pass": "FitKey pass comes two ways: coins (pay per visit, each centre has its own coin cost) or sessions (a fixed number of visits at any centre within validity). Covers gyms, pools, yoga studios, dance, MMA/martial arts and sports clubs listed on FITKEY.",
+      "booking": "Book a slot, then check in by scanning the venue's QR or entering the desk code. Cancel before the slot and the coins or session come back.",
+      "proveit": "Phone camera counts pushups, squats and pullups and times planks; the plank timer pauses on bad form. Levels earn a badge + ProveIt coins the first time. Unlimited is one all-out set; your best Unlimited set is your All India Rank (Unlimited earns no coins). Only full-range reps are counted. Reps are counted on the phone; no video is recorded or uploaded (proof clips are OFF in the app; never claim them). After a set you get a branded ProveIt share card (Story 9:16 or Post 4:5) showing your set, badge and All India Rank or city rank; post it to FitFeed or share to WhatsApp, Instagram or any app. ProveIt coins are spent in the FitKey Store.",
+      "mansi": "AI fitness & diet coach. Knows your goal, daily calorie/protein targets, what you logged today and your recent check-ins. Accepts a photo: meal, nutrition label, form or equipment. Indian, budget-friendly, veg ideas. Stays on fitness/nutrition/wellness topics.",
+      "meal_scan": "Snap your plate: dishes identified, portions estimated, calories/protein/carbs/fat in seconds. Or snap a packaged-food nutrition label. Edit name/servings before saving. Barcode scan also available.",
+      "fuel_log": "Indian food database (roti, poha, dal etc.), cooked dishes, raw ingredients, packaged foods; fibre, vitamins and minerals; water tracker; daily targets from your goal.",
+      "studio": "Coach-led workout videos in the app: yoga, strength, dance, HIIT and more.",
+      "community": "Circles: local morning walks, yoga, laughter clubs in your park or society; Hindi labels, large text, voice notes, QR-poster attendance, members without a phone, family follow for streaks. FitFeed: photo posts, before/after journeys with stats & timeline, on-device face blur, blogs from verified trainers & nutritionists. Events: city, office & campus events with leaderboards; Trophy board. Gym Buddy: match with members at the same venue and time.",
+      "refer": "Share your code; when a friend signs up with it you both get referral coins (locked). They go live when the friend buys any FitKey pass. Referral coins pay up to 50% of a pass, or use them in the Store. Do not print a coin amount (it is configurable).",
+      "more": "Book verified, certified trainers (online, at home, at a partner gym). FitKey Store: whey, gear & wearables, cash on delivery, live tracking. HealthStop: clinics, sports medicine & physio, chemists near you."
+    },
+    "accents": {
+      "primary": "FITKEY brand orange/primary — pass, hero moments",
+      "lime": "ProveIt / Arena energy",
+      "purple": "Mansi / AI",
+      "green": "Food, Fuel Log, meal scan",
+      "blue": "Wallet, refer, utility",
+      "pink": "Community, Circles, FitFeed"
+    },
+    "render_notes": [
+      "Every slide carries the FITKEY wordmark small, top-left. The CTA slide carries the official 'Get it on Google Play' badge.",
+      "screen:* visuals = real app screenshots in a phone frame, no mocked data that implies user counts or ranks; use demo account names like 'FITKEY member'.",
+      "headline ≤ 7 words, body ≤ 22 words, bullets ≤ 4. Do not add copy in design.",
+      "alt is the image description for accessibility; paste it into the platform's alt-text field."
+    ]
+  },
+  "carousels": [
+    {
+      "id": "c1-one-pass",
+      "theme": "One pass for every workout",
+      "format": "1080x1350",
+      "slides": [
+        {
+          "type": "cover",
+          "eyebrow": "FITKEY PASS",
+          "headline": "Ab gym ka ek hi pass.",
+          "body": "Gyms, pools, yoga, dance, MMA and sports. One pass, one app, near you.",
+          "bullets": [],
+          "visual": "photo:gym_floor",
+          "accent": "primary",
+          "alt": "A busy gym floor with the headline 'Ab gym ka ek hi pass.' and the FITKEY logo."
+        },
+        {
+          "type": "feature",
+          "eyebrow": "MIX IT UP",
+          "headline": "Monday gym. Wednesday pool.",
+          "body": "Saturday yoga, Sunday football. Your pass works across partner gyms, pools & studios near you.",
+          "bullets": [],
+          "visual": "photo:swimming",
+          "accent": "primary",
+          "alt": "A swimmer mid-stroke in a pool, captioned 'Monday gym. Wednesday pool.'"
+        },
+        {
+          "type": "split",
+          "eyebrow": "YOUR PASS, YOUR WAY",
+          "headline": "Two ways to pay.",
+          "body": "Pick what fits how you train.",
+          "bullets": [
+            "Coins: pay per visit, any centre",
+            "Sessions: a fixed set of visits",
+            "Every centre shows its cost upfront"
+          ],
+          "visual": "screen:plans",
+          "accent": "primary",
+          "alt": "FITKEY Plans screen in a phone frame showing coin packs and session plans, next to three bullet points."
+        },
+        {
+          "type": "feature",
+          "eyebrow": "CHECK-IN",
+          "headline": "Book. Scan. Sweat.",
+          "body": "Pick a slot, walk in, scan the QR at the desk. That's the whole check-in.",
+          "bullets": [],
+          "visual": "screen:booking",
+          "accent": "primary",
+          "alt": "FITKEY slot-booking screen with time slots and a QR check-in step."
+        },
+        {
+          "type": "feature",
+          "eyebrow": "PLANS CHANGE",
+          "headline": "Can't make it? Get it back.",
+          "body": "Cancel before your slot and your coins or session return to your pass.",
+          "bullets": [],
+          "visual": "icon:refresh",
+          "accent": "primary",
+          "alt": "A circular refresh icon with the line 'Can't make it? Get it back.'"
+        },
+        {
+          "type": "cta",
+          "eyebrow": "ONE KEY. EVERY WORKOUT.",
+          "headline": "Find your next workout.",
+          "body": "Gyms, pools & studios near you. Find FITKEY on Google Play.",
+          "bullets": [],
+          "visual": "screen:home",
+          "accent": "primary",
+          "alt": "FITKEY home screen with the FITKEY Pass card, plus a 'Get it on Google Play' badge."
+        }
+      ],
+      "caption": "Ab gym ka ek hi pass. Gyms, pools, yoga, dance, MMA & sports near you — book a slot, scan, sweat. Find FITKEY on Google Play.",
+      "hashtags": [
+        "#FITKEY",
+        "#EkHiPass",
+        "#fitness",
+        "#gym",
+        "#gymlife",
+        "#fitnessmotivation",
+        "#workout",
+        "#fitnessindia",
+        "#indianfitness",
+        "#gymindia",
+        "#swimming",
+        "#yogaindia",
+        "#mma",
+        "#danceworkout",
+        "#sportsindia",
+        "#bangalorefitness",
+        "#mumbaifitness",
+        "#delhifitness",
+        "#fitnessapp",
+        "#workoutanywhere"
+      ]
+    },
+    {
+      "id": "c2-proveit",
+      "theme": "ProveIt — only real reps count",
+      "format": "1080x1350",
+      "slides": [
+        {
+          "type": "cover",
+          "eyebrow": "PROVEIT",
+          "headline": "Only real reps count.",
+          "body": "Your phone camera counts every rep. Half reps don't make our board.",
+          "bullets": [],
+          "visual": "photo:home_workout",
+          "accent": "lime",
+          "alt": "Person doing a pushup at home with a phone propped in front, headline 'Only real reps count.'"
+        },
+        {
+          "type": "feature",
+          "eyebrow": "HOW IT WORKS",
+          "headline": "Prop your phone. Go.",
+          "body": "Pushups, squats, pullups or plank. Only full reps count. Counted on your phone, nothing recorded.",
+          "bullets": [],
+          "visual": "screen:proveit_exercise",
+          "accent": "lime",
+          "alt": "ProveIt exercise screen showing a live rep counter over a camera view with pose tracking lines."
+        },
+        {
+          "type": "feature",
+          "eyebrow": "PLANK MODE",
+          "headline": "Hips drop? Timer stops.",
+          "body": "Bad form pauses the clock. Break the hold and the set ends. Brutal. Fair.",
+          "bullets": [],
+          "visual": "photo:strength",
+          "accent": "lime",
+          "alt": "Athlete holding a forearm plank, captioned 'Hips drop? Timer stops.'"
+        },
+        {
+          "type": "split",
+          "eyebrow": "PICK YOUR MODE",
+          "headline": "Levels or Unlimited?",
+          "body": "Climb step by step, or go all out once.",
+          "bullets": [
+            "Levels: hit the target, earn a badge + coins",
+            "Unlimited: one set, no target",
+            "Your best Unlimited set is your All India Rank"
+          ],
+          "visual": "screen:proveit",
+          "accent": "lime",
+          "alt": "ProveIt screen listing pushups, squats, pullups and plank with Levels and Unlimited options."
+        },
+        {
+          "type": "feature",
+          "eyebrow": "FLEX, BRANDED",
+          "headline": "Your rank. On a card.",
+          "body": "Get a ProveIt card with your set, badge and rank. Post it to FitFeed, WhatsApp or Instagram.",
+          "bullets": [],
+          "visual": "screen:proveit",
+          "accent": "lime",
+          "alt": "A branded ProveIt share card in Story and Post sizes showing a badge and an All India Rank, with FitFeed, WhatsApp and Instagram share options."
+        },
+        {
+          "type": "feature",
+          "eyebrow": "EARN IT",
+          "headline": "Real effort. Real coins.",
+          "body": "Clear a level for the first time to earn a badge and ProveIt coins for the FitKey Store.",
+          "bullets": [],
+          "visual": "icon:coin",
+          "accent": "lime",
+          "alt": "A FITKEY coin icon beside a badge, headline 'Real effort. Real coins.'"
+        },
+        {
+          "type": "cta",
+          "eyebrow": "ALL INDIA RANK",
+          "headline": "Your rank is waiting.",
+          "body": "Find FITKEY on Google Play and drop for some real reps.",
+          "bullets": [],
+          "visual": "screen:proveit",
+          "accent": "lime",
+          "alt": "ProveIt screen with an All India Rank card and a 'Get it on Google Play' badge."
+        }
+      ],
+      "caption": "Only real reps count. FITKEY's ProveIt uses your phone camera to count pushups, squats & pullups and time your plank. Get your All India Rank on Google Play.",
+      "hashtags": [
+        "#FITKEY",
+        "#ProveIt",
+        "#OnlyRealReps",
+        "#pushups",
+        "#pushupchallenge",
+        "#squats",
+        "#pullups",
+        "#plank",
+        "#plankchallenge",
+        "#homeworkout",
+        "#calisthenics",
+        "#calisthenicsindia",
+        "#fitnesschallenge",
+        "#fitnessindia",
+        "#indianfitness",
+        "#gymmotivation",
+        "#workoutmotivation",
+        "#fitness",
+        "#allindiarank",
+        "#noexcuses"
+      ]
+    },
+    {
+      "id": "c3-mansi",
+      "theme": "Meet Mansi, your AI coach",
+      "format": "1080x1350",
+      "slides": [
+        {
+          "type": "cover",
+          "eyebrow": "MEET MANSI",
+          "headline": "Your coach. In your pocket.",
+          "body": "Mansi is FITKEY's AI fitness & diet coach. She knows your goal — and what you ate today.",
+          "bullets": [],
+          "visual": "screen:mansi",
+          "accent": "purple",
+          "alt": "FITKEY's Mansi AI coach chat screen in a phone frame, headline 'Your coach. In your pocket.'"
+        },
+        {
+          "type": "stat-free-bullets",
+          "eyebrow": "SHE GETS CONTEXT",
+          "headline": "No generic advice.",
+          "body": "Every reply starts from you.",
+          "bullets": [
+            "Your goal and daily targets",
+            "Today's meals from your Fuel Log",
+            "Your check-ins this week"
+          ],
+          "visual": "icon:sparkle",
+          "accent": "purple",
+          "alt": "A sparkle icon with three bullets: your goal and targets, today's meals, your check-ins."
+        },
+        {
+          "type": "feature",
+          "eyebrow": "JUST ASK",
+          "headline": "Ask anything fitness.",
+          "body": "Workouts, food, recovery — in plain words.",
+          "bullets": [
+            "Plan my 4-day split",
+            "High-protein veg breakfast?",
+            "Fix my squat form",
+            "Help me recover better"
+          ],
+          "visual": "screen:mansi",
+          "accent": "purple",
+          "alt": "Mansi chat screen with suggested prompts like 'Plan my 4-day split' and 'Fix my squat form'."
+        },
+        {
+          "type": "feature",
+          "eyebrow": "SHOW, DON'T TYPE",
+          "headline": "Show Mansi a photo.",
+          "body": "Your meal, a nutrition label, your form or a machine at the gym. Snap it, then ask.",
+          "bullets": [],
+          "visual": "photo:indian_thali_2",
+          "accent": "purple",
+          "alt": "A plate of Indian food being photographed on a phone to send to Mansi."
+        },
+        {
+          "type": "feature",
+          "eyebrow": "DESI BY DEFAULT",
+          "headline": "Ghar ka khana? She gets it.",
+          "body": "Indian, budget-friendly, high-protein veg ideas — planned around your calorie and protein targets.",
+          "bullets": [],
+          "visual": "photo:roti_2@35% center",
+          "accent": "purple",
+          "alt": "A bowl of dal and sabzi with the headline 'Ghar ka khana? She gets it.'"
+        },
+        {
+          "type": "feature",
+          "eyebrow": "HONEST BY DESIGN",
+          "headline": "A coach, not a doctor.",
+          "body": "For pain or medical conditions, Mansi tells you to see a professional. As she should.",
+          "bullets": [],
+          "visual": "icon:shield",
+          "accent": "purple",
+          "alt": "A shield icon with the line 'A coach, not a doctor.'"
+        },
+        {
+          "type": "cta",
+          "eyebrow": "SAY HI",
+          "headline": "Ask Mansi anything.",
+          "body": "She's inside FITKEY. Find FITKEY on Google Play and send your first question.",
+          "bullets": [],
+          "visual": "screen:mansi",
+          "accent": "purple",
+          "alt": "Mansi chat screen with an 'Ask Mansi anything' box and a 'Get it on Google Play' badge."
+        }
+      ],
+      "caption": "Meet Mansi — FITKEY's AI fitness & diet coach. She knows your goal and today's meals, reads photos, and plans desi meals around your targets. On Google Play.",
+      "hashtags": [
+        "#FITKEY",
+        "#MeetMansi",
+        "#AIcoach",
+        "#fitnesscoach",
+        "#dietplan",
+        "#indiandiet",
+        "#highprotein",
+        "#vegetarianprotein",
+        "#indianfood",
+        "#healthyindianfood",
+        "#workoutplan",
+        "#gymtips",
+        "#fitnesstips",
+        "#fitnessindia",
+        "#indianfitness",
+        "#weightlossjourney",
+        "#fatlossindia",
+        "#nutritiontips",
+        "#fitness",
+        "#healthylifestyle"
+      ]
+    },
+    {
+      "id": "c4-meal-scan",
+      "theme": "Snap your thali, get your macros",
+      "format": "1080x1350",
+      "slides": [
+        {
+          "type": "cover",
+          "eyebrow": "AI MEAL SCAN",
+          "headline": "Snap your thali. Get macros.",
+          "body": "Calories, protein, carbs & fat — estimated in seconds from one photo.",
+          "bullets": [],
+          "visual": "photo:indian_thali",
+          "accent": "green",
+          "alt": "Top-down photo of an Indian thali, headline 'Snap your thali. Get macros.'"
+        },
+        {
+          "type": "feature",
+          "eyebrow": "MADE FOR INDIAN PLATES",
+          "headline": "Roti, dal, sabzi — sorted.",
+          "body": "It spots each dish on your plate and estimates the portion. No weighing scale needed.",
+          "bullets": [],
+          "visual": "screen:meal_scan",
+          "accent": "green",
+          "alt": "FITKEY meal scanner showing dishes identified on a plate with calories and protein for each."
+        },
+        {
+          "type": "feature",
+          "eyebrow": "PACKAGED SNACK?",
+          "headline": "Snap the label instead.",
+          "body": "It reads calories, protein, carbs & more straight off the pack.",
+          "bullets": [],
+          "visual": "photo:supplements",
+          "accent": "green",
+          "alt": "A phone photographing the nutrition label on a snack pack."
+        },
+        {
+          "type": "split",
+          "eyebrow": "YOU'RE IN CONTROL",
+          "headline": "Check it. Tweak it. Log it.",
+          "body": "Values are AI estimates. Fix the dish name or servings before it saves to today.",
+          "bullets": [],
+          "visual": "screen:meal_scan",
+          "accent": "green",
+          "alt": "Meal scan result card with editable food name and servings fields."
+        },
+        {
+          "type": "stat-free-bullets",
+          "eyebrow": "FUEL LOG",
+          "headline": "Your desi food diary.",
+          "body": "Search like you eat.",
+          "bullets": [
+            "Roti, poha, dal & more",
+            "Cooked dishes, raw ingredients, packs",
+            "Fibre, vitamins & minerals",
+            "Barcode scan and water tracker"
+          ],
+          "visual": "screen:fuel_log",
+          "accent": "green",
+          "alt": "FITKEY Fuel Log screen with daily calorie and protein rings and a search for Indian foods."
+        },
+        {
+          "type": "feature",
+          "eyebrow": "CONNECTED",
+          "headline": "Mansi sees your log.",
+          "body": "Ask what to eat for dinner and she plans around what you've already had today.",
+          "bullets": [],
+          "visual": "screen:mansi",
+          "accent": "green",
+          "alt": "Mansi chat suggesting a dinner idea based on today's logged meals."
+        },
+        {
+          "type": "cta",
+          "eyebrow": "KHAANA KHAO, SNAP KARO",
+          "headline": "Log your next meal fast.",
+          "body": "Find FITKEY on Google Play and scan your next plate.",
+          "bullets": [],
+          "visual": "photo:poha_or_breakfast",
+          "accent": "green",
+          "alt": "A bowl of poha next to a phone running FITKEY, with a 'Get it on Google Play' badge."
+        }
+      ],
+      "caption": "Snap your thali, get your macros. FITKEY's AI meal scan estimates calories & protein from one photo — roti, dal, poha and more. Find FITKEY on Google Play.",
+      "hashtags": [
+        "#FITKEY",
+        "#SnapYourThali",
+        "#calorietracking",
+        "#macros",
+        "#countingmacros",
+        "#proteinintake",
+        "#indianfood",
+        "#indianthali",
+        "#gharkakhana",
+        "#healthyindianfood",
+        "#indiandiet",
+        "#vegetarianprotein",
+        "#highproteinindian",
+        "#mealprep",
+        "#nutrition",
+        "#fitnessindia",
+        "#fatloss",
+        "#eatclean",
+        "#foodtracking",
+        "#desifood"
+      ]
+    },
+    {
+      "id": "c5-your-circle",
+      "theme": "Your fitness, your circle",
+      "format": "1080x1350",
+      "slides": [
+        {
+          "type": "cover",
+          "eyebrow": "COMMUNITY",
+          "headline": "Fitness hits different together.",
+          "body": "Circles, FitFeed, events and gym buddies. Your people are already moving.",
+          "bullets": [],
+          "visual": "photo:friends_workout@40% center",
+          "accent": "pink",
+          "alt": "A group fitness class laughing mid-workout, headline 'Fitness hits different together.'"
+        },
+        {
+          "type": "feature",
+          "eyebrow": "FITKEY CIRCLES",
+          "headline": "Your park. Your society. Your circle.",
+          "body": "Morning walks, yoga and laughter clubs near you. Start one and invite neighbours on WhatsApp.",
+          "bullets": [],
+          "visual": "screen:circles",
+          "accent": "pink",
+          "alt": "FITKEY Circles screen listing nearby morning walk and yoga circles sorted by distance."
+        },
+        {
+          "type": "stat-free-bullets",
+          "eyebrow": "BUILT FOR MUMMY-PAPA",
+          "headline": "Easy enough for everyone.",
+          "body": "Designed so parents and grandparents join in too.",
+          "bullets": [
+            "Hindi labels and large text",
+            "Voice notes in circle chat",
+            "Scan the park QR to mark attendance",
+            "Kids can follow parents' streaks"
+          ],
+          "visual": "photo:yoga",
+          "accent": "pink",
+          "alt": "Older adults doing morning yoga in a park, with four bullet points about ease of use."
+        },
+        {
+          "type": "feature",
+          "eyebrow": "FITFEED",
+          "headline": "Share the journey.",
+          "body": "Before/after posts with your stats and a timeline. Blur your face on-device before upload.",
+          "bullets": [],
+          "visual": "screen:fitfeed",
+          "accent": "pink",
+          "alt": "FitFeed screen showing a transformation journey post and expert tip posts."
+        },
+        {
+          "type": "feature",
+          "eyebrow": "EVENTS & TROPHY BOARD",
+          "headline": "Office vs office. Game on.",
+          "body": "City, office and campus events, each with its own leaderboard. Check in, log runs, climb.",
+          "bullets": [],
+          "visual": "photo:running",
+          "accent": "pink",
+          "alt": "Runners in a group race, headline 'Office vs office. Game on.'"
+        },
+        {
+          "type": "feature",
+          "eyebrow": "GYM BUDDY",
+          "headline": "Never train alone again.",
+          "body": "Match with members at the same venue and time. Meet at the venue, train together.",
+          "bullets": [],
+          "visual": "photo:indian_gym_2@center 30%",
+          "accent": "pink",
+          "alt": "Two gym partners on battle ropes, headline 'Never train alone again.'"
+        },
+        {
+          "type": "cta",
+          "eyebrow": "FIND YOUR PEOPLE",
+          "headline": "Find your circle.",
+          "body": "Find FITKEY on Google Play and see who's moving near you.",
+          "bullets": [],
+          "visual": "screen:circles",
+          "accent": "pink",
+          "alt": "FITKEY Circles screen with a 'Join circle' button and a 'Get it on Google Play' badge."
+        }
+      ],
+      "caption": "Your fitness, your circle. Morning-walk and yoga circles in your park, FitFeed journeys, office events and gym buddies — all on FITKEY. Find FITKEY on Google Play.",
+      "hashtags": [
+        "#FITKEY",
+        "#FitKeyCircles",
+        "#FitFeed",
+        "#fitnesscommunity",
+        "#morningwalk",
+        "#yogaindia",
+        "#laughteryoga",
+        "#seniorfitness",
+        "#familyfitness",
+        "#gymbuddy",
+        "#workoutpartner",
+        "#transformation",
+        "#fitnessjourney",
+        "#corporatefitness",
+        "#runningindia",
+        "#fitindia",
+        "#indianfitness",
+        "#fitnessindia",
+        "#communityfirst",
+        "#healthylifestyle"
+      ]
+    },
+    {
+      "id": "c6-refer-why-now",
+      "theme": "Why download now + Refer & earn",
+      "format": "1080x1350",
+      "slides": [
+        {
+          "type": "cover",
+          "eyebrow": "WHY FITKEY",
+          "headline": "Your whole fitness life. One app.",
+          "body": "Train, eat right, recover and compete — without juggling apps.",
+          "bullets": [],
+          "visual": "photo:onboarding",
+          "accent": "blue",
+          "alt": "A phone showing the FITKEY home screen, headline 'Your whole fitness life. One app.'"
+        },
+        {
+          "type": "stat-free-bullets",
+          "eyebrow": "INSIDE THE APP",
+          "headline": "Everything fitness.",
+          "body": "Open it once, you'll see.",
+          "bullets": [
+            "One pass: gyms, pools & studios",
+            "ProveIt rep challenges",
+            "Mansi AI coach + meal scan",
+            "Studio workouts for home"
+          ],
+          "visual": "screen:home",
+          "accent": "blue",
+          "alt": "FITKEY home screen grid with tiles for pass, ProveIt, Mansi, meal scan and Studio."
+        },
+        {
+          "type": "stat-free-bullets",
+          "eyebrow": "AND THEN SOME",
+          "headline": "Trainers. Store. HealthStop.",
+          "body": "The stuff around your workout, sorted.",
+          "bullets": [
+            "Certified trainers: online, home or gym",
+            "Whey, gear & wearables, cash on delivery",
+            "Physio, clinics & chemists nearby"
+          ],
+          "visual": "photo:supplements",
+          "accent": "blue",
+          "alt": "Whey tubs and gym gear, with bullets about trainers, store and HealthStop."
+        },
+        {
+          "type": "feature",
+          "eyebrow": "REFER & EARN",
+          "headline": "Bring your gym gang.",
+          "body": "Share your code. When a friend joins with it, you both get coins.",
+          "bullets": [],
+          "visual": "screen:refer",
+          "accent": "blue",
+          "alt": "FITKEY Refer & Earn screen showing a referral code with WhatsApp and Instagram share buttons."
+        },
+        {
+          "type": "split",
+          "eyebrow": "HOW THE COINS WORK",
+          "headline": "Invite. Join. Unlock.",
+          "body": "",
+          "bullets": [
+            "Share your code on WhatsApp or Instagram",
+            "Friend signs up — you both get coins",
+            "They buy a pass — coins go live",
+            "Pay up to 50% of a pass with them"
+          ],
+          "visual": "screen:wallet",
+          "accent": "blue",
+          "alt": "FITKEY wallet screen showing referral coins, beside four steps explaining how referral coins unlock."
+        },
+        {
+          "type": "cta",
+          "eyebrow": "SWEAT. UNLOCK. REPEAT.",
+          "headline": "Download. Invite. Sweat.",
+          "body": "Get FITKEY on Google Play. Gyms, pools & studios near you — and more joining.",
+          "bullets": [],
+          "visual": "photo:indian_gym",
+          "accent": "blue",
+          "alt": "Gym interior with the line 'Download. Invite. Sweat.' and a 'Get it on Google Play' badge."
+        }
+      ],
+      "caption": "Pass, ProveIt, Mansi, meal scan, Studio, trainers, store — one app. Bring your gym gang: you both get coins when they join with your code. FITKEY on Google Play.",
+      "hashtags": [
+        "#FITKEY",
+        "#ReferAndEarn",
+        "#EkHiPass",
+        "#fitnessapp",
+        "#fitness",
+        "#gym",
+        "#workout",
+        "#homeworkout",
+        "#fitnessindia",
+        "#indianfitness",
+        "#gymbuddies",
+        "#gymgang",
+        "#fitfam",
+        "#healthylifestyle",
+        "#fitnessgoals",
+        "#madeinindia",
+        "#indianapp",
+        "#androidapp",
+        "#bangalore",
+        "#workoutmotivation"
+      ]
+    }
+  ],
+  "posts": [
+    {
+      "id": "p01-ek-hi-pass",
+      "angle": "bold one-liner",
+      "format": "1080x1350",
+      "type": "cover",
+      "eyebrow": "FITKEY PASS",
+      "headline": "Ab gym ka ek hi pass.",
+      "body": "Gyms, pools, yoga, dance, MMA & sports near you. Find FITKEY on Google Play.",
+      "bullets": [],
+      "visual": "photo:indian_gym_2@center 30%",
+      "accent": "primary",
+      "alt": "A gym in warm light, headline 'Ab gym ka ek hi pass.' with a Google Play badge.",
+      "caption": "Ek pass. Gym, pool, yoga, dance, MMA, sports. Bas. FITKEY on Google Play.",
+      "hashtags": [
+        "#FITKEY",
+        "#EkHiPass",
+        "#fitness",
+        "#gym",
+        "#fitnessindia",
+        "#indianfitness",
+        "#gymlife",
+        "#workout"
+      ]
+    },
+    {
+      "id": "p02-myth-reps",
+      "angle": "myth-buster",
+      "format": "1080x1350",
+      "type": "split",
+      "eyebrow": "MYTH VS FACT",
+      "headline": "Half reps aren't reps.",
+      "body": "Myth: 50 sloppy pushups beat 20 clean ones. Fact: ProveIt only counts the clean ones.",
+      "bullets": [],
+      "visual": "photo:home_workout + screen:proveit_exercise",
+      "accent": "lime",
+      "alt": "Split image: a sloppy half pushup marked 'myth' and a full-range pushup marked 'fact'.",
+      "caption": "Ego reps don't count. Real ones do. Test yourself on ProveIt — FITKEY, Google Play.",
+      "hashtags": [
+        "#FITKEY",
+        "#ProveIt",
+        "#OnlyRealReps",
+        "#pushups",
+        "#formcheck",
+        "#calisthenics",
+        "#fitnessmyths",
+        "#fitnessindia"
+      ]
+    },
+    {
+      "id": "p03-this-vs-that-routine",
+      "angle": "this vs that",
+      "format": "1080x1350",
+      "type": "split",
+      "eyebrow": "THIS VS THAT",
+      "headline": "Same gym, same rut?",
+      "body": "Left: one gym, same routine. Right: gym Monday, pool Wednesday, yoga Saturday. One pass.",
+      "bullets": [
+        "One gym, every day",
+        "Gym · pool · yoga · MMA"
+      ],
+      "visual": "photo:gym vs photo:indian_gym,swimming,indian_yoga_park_2,martial_arts",
+      "accent": "primary",
+      "alt": "Split image comparing a single treadmill on the left with a collage of gym, pool, yoga and MMA on the right.",
+      "caption": "Boredom kills streaks. Variety saves them. One FITKEY pass, many places to train.",
+      "hashtags": [
+        "#FITKEY",
+        "#EkHiPass",
+        "#workoutvariety",
+        "#crosstraining",
+        "#gym",
+        "#swimming",
+        "#yoga",
+        "#fitnessindia"
+      ]
+    },
+    {
+      "id": "p04-meme-mummy-roti",
+      "angle": "desi meme",
+      "format": "1080x1350",
+      "type": "split",
+      "eyebrow": "EVERY INDIAN DINNER",
+      "headline": "Mummy: ek roti aur? Me: scan first.",
+      "body": "Respect the roti. Know the macros. FITKEY's meal scan, before seconds.",
+      "bullets": [],
+      "visual": "photo:roti + screen:meal_scan",
+      "accent": "green",
+      "alt": "Meme layout: a hand adding a roti to a thali captioned 'Mummy: ek roti aur?' and a phone scanning the plate captioned 'Me: scan first.'",
+      "caption": "Mummy ka pyaar unlimited. Your protein target isn't. 😄 Snap the thali first.",
+      "hashtags": [
+        "#FITKEY",
+        "#SnapYourThali",
+        "#desimemes",
+        "#indianmom",
+        "#gharkakhana",
+        "#calorietracking",
+        "#indianfood",
+        "#fitnesshumor"
+      ]
+    },
+    {
+      "id": "p05-myth-indian-food",
+      "angle": "myth-buster",
+      "format": "1080x1350",
+      "type": "split",
+      "eyebrow": "MYTH VS FACT",
+      "headline": "Indian food can't be tracked? Nope.",
+      "body": "Roti, dal, poha, sabzi — snap the plate and get estimated calories and protein.",
+      "bullets": [],
+      "visual": "photo:indian_thali_2 + screen:meal_scan",
+      "accent": "green",
+      "alt": "FITKEY meal scanner result for a plate of dal, roti and sabzi with estimated macros.",
+      "caption": "Tracking isn't only for salads. Your thali counts too.",
+      "hashtags": [
+        "#FITKEY",
+        "#indianfood",
+        "#macros",
+        "#calorietracking",
+        "#healthyindianfood",
+        "#indiandiet",
+        "#fitnessmyths",
+        "#nutrition"
+      ]
+    },
+    {
+      "id": "p06-mansi-late-night",
+      "angle": "bold one-liner",
+      "format": "1080x1350",
+      "type": "feature",
+      "eyebrow": "MEET MANSI",
+      "headline": "Midnight protein doubt? Ask Mansi.",
+      "body": "Your AI fitness & diet coach, inside FITKEY. Knows your goal and today's meals.",
+      "bullets": [],
+      "visual": "screen:mansi",
+      "accent": "purple",
+      "alt": "Mansi chat screen at night answering 'High-protein veg breakfast?'.",
+      "caption": "Kal ka breakfast plan, aaj raat ko sorted. Ask Mansi on FITKEY.",
+      "hashtags": [
+        "#FITKEY",
+        "#MeetMansi",
+        "#AIcoach",
+        "#highprotein",
+        "#vegetarianprotein",
+        "#dietplan",
+        "#fitnesstips",
+        "#fitnessindia"
+      ]
+    },
+    {
+      "id": "p07-selfie-vs-card",
+      "angle": "this vs that",
+      "format": "1080x1350",
+      "type": "split",
+      "eyebrow": "THIS VS THAT",
+      "headline": "Gym selfie vs ProveIt card.",
+      "body": "Anyone can post a mirror pic. A ProveIt card shows full reps counted by AI, plus your rank.",
+      "bullets": [
+        "Mirror selfie",
+        "ProveIt card + rank"
+      ],
+      "visual": "photo:indian_gym_2@center 25% vs screen:proveit",
+      "accent": "lime",
+      "alt": "Split image: a mirror gym selfie on the left, a branded ProveIt share card with score and All India Rank on the right.",
+      "caption": "Pics or it didn't happen? We'll do one better: reps or it didn't happen.",
+      "hashtags": [
+        "#FITKEY",
+        "#ProveIt",
+        "#gymselfie",
+        "#OnlyRealReps",
+        "#pushupchallenge",
+        "#allindiarank",
+        "#gymmotivation",
+        "#fitnessindia"
+      ]
+    },
+    {
+      "id": "p08-meme-rishtedaar",
+      "angle": "desi meme",
+      "format": "1080x1350",
+      "type": "split",
+      "eyebrow": "FAMILY FUNCTION ENERGY",
+      "headline": "Kitne pushups? Rank dekh lo.",
+      "body": "When relatives ask about your 'gym wala body', just share your All India Rank.",
+      "bullets": [],
+      "visual": "screen:proveit",
+      "accent": "lime",
+      "alt": "Meme layout: an uncle asking 'Kitne pushups maar lete ho?' and a phone showing a ProveIt All India Rank share card.",
+      "caption": "Next family function, let the rank do the talking. 😎",
+      "hashtags": [
+        "#FITKEY",
+        "#ProveIt",
+        "#desimemes",
+        "#rishtedaar",
+        "#indianfamily",
+        "#pushups",
+        "#gymhumor",
+        "#allindiarank"
+      ]
+    },
+    {
+      "id": "p09-papa-streak",
+      "angle": "emotional / community",
+      "format": "1080x1350",
+      "type": "feature",
+      "eyebrow": "FITKEY CIRCLES",
+      "headline": "Papa's morning walk has a streak now.",
+      "body": "Join a walk or yoga circle in your park. Follow your parents' streaks from anywhere.",
+      "bullets": [],
+      "visual": "photo:elders_walk_2 + screen:circles",
+      "accent": "pink",
+      "alt": "An older man on a morning walk in a park, with a streak badge overlay.",
+      "caption": "Miles away, still cheering. Follow your parents' circle streaks on FITKEY.",
+      "hashtags": [
+        "#FITKEY",
+        "#FitKeyCircles",
+        "#morningwalk",
+        "#seniorfitness",
+        "#familyfitness",
+        "#parents",
+        "#healthyageing",
+        "#yogaindia"
+      ]
+    },
+    {
+      "id": "p10-studio-home",
+      "angle": "bold one-liner",
+      "format": "1080x1350",
+      "type": "feature",
+      "eyebrow": "FITKEY STUDIO",
+      "headline": "No gym today? Studio's open.",
+      "body": "Coach-led yoga, strength, dance & HIIT videos in the app. Your home workout, coached.",
+      "bullets": [],
+      "visual": "screen:studio",
+      "accent": "primary",
+      "alt": "FITKEY Studio screen with category tiles for yoga, strength, dance and HIIT.",
+      "caption": "Rain, traffic, late meeting — no excuses left. Press play in FITKEY Studio.",
+      "hashtags": [
+        "#FITKEY",
+        "#homeworkout",
+        "#yogaathome",
+        "#hiit",
+        "#danceworkout",
+        "#workoutfromhome",
+        "#fitnessindia",
+        "#noexcuses"
+      ]
+    }
+  ],
+  "stories": [
+    {
+      "id": "s1-ek-hi-pass",
+      "format": "1080x1920",
+      "type": "cta",
+      "eyebrow": "ON GOOGLE PLAY",
+      "headline": "Ab gym ka ek hi pass.",
+      "body": "Gyms, pools, yoga, dance, MMA & sports near you. Book, scan, sweat.",
+      "bullets": [],
+      "visual": "photo:indian_gym_2@center 30%",
+      "accent": "primary",
+      "cta": "Download on Google Play",
+      "sticker": "link sticker → store_url",
+      "alt": "Vertical gym photo with 'Ab gym ka ek hi pass.' and a 'Find FITKEY on Google Play' button.",
+      "caption": "Ek hi pass. Swipe up / tap the link."
+    },
+    {
+      "id": "s2-proveit-poll",
+      "format": "1080x1920",
+      "type": "feature",
+      "eyebrow": "PROVEIT",
+      "headline": "How many real pushups?",
+      "body": "Phone camera counts. Half reps don't. Find your All India Rank.",
+      "bullets": [],
+      "visual": "screen:proveit_exercise",
+      "accent": "lime",
+      "cta": "Download on Google Play",
+      "sticker": "poll: '<10' / '10–30' / '30+' then link sticker",
+      "alt": "ProveIt rep counter screen with a poll asking how many real pushups you can do.",
+      "caption": "Be honest. Then prove it."
+    },
+    {
+      "id": "s3-mansi-ask",
+      "format": "1080x1920",
+      "type": "feature",
+      "eyebrow": "MEET MANSI",
+      "headline": "Ask Mansi anything.",
+      "body": "Your AI fitness & diet coach. She knows your goal and today's meals.",
+      "bullets": [],
+      "visual": "screen:mansi",
+      "accent": "purple",
+      "cta": "Download on Google Play",
+      "sticker": "question box: 'What would you ask your AI coach?' + link sticker",
+      "alt": "Mansi chat screen with a question-box sticker and a 'Find FITKEY on Google Play' button.",
+      "caption": "Drop your question — we'll ask Mansi in the next story."
+    },
+    {
+      "id": "s4-thali-scan",
+      "format": "1080x1920",
+      "type": "feature",
+      "eyebrow": "AI MEAL SCAN",
+      "headline": "Snap your thali.",
+      "body": "Estimated calories, protein, carbs & fat in seconds. Roti to rajma.",
+      "bullets": [],
+      "visual": "photo:indian_thali_2",
+      "accent": "green",
+      "cta": "Download on Google Play",
+      "sticker": "slider emoji 🍛 'How much do you love thali?' + link sticker",
+      "alt": "Top-down thali with scan corner marks and a 'Find FITKEY on Google Play' button.",
+      "caption": "Click. Macros. Done."
+    },
+    {
+      "id": "s5-refer-gang",
+      "format": "1080x1920",
+      "type": "cta",
+      "eyebrow": "REFER & EARN",
+      "headline": "Bring your gym gang.",
+      "body": "Share your code. They join, you both get coins. Coins go live when they buy a pass.",
+      "bullets": [],
+      "visual": "screen:refer",
+      "accent": "blue",
+      "cta": "Download on Google Play",
+      "sticker": "mention sticker 'Tag your gym buddy' + link sticker",
+      "alt": "FITKEY Refer & Earn screen with a 'Tag your gym buddy' sticker and a 'Find FITKEY on Google Play' button.",
+      "caption": "Tag the friend who always says 'kal se pakka'."
+    }
+  ]
+}

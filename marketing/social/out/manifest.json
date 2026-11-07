@@ -1,0 +1,93 @@
+[
+  {
+    "id": "c1-one-pass/01",
+    "file": "c1-one-pass/01.png",
+    "type": "cover",
+    "format": "post",
+    "warnings": []
+  },
+  {
+    "id": "c1-one-pass/02",
+    "file": "c1-one-pass/02.png",
+    "type": "feature",
+    "format": "post",
+    "warnings": []
+  },
+  {
+    "id": "c1-one-pass/03",
+    "file": "c1-one-pass/03.png",
+    "type": "split",
+    "format": "post",
+    "warnings": []
+  },
+  {
+    "id": "c1-one-pass/04",
+    "file": "c1-one-pass/04.png",
+    "type": "feature",
+    "format": "post",
+    "warnings": []
+  },
+  {
+    "id": "c1-one-pass/05",
+    "file": "c1-one-pass/05.png",
+    "type": "feature",
+    "format": "post",
+    "warnings": []
+  },
+  {
+    "id": "c1-one-pass/06",
+    "file": "c1-one-pass/06.png",
+    "type": "cta",
+    "format": "post",
+    "warnings": []
+  },
+  {
+    "id": "c3-mansi/01",
+    "file": "c3-mansi/01.png",
+    "type": "cover",
+    "format": "post",
+    "warnings": []
+  },
+  {
+    "id": "c3-mansi/02",
+    "file": "c3-mansi/02.png",
+    "type": "stat-free-bullets",
+    "format": "post",
+    "warnings": []
+  },
+  {
+    "id": "c3-mansi/03",
+    "file": "c3-mansi/03.png",
+    "type": "feature",
+    "format": "post",
+    "warnings": []
+  },
+  {
+    "id": "c3-mansi/04",
+    "file": "c3-mansi/04.png",
+    "type": "feature",
+    "format": "post",
+    "warnings": []
+  },
+  {
+    "id": "c3-mansi/05",
+    "file": "c3-mansi/05.png",
+    "type": "feature",
+    "format": "post",
+    "warnings": []
+  },
+  {
+    "id": "c3-mansi/06",
+    "file": "c3-mansi/06.png",
+    "type": "feature",
+    "format": "post",
+    "warnings": []
+  },
+  {
+    "id": "c3-mansi/07",
+    "file": "c3-mansi/07.png",
+    "type": "cta",
+    "format": "post",
+    "warnings": []
+  }
+]

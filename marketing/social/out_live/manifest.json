@@ -1,0 +1,387 @@
+[
+  {
+    "id": "c1-one-pass/01",
+    "file": "c1-one-pass/01.png",
+    "type": "cover",
+    "format": "post",
+    "warnings": []
+  },
+  {
+    "id": "c1-one-pass/02",
+    "file": "c1-one-pass/02.png",
+    "type": "feature",
+    "format": "post",
+    "warnings": []
+  },
+  {
+    "id": "c1-one-pass/03",
+    "file": "c1-one-pass/03.png",
+    "type": "split",
+    "format": "post",
+    "warnings": []
+  },
+  {
+    "id": "c1-one-pass/04",
+    "file": "c1-one-pass/04.png",
+    "type": "feature",
+    "format": "post",
+    "warnings": []
+  },
+  {
+    "id": "c1-one-pass/05",
+    "file": "c1-one-pass/05.png",
+    "type": "feature",
+    "format": "post",
+    "warnings": []
+  },
+  {
+    "id": "c1-one-pass/06",
+    "file": "c1-one-pass/06.png",
+    "type": "cta",
+    "format": "post",
+    "warnings": []
+  },
+  {
+    "id": "c2-proveit/01",
+    "file": "c2-proveit/01.png",
+    "type": "cover",
+    "format": "post",
+    "warnings": []
+  },
+  {
+    "id": "c2-proveit/02",
+    "file": "c2-proveit/02.png",
+    "type": "feature",
+    "format": "post",
+    "warnings": []
+  },
+  {
+    "id": "c2-proveit/03",
+    "file": "c2-proveit/03.png",
+    "type": "feature",
+    "format": "post",
+    "warnings": []
+  },
+  {
+    "id": "c2-proveit/04",
+    "file": "c2-proveit/04.png",
+    "type": "split",
+    "format": "post",
+    "warnings": []
+  },
+  {
+    "id": "c2-proveit/05",
+    "file": "c2-proveit/05.png",
+    "type": "feature",
+    "format": "post",
+    "warnings": []
+  },
+  {
+    "id": "c2-proveit/06",
+    "file": "c2-proveit/06.png",
+    "type": "feature",
+    "format": "post",
+    "warnings": []
+  },
+  {
+    "id": "c2-proveit/07",
+    "file": "c2-proveit/07.png",
+    "type": "cta",
+    "format": "post",
+    "warnings": []
+  },
+  {
+    "id": "c3-mansi/01",
+    "file": "c3-mansi/01.png",
+    "type": "cover",
+    "format": "post",
+    "warnings": []
+  },
+  {
+    "id": "c3-mansi/02",
+    "file": "c3-mansi/02.png",
+    "type": "stat-free-bullets",
+    "format": "post",
+    "warnings": []
+  },
+  {
+    "id": "c3-mansi/03",
+    "file": "c3-mansi/03.png",
+    "type": "feature",
+    "format": "post",
+    "warnings": []
+  },
+  {
+    "id": "c3-mansi/04",
+    "file": "c3-mansi/04.png",
+    "type": "feature",
+    "format": "post",
+    "warnings": []
+  },
+  {
+    "id": "c3-mansi/05",
+    "file": "c3-mansi/05.png",
+    "type": "feature",
+    "format": "post",
+    "warnings": []
+  },
+  {
+    "id": "c3-mansi/06",
+    "file": "c3-mansi/06.png",
+    "type": "feature",
+    "format": "post",
+    "warnings": []
+  },
+  {
+    "id": "c3-mansi/07",
+    "file": "c3-mansi/07.png",
+    "type": "cta",
+    "format": "post",
+    "warnings": []
+  },
+  {
+    "id": "c4-meal-scan/01",
+    "file": "c4-meal-scan/01.png",
+    "type": "cover",
+    "format": "post",
+    "warnings": []
+  },
+  {
+    "id": "c4-meal-scan/02",
+    "file": "c4-meal-scan/02.png",
+    "type": "feature",
+    "format": "post",
+    "warnings": []
+  },
+  {
+    "id": "c4-meal-scan/03",
+    "file": "c4-meal-scan/03.png",
+    "type": "feature",
+    "format": "post",
+    "warnings": []
+  },
+  {
+    "id": "c4-meal-scan/04",
+    "file": "c4-meal-scan/04.png",
+    "type": "split",
+    "format": "post",
+    "warnings": []
+  },
+  {
+    "id": "c4-meal-scan/05",
+    "file": "c4-meal-scan/05.png",
+    "type": "stat-free-bullets",
+    "format": "post",
+    "warnings": []
+  },
+  {
+    "id": "c4-meal-scan/06",
+    "file": "c4-meal-scan/06.png",
+    "type": "feature",
+    "format": "post",
+    "warnings": []
+  },
+  {
+    "id": "c4-meal-scan/07",
+    "file": "c4-meal-scan/07.png",
+    "type": "cta",
+    "format": "post",
+    "warnings": []
+  },
+  {
+    "id": "c5-your-circle/01",
+    "file": "c5-your-circle/01.png",
+    "type": "cover",
+    "format": "post",
+    "warnings": []
+  },
+  {
+    "id": "c5-your-circle/02",
+    "file": "c5-your-circle/02.png",
+    "type": "feature",
+    "format": "post",
+    "warnings": []
+  },
+  {
+    "id": "c5-your-circle/03",
+    "file": "c5-your-circle/03.png",
+    "type": "stat-free-bullets",
+    "format": "post",
+    "warnings": []
+  },
+  {
+    "id": "c5-your-circle/04",
+    "file": "c5-your-circle/04.png",
+    "type": "feature",
+    "format": "post",
+    "warnings": []
+  },
+  {
+    "id": "c5-your-circle/05",
+    "file": "c5-your-circle/05.png",
+    "type": "feature",
+    "format": "post",
+    "warnings": []
+  },
+  {
+    "id": "c5-your-circle/06",
+    "file": "c5-your-circle/06.png",
+    "type": "feature",
+    "format": "post",
+    "warnings": []
+  },
+  {
+    "id": "c5-your-circle/07",
+    "file": "c5-your-circle/07.png",
+    "type": "cta",
+    "format": "post",
+    "warnings": []
+  },
+  {
+    "id": "c6-refer-why-now/01",
+    "file": "c6-refer-why-now/01.png",
+    "type": "cover",
+    "format": "post",
+    "warnings": []
+  },
+  {
+    "id": "c6-refer-why-now/02",
+    "file": "c6-refer-why-now/02.png",
+    "type": "stat-free-bullets",
+    "format": "post",
+    "warnings": []
+  },
+  {
+    "id": "c6-refer-why-now/03",
+    "file": "c6-refer-why-now/03.png",
+    "type": "stat-free-bullets",
+    "format": "post",
+    "warnings": []
+  },
+  {
+    "id": "c6-refer-why-now/04",
+    "file": "c6-refer-why-now/04.png",
+    "type": "feature",
+    "format": "post",
+    "warnings": []
+  },
+  {
+    "id": "c6-refer-why-now/05",
+    "file": "c6-refer-why-now/05.png",
+    "type": "split",
+    "format": "post",
+    "warnings": []
+  },
+  {
+    "id": "c6-refer-why-now/06",
+    "file": "c6-refer-why-now/06.png",
+    "type": "cta",
+    "format": "post",
+    "warnings": []
+  },
+  {
+    "id": "posts/p01-ek-hi-pass",
+    "file": "posts/p01-ek-hi-pass.png",
+    "type": "cover",
+    "format": "post",
+    "warnings": []
+  },
+  {
+    "id": "posts/p02-myth-reps",
+    "file": "posts/p02-myth-reps.png",
+    "type": "split",
+    "format": "post",
+    "warnings": []
+  },
+  {
+    "id": "posts/p03-this-vs-that-routine",
+    "file": "posts/p03-this-vs-that-routine.png",
+    "type": "split",
+    "format": "post",
+    "warnings": []
+  },
+  {
+    "id": "posts/p04-meme-mummy-roti",
+    "file": "posts/p04-meme-mummy-roti.png",
+    "type": "split",
+    "format": "post",
+    "warnings": []
+  },
+  {
+    "id": "posts/p05-myth-indian-food",
+    "file": "posts/p05-myth-indian-food.png",
+    "type": "split",
+    "format": "post",
+    "warnings": []
+  },
+  {
+    "id": "posts/p06-mansi-late-night",
+    "file": "posts/p06-mansi-late-night.png",
+    "type": "feature",
+    "format": "post",
+    "warnings": []
+  },
+  {
+    "id": "posts/p07-selfie-vs-card",
+    "file": "posts/p07-selfie-vs-card.png",
+    "type": "split",
+    "format": "post",
+    "warnings": []
+  },
+  {
+    "id": "posts/p08-meme-rishtedaar",
+    "file": "posts/p08-meme-rishtedaar.png",
+    "type": "split",
+    "format": "post",
+    "warnings": []
+  },
+  {
+    "id": "posts/p09-papa-streak",
+    "file": "posts/p09-papa-streak.png",
+    "type": "feature",
+    "format": "post",
+    "warnings": []
+  },
+  {
+    "id": "posts/p10-studio-home",
+    "file": "posts/p10-studio-home.png",
+    "type": "feature",
+    "format": "post",
+    "warnings": []
+  },
+  {
+    "id": "stories/s1-ek-hi-pass",
+    "file": "stories/s1-ek-hi-pass.png",
+    "type": "cta",
+    "format": "story",
+    "warnings": []
+  },
+  {
+    "id": "stories/s2-proveit-poll",
+    "file": "stories/s2-proveit-poll.png",
+    "type": "feature",
+    "format": "story",
+    "warnings": []
+  },
+  {
+    "id": "stories/s3-mansi-ask",
+    "file": "stories/s3-mansi-ask.png",
+    "type": "feature",
+    "format": "story",
+    "warnings": []
+  },
+  {
+    "id": "stories/s4-thali-scan",
+    "file": "stories/s4-thali-scan.png",
+    "type": "feature",
+    "format": "story",
+    "warnings": []
+  },
+  {
+    "id": "stories/s5-refer-gang",
+    "file": "stories/s5-refer-gang.png",
+    "type": "cta",
+    "format": "story",
+    "warnings": []
+  }
+]

@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../ui/ui.dart';
 
-/// FITKEY "F + key" monogram on the brand lime tile.
+/// The FITKEY app icon (neon F-key on a dark tile), used wherever the brand mark appears.
 class BrandMark extends StatelessWidget {
   const BrandMark({super.key, this.size = 40});
   final double size;
@@ -13,18 +13,13 @@ class BrandMark extends StatelessWidget {
       width: size,
       height: size,
       decoration: BoxDecoration(
-        color: AppColors.lime,
-        borderRadius: BorderRadius.circular(size * 0.3),
-        boxShadow: [BoxShadow(color: AppColors.lime.withValues(alpha: 0.35), blurRadius: size * 0.4, offset: Offset(0, size * 0.1))],
+        borderRadius: BorderRadius.circular(size * 0.24),
+        boxShadow: [BoxShadow(color: AppColors.lime.withValues(alpha: 0.28), blurRadius: size * 0.35, offset: Offset(0, size * 0.08))],
       ),
-      child: Stack(alignment: Alignment.center, children: [
-        Text('F', style: TextStyle(fontSize: size * 0.6, fontWeight: FontWeight.w800, color: AppColors.ink, height: 1)),
-        Positioned(
-          right: size * 0.13,
-          bottom: size * 0.13,
-          child: Icon(Icons.key_rounded, size: size * 0.3, color: AppColors.ink),
-        ),
-      ]),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(size * 0.24),
+        child: Image.asset('assets/icon/app_icon_tile.png', width: size, height: size, fit: BoxFit.cover),
+      ),
     );
   }
 }

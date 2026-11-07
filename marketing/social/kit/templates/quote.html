@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>FITKEY · quote / oneliner</title>
+<link rel="stylesheet" href="../kit.css">
+<style>
+  /* QUOTE / ONELINER — giant type poster on a colour block.
+     accent → block: lime (default) | primary/ember | mansi/purple | ink/dark | light */
+  .q .main { display: flex; flex-direction: column; justify-content: center; }
+  .q .stack { gap: 44px; }
+  .q .h { line-height: .9; letter-spacing: -.055em; }
+  .q .qmark { width: 150px; height: 120px; color: var(--hl); flex: none; }
+  .t-lime.q .qmark, .t-ember.q .qmark, .t-mansi.q .qmark { color: var(--ink); }
+  .q .qattr { display: flex; align-items: center; gap: 22px; font-weight: 700; font-size: var(--body); color: var(--s-muted); line-height: 1.3; }
+  .q .qattr::before { content: ""; width: 64px; height: 5px; border-radius: 9px; background: currentColor; flex: none; }
+  .q .giant { position: absolute; z-index: 1; right: -60px; bottom: -150px; font-weight: 800; font-size: 820px; line-height: 1; color: transparent; -webkit-text-stroke: 3px var(--s-faint); pointer-events: none; }
+</style></head>
+<body>
+<script src="../kit.js"></script>
+<script>
+Kit.mount((s, c) => {
+  const a = Kit.normAccent(s.accent);
+  const theme = Kit.THEMES.includes(s.theme) ? s.theme
+    : ({ lime: 'lime', ember: 'ember', purple: 'mansi', mansi: 'mansi', pink: 'mansi', ink: 'dark' }[a] || 'lime');
+  const isQuote = String(s.type).toLowerCase() === 'quote';
+  const H = { post: 200, square: 160, story: 210 }[c.format];
+  // stack short multi-sentence lines one per row ("Sweat. / Unlock. / Repeat.") unless the copy sets its own breaks
+  const hs = String(s.headline || '');
+  const parts = hs.match(/[^.!?]+[.!?]+\s*/g);
+  const head = !/\n|\\n/.test(hs) && parts && parts.length > 1 && parts.length <= 4 && parts.join('').trim() === hs.trim() && parts.every((p) => p.trim().split(/\s+/).length <= 3)
+    ? Kit.headline(s).replace(/([.!?](?:<\/span>)?)(<\/em>)?\s+(?=\S)/g, '$1$2<br>') : Kit.headline(s);
+  const qmark = `<svg class="qmark" viewBox="0 0 150 120" fill="currentColor"><path d="M0 120V70C0 30 22 6 62 0l8 20C46 28 36 42 35 62h30v58zM80 120V70c0-40 22-64 62-70l8 20c-24 8-34 22-35 42h30v58z"/></svg>`;
+  return Kit.shell(s, c, { theme, cls: 'q', inner: `
+    <div class="giant">${isQuote ? '”' : 'F'}</div>
+    <div class="frame">
+      ${Kit.hdr(c)}
+      <div class="main box" data-box="quote"><div class="stack">
+        ${isQuote ? qmark : Kit.eyebrow(s)}
+        <h2 class="h" data-fit="${H},60">${head}</h2>
+        ${s.body ? `<p class="qattr" data-fit="${c.format === 'story' ? 38 : 32},22" data-order="1">${Kit.rich(s.body)}</p>` : ''}
+      </div></div>
+      ${Kit.ftr(c)}
+    </div>` });
+}, {
+  slide: { type: 'oneliner', eyebrow: 'Only real reps count', headline: 'Sweat. Unlock. *Repeat.*', body: 'FITKEY — your key to fitness everywhere.', accent: 'lime' },
+  ctx: { kind: 'post', index: 0, total: 1, format: 'post' },
+});
+</script>
+</body></html>

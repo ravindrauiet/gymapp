@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>FITKEY · screenshot</title>
+<link rel="stylesheet" href="../kit.css">
+<style>
+  /* SCREENSHOT — short headline + a big tilted phone rising out of a glowing stage card */
+  .shot .main { display: flex; flex-direction: column; gap: 40px; }
+  .shot .head { flex: none; max-height: 330px; }
+  .fmt-story .shot .head { max-height: 420px; }
+  .fmt-square .shot .head { max-height: 220px; }
+  .shot .stack { gap: 26px; }
+  .shot .stage { position: relative; flex: 1 1 auto; min-height: 0; border-radius: 52px; overflow: hidden;
+    background:
+      radial-gradient(60% 55% at 50% 42%, color-mix(in srgb, var(--glow) 85%, white 0%), transparent 72%),
+      linear-gradient(160deg, color-mix(in srgb, var(--glow) 55%, #23252F) 0%, #15161d 100%);
+    box-shadow: inset 0 0 0 2px rgba(255,255,255,.08); }
+  .t-light .shot .stage { box-shadow: 0 30px 60px rgba(26,27,37,.18); }
+  .shot .rings { position: absolute; left: 50%; top: 46%; width: 1300px; height: 1300px; transform: translate(-50%, -50%);
+    background: repeating-radial-gradient(circle, rgba(255,255,255,.07) 0 2px, transparent 2px 110px); }
+  .shot .stage .phone { position: absolute; left: 50%; top: 72px; transform: translateX(-50%) rotate(-7deg); z-index: 2;
+    box-shadow: 0 0 0 2px rgba(255,255,255,.08) inset, -30px 50px 90px rgba(0,0,0,.55); }
+  .shot .chips { position: absolute; inset: 0; z-index: 3; }
+  .shot .chip { position: absolute; }
+  .shot .chip:nth-child(1) { left: 36px; top: 30%; transform: rotate(-3deg); }
+  .shot .chip:nth-child(2) { right: 36px; top: 52%; transform: rotate(3deg); }
+  .shot .chip:nth-child(3) { left: 56px; top: 74%; transform: rotate(-2deg); }
+  .fmt-square .shot .chip:nth-child(3) { display: none; }
+  .shot .chip .ic { background: var(--chip-ic, var(--ember)); }
+  .t-dark .shot .chip .ic { color: #fff; }
+</style></head>
+<body>
+<script src="../kit.js"></script>
+<script>
+Kit.mount((s, c) => {
+  const v = Kit.parseVisual(s.visual);
+  const pw = { post: 470, square: 420, story: 560 }[c.format];
+  const H = { post: 104, square: 76, story: 124 }[c.format];
+  const icColors = ['#FF5A36', '#7C5CFF', '#1BA672'];
+  const chips = Kit.items(s.bullets).slice(0, 3).map((b, i) =>
+    `<div class="chip" style="--chip-ic:${icColors[i]}"><span class="ic">${Kit.icon(b.icon)}</span>${Kit.esc(b.title)}</div>`).join('');
+  return Kit.shell(s, c, { theme: 'dark', cls: 'shot', inner: `
+    <div class="frame">
+      ${Kit.hdr(c)}
+      <div class="main">
+        <div class="head box" data-box="head"><div class="stack">
+          ${Kit.eyebrow(s)}
+          <h2 class="h" data-fit="${H},52">${Kit.headline(s)}</h2>
+          ${s.body ? `<p class="body" data-fit="${c.format === 'story' ? 36 : 30},22" data-order="1">${Kit.rich(s.body)}</p>` : ''}
+        </div></div>
+        <div class="stage"><div class="rings"></div>${Kit.phone(v.kind === 'screen' ? v : { kind: 'none', name: v.name }, pw)}<div class="chips">${chips}</div></div>
+      </div>
+      ${Kit.ftr(c)}
+    </div>` });
+}, {
+  slide: { type: 'screenshot', eyebrow: 'ProveIt', headline: 'Only *real reps* count.', bullets: ['Counts pushups', 'Pauses on bad form', 'All India Rank'], visual: 'screen:proveit', accent: 'ember' },
+  ctx: { kind: 'carousel', index: 3, total: 6, format: 'post' },
+});
+</script>
+</body></html>

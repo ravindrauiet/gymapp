@@ -167,9 +167,10 @@ class _FitKeyCoinsCard extends StatelessWidget {
               ])),
             ]),
           ),
+          // Wide enough for the label: with an icon at 104px it rendered as "T…".
           SizedBox(
-            width: 104,
-            child: AppButton(label: 'Top up', icon: Icons.add_rounded, height: 42, onPressed: onTopUp),
+            width: 128,
+            child: AppButton(label: 'Top up', height: 42, onPressed: onTopUp),
           ),
         ]),
         const SizedBox(height: 10),
@@ -211,10 +212,9 @@ class _SessionsCard extends StatelessWidget {
             ]),
           ),
           SizedBox(
-            width: 104,
+            width: 128,
             child: AppButton(
               label: w.sessionsLeft > 0 ? 'Renew' : 'Get plan',
-              icon: Icons.autorenew_rounded,
               height: 42,
               color: AppColors.ink,
               onPressed: onRenew,

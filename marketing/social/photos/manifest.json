@@ -1,0 +1,17 @@
+{
+  "indian_thali":        { "file": "indian_thali.jpg",        "id": "1589778655375-3e622a9fc91c", "description": "Overhead North Indian thali with katoris, jeera rice, raita, halwa, papad and a basket of rotis on red cloth (one bowl looks non-veg)", "orientation": "landscape" },
+  "indian_thali_2":      { "file": "indian_thali_2.jpg",      "id": "1680993032090-1ef7ea9b51e5", "description": "Steel oval thali: rice, dal makhani, two rotis, sabzi, sambar, pickle, gulab jamun", "orientation": "landscape" },
+  "roti":                { "file": "roti.jpg",                "id": "1780907084874-14d202d39bf1", "description": "Roti cooking on a black tawa with steam", "orientation": "landscape" },
+  "roti_2":              { "file": "roti_2.jpg",              "id": "1576846806147-8065a16f89b0", "description": "Home-style steel plate with folded chapatis, palak and carrot sabzi, katori of dal", "orientation": "landscape" },
+  "poha_or_breakfast":   { "file": "poha_or_breakfast.jpg",   "id": "1789991184412-c29c9dfa2b39", "description": "Kanda poha with peanuts and green chillies on a steel plate with lemon", "orientation": "portrait" },
+  "poha_or_breakfast_2": { "file": "poha_or_breakfast_2.jpg", "id": "1741376509166-cbd74b608f5a", "description": "Idli, sambar, chutney and filter coffee on a banana leaf", "orientation": "landscape" },
+  "indian_gym":          { "file": "indian_gym.jpg",          "id": "1630065612426-e03d3fec7348", "description": "Sikh man training on a shoulder-press machine", "orientation": "landscape" },
+  "indian_gym_2":        { "file": "indian_gym_2.jpg",        "id": "1583500178689-665d1f77e67d", "description": "Indian man doing battle ropes in a gym, facing camera", "orientation": "portrait" },
+  "indian_yoga_park":    { "file": "indian_yoga_park.jpg",    "id": "1606367199370-4852f9506648", "description": "Three men on a foggy morning walk on Rajpath/Kartavya Path, New Delhi", "orientation": "portrait" },
+  "indian_yoga_park_2":  { "file": "indian_yoga_park_2.jpg",  "id": "1734873476398-987eabfaaa0e", "description": "Indian man doing cobra pose on a mat in a lakeside park", "orientation": "portrait" },
+  "elders_walk":         { "file": "elders_walk.jpg",         "id": "1765572144382-d6021cd1f564", "description": "Two elderly Rajasthani men in turbans walking on a village road", "orientation": "landscape" },
+  "elders_walk_2":       { "file": "elders_walk_2.jpg",       "id": "1643204785847-f37c6a9d803d", "description": "Elderly South Indian man in lungi walking along a green road, seen from behind", "orientation": "portrait" },
+  "friends_workout":     { "file": "friends_workout.jpg",     "id": "1654764746264-e7cf2af29c7b", "description": "Indian woman and man resting on mats in a group fitness class", "orientation": "landscape" },
+  "phone_fitness":       { "file": "phone_fitness.jpg",       "id": "1727432806019-99527daa45f7", "description": "Phone on a gym bench showing a workout-logging screen (third-party UI, no brand; good for screen replacement)", "orientation": "portrait" },
+  "phone_fitness_2":     { "file": "phone_fitness_2.jpg",     "id": "1599655091501-14aad7de285a", "description": "B&W: Indian woman in activewear using her phone outdoors (wears a face mask)", "orientation": "portrait" }
+}

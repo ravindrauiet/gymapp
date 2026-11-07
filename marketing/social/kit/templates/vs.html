@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>FITKEY · vs</title>
+<link rel="stylesheet" href="../kit.css">
+<style>
+  /* VS — this vs that. Data: left:{label,items[]}, right:{label,items[]}
+     or bullets ["old || new", ...] (labels default "The old way" / "With FITKEY"). */
+  .vs .main { display: flex; flex-direction: column; justify-content: center; }
+  .vs .stack { gap: 40px; }
+  .vs .cols { position: relative; display: grid; grid-template-columns: 1fr 1fr; gap: 22px; font-size: 32px; }
+  .vs .vs-col { border-radius: 40px; padding: 1.15em 1em 1.2em; display: flex; flex-direction: column; gap: .9em; }
+  .vs .vs-col.old { background: var(--card); border: 2px solid var(--card-line); }
+  .vs .vs-col.new { background: var(--pass-grad); color: #fff; box-shadow: 0 30px 60px rgba(26,27,37,.28); }
+  .t-dark.vs .vs-col.new { background: var(--lime); color: var(--ink); }
+  .vs .lab { align-self: flex-start; font-weight: 800; font-size: .7em; letter-spacing: .14em; text-transform: uppercase; padding: .55em .9em; border-radius: 99px; }
+  .vs .old .lab { background: var(--s-faint); color: var(--s-muted); }
+  .vs .new .lab { background: var(--lime); color: var(--ink); }
+  .t-dark.vs .new .lab { background: var(--ink); color: var(--lime); }
+  .vs ul { list-style: none; display: flex; flex-direction: column; gap: .8em; }
+  .vs li { display: flex; gap: .5em; align-items: flex-start; font-weight: 700; line-height: 1.22; letter-spacing: -.01em; }
+  .vs .old li { color: var(--s-muted); font-weight: 600; }
+  .vs li i { flex: none; width: 1.1em; height: 1.1em; border-radius: 99px; display: grid; place-items: center; margin-top: .04em; }
+  .vs li i svg { width: .66em; height: .66em; stroke-width: 3; }
+  .vs .old li i { background: var(--s-faint); color: var(--s-muted); }
+  .vs .new li i { background: var(--lime); color: var(--ink); }
+  .t-dark.vs .new li i { background: var(--ink); color: var(--lime); }
+  .vs .badge { position: absolute; left: 50%; top: 1.1em; transform: translate(-50%, -14%) rotate(-8deg); z-index: 3;
+    width: 112px; height: 112px; border-radius: 50%; background: var(--ember); color: #fff; display: grid; place-items: center;
+    font-weight: 800; font-size: 40px; letter-spacing: -.03em; border: 8px solid var(--s-bg); box-shadow: 0 14px 30px rgba(255,90,54,.35); }
+</style></head>
+<body>
+<script src="../kit.js"></script>
+<script>
+Kit.mount((s, c) => {
+  let left = s.left, right = s.right;
+  if (!left || !right) {
+    const pairs = (s.bullets || []).map((b) => String(b).split(/\s*\|\|\s*|\s+vs\.?\s+/i));
+    left = { label: 'The old way', items: pairs.map((p) => p[0]).filter(Boolean) };
+    right = { label: 'With FITKEY', items: pairs.map((p) => p[1] || '').filter(Boolean) };
+  }
+  const li = (arr, ic) => (arr.items || []).map((t) => `<li><i>${Kit.icon(ic)}</i><span>${Kit.rich(t)}</span></li>`).join('');
+  const H = { post: 92, square: 70, story: 112 }[c.format];
+  const L = { post: 38, square: 30, story: 44 }[c.format];
+  return Kit.shell(s, c, { theme: 'light', cls: 'vs', inner: `
+    <div class="frame">
+      ${Kit.hdr(c)}
+      <div class="main box" data-box="vs"><div class="stack">
+        ${Kit.eyebrow(s)}
+        <h2 class="h" data-fit="${H},50">${Kit.headline(s)}</h2>
+        ${s.body ? `<p class="body" data-fit="${L},22" data-order="2">${Kit.rich(s.body)}</p>` : ''}
+        <div class="cols" data-fit="${L},20" data-order="1" style="font-size:${L}px">
+          <div class="vs-col old"><span class="lab">${Kit.esc(left.label || 'Before')}</span><ul>${li(left, 'x')}</ul></div>
+          <div class="vs-col new"><span class="lab">${Kit.esc(right.label || 'With FITKEY')}</span><ul>${li(right, 'check')}</ul></div>
+          <div class="badge">VS</div>
+        </div>
+      </div></div>
+      ${Kit.ftr(c)}
+    </div>` });
+}, {
+  slide: { type: 'vs', eyebrow: 'This vs that', headline: 'Same gym, *same rut?*', bullets: ['One gym, every day || Gym, pool, yoga, MMA', 'Annual lock-in || Pay per visit or sessions', 'Pay for days you skip || Cancel a slot, get it back'] },
+  ctx: { kind: 'carousel', index: 4, total: 6, format: 'post' },
+});
+</script>
+</body></html>

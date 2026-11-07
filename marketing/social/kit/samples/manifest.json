@@ -1,0 +1,65 @@
+[
+  {
+    "id": "demo-one-pass/01",
+    "file": "demo-one-pass/01.png",
+    "type": "cover",
+    "format": "post",
+    "warnings": []
+  },
+  {
+    "id": "demo-one-pass/02",
+    "file": "demo-one-pass/02.png",
+    "type": "feature",
+    "format": "post",
+    "warnings": []
+  },
+  {
+    "id": "demo-one-pass/03",
+    "file": "demo-one-pass/03.png",
+    "type": "screenshot",
+    "format": "post",
+    "warnings": []
+  },
+  {
+    "id": "demo-one-pass/04",
+    "file": "demo-one-pass/04.png",
+    "type": "stat-free-bullets",
+    "format": "post",
+    "warnings": []
+  },
+  {
+    "id": "demo-one-pass/05",
+    "file": "demo-one-pass/05.png",
+    "type": "vs",
+    "format": "post",
+    "warnings": []
+  },
+  {
+    "id": "demo-one-pass/06",
+    "file": "demo-one-pass/06.png",
+    "type": "cta",
+    "format": "post",
+    "warnings": []
+  },
+  {
+    "id": "posts/demo-oneliner",
+    "file": "posts/demo-oneliner.png",
+    "type": "oneliner",
+    "format": "post",
+    "warnings": []
+  },
+  {
+    "id": "posts/demo-split-square",
+    "file": "posts/demo-split-square.png",
+    "type": "split",
+    "format": "square",
+    "warnings": []
+  },
+  {
+    "id": "stories/demo-story-mansi",
+    "file": "stories/demo-story-mansi.png",
+    "type": "feature",
+    "format": "story",
+    "warnings": []
+  }
+]

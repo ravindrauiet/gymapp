@@ -8,6 +8,7 @@ import '../../data/booking_api.dart';
 import '../../data/models.dart';
 import '../../state/session.dart';
 import '../../ui/ui.dart';
+import '../../widgets/brand.dart';
 import '../../widgets/rating_widgets.dart';
 import '../../widgets/venue_card.dart' show isOpenNow;
 import '../booking/book_slot_screen.dart';
@@ -487,12 +488,7 @@ class _Body extends StatelessWidget {
               child: AppCard(
                 onTap: () => push(context, const PlansScreen()),
                 child: Row(children: [
-                  Container(
-                    width: 44,
-                    height: 44,
-                    decoration: BoxDecoration(gradient: AppColors.passGradient, borderRadius: BorderRadius.circular(12)),
-                    child: const Icon(Icons.key_rounded, color: AppColors.lime),
-                  ),
+                  const BrandMark(size: 44),
                   const SizedBox(width: 12),
                   Expanded(
                     child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
