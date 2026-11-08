@@ -9,7 +9,7 @@ import '../../ui/ui.dart';
 import 'health_sync.dart';
 import 'log_sheets.dart' show HealthSheetHeader;
 
-/// Steps for the member's FITKEY report: auto-sync from Health Connect (Android) / Apple Health (iOS),
+/// Steps for the member's FITKEY report: counted by the phone's step sensor (see StepCounter),
 /// with manual entry as the fallback (and on web). Pops with `true` when something was saved.
 class StepSyncSheet extends StatefulWidget {
   const StepSyncSheet({super.key, this.goal = 8000});
@@ -71,7 +71,7 @@ class _StepSyncSheetState extends State<StepSyncSheet> {
     });
     try {
       if (_state != HealthSyncState.connected) {
-        final granted = await _sync.connect();
+        final granted = await _sync.connect(api);
         if (!granted) {
           if (!mounted) return;
           setState(() {
@@ -289,7 +289,7 @@ class _AutoSyncCard extends StatelessWidget {
       null => ('Checking $provider…', 'One moment', null, null, Icons.sync_rounded),
       HealthSyncState.unsupported => (
           'Auto-sync is available in the mobile app',
-          'Open FITKEY on your Android phone or iPhone to sync steps from Health Connect or Apple Health.',
+          'Open FITKEY on your Android phone or iPhone to count steps automatically.',
           null,
           null,
           Icons.phone_android_rounded,
@@ -303,14 +303,14 @@ class _AutoSyncCard extends StatelessWidget {
         ),
       HealthSyncState.needsPermission => (
           'Connect $provider',
-          'Allow read access once — steps, distance and active calories then sync automatically.',
+          'Allow "Physical activity" once — your phone then counts steps all day, even with FITKEY closed.',
           'Connect',
           onSync,
           Icons.link_rounded,
         ),
       HealthSyncState.connected => (
           '$provider connected',
-          'Steps sync automatically when you open Progress. Tap to sync the last 30 days now.',
+          'Steps are counted automatically and added to your report. Tap to sync today now.',
           'Sync now',
           onSync,
           Icons.check_circle_rounded,

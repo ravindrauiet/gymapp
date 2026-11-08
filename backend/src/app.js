@@ -13,6 +13,7 @@ import { filesRouter, uploadsRouter } from './routes/files.js';
 import checkinsRouter from './routes/checkins.js';
 import { contestsRouter, leaderboardRouter } from './routes/contests.js';
 import healthRouter from './routes/health.js';
+import activityRouter from './routes/activity.js';
 import meRouter from './routes/me.js';
 import metaRouter from './routes/meta.js';
 import partnerRouter from './routes/partner.js';
@@ -78,6 +79,7 @@ export function createApp() {
   api.use('/contests', contestsRouter);
   api.use('/leaderboard', leaderboardRouter);
   api.use('/health', healthRouter);
+  api.use('/activity', activityRouter); // Move tracker (GPS routes, area covered) + contacts match
   api.use('/goals', goalsRouter);
   api.use('/marketplace', marketplaceRouter);
   api.use('/nutrition', nutritionRouter);

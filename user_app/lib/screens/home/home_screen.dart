@@ -20,6 +20,7 @@ import '../feed/feed_screen.dart';
 import '../notifications/notifications_screen.dart';
 import '../explore/venue_detail_screen.dart';
 import '../health/health_report_screen.dart';
+import '../move/move_screen.dart';
 import '../nutrition/ai_food_scanner.dart';
 import '../nutrition/fuel_log_screen.dart';
 import '../plans/plans_screen.dart';
@@ -103,6 +104,8 @@ class _HomeScreenState extends State<HomeScreen> {
                 children: [
                   _PassCard(subscription: session.subscription, wallet: _wallet),
                   const LowBalanceBanner(),
+                  const SizedBox(height: 14),
+                  StepsTodayCard(onTap: () => push(context, const MoveScreen())),
                   const DividerTitle("What's on your mind?", padding: EdgeInsets.fromLTRB(0, 26, 0, 14)),
                   const _CategoryRail(),
                   const SectionTitle('Everything fitness', subtitle: 'One app for training, food & recovery'),

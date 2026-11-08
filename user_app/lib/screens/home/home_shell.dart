@@ -1,7 +1,15 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import 'package:provider/provider.dart';
+
+import '../../services/move_tracker.dart';
+import '../../services/step_counter.dart';
+import '../../state/session.dart';
 import '../../ui/ui.dart';
+import '../move/permissions_screen.dart';
 import '../checkin/checkin_screen.dart';
 import '../community/community_screen.dart';
 import '../explore/explore_screen.dart';
@@ -24,6 +32,21 @@ class HomeShell extends StatefulWidget {
 class _HomeShellState extends State<HomeShell> {
   int _index = 0;
   final _visited = <int>{0};
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      if (!mounted) return;
+      final api = context.read<Session>().api;
+      // Steps keep counting in the phone's sensor; start reading them if already allowed, and upload any
+      // trips that were recorded offline.
+      unawaited(StepCounter.instance.start(api));
+      unawaited(MoveTracker.instance.flushPending(api));
+      await PermissionsScreen.showOnce(context);
+      if (mounted) unawaited(StepCounter.instance.start(api));
+    });
+  }
 
   void _select(int i) {
     if (i == _index) return;

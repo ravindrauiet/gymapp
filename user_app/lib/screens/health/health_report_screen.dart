@@ -427,7 +427,7 @@ class _HealthReportScreenState extends State<HealthReportScreen> with SingleTick
       SectionTitle('Steps',
           subtitle: r.lastDeviceSource == null
               ? 'Goal ${_n(stepTarget)} a day'
-              : 'Synced from ${r.lastDeviceSource == 'apple_healthkit' ? 'Apple Health' : 'Health Connect'} · goal ${_n(stepTarget)}',
+              : 'Synced from ${switch (r.lastDeviceSource) { 'apple_healthkit' => 'Apple Health', 'phone_sensor' => 'your phone', _ => 'Health Connect' }} · goal ${_n(stepTarget)}',
           action: 'Sync',
           onAction: _syncSteps),
       if (m == null || m.totalSteps == 0)

@@ -5,7 +5,17 @@
 	<key>NSMicrophoneUsageDescription</key>
 	<string>FITKEY records AI Arena proof clips and Circle voice notes.</string>
 	<key>NSLocationWhenInUseUsageDescription</key>
-	<string>FITKEY uses your location to show fitness Circles near you.</string>
+	<string>FITKEY uses your location to record your walks, runs and rides on a map and to show gyms and Circles near you.</string>
+	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
+	<string>FITKEY keeps recording the route of a walk, run or ride you started, even when the screen is off.</string>
+	<key>NSMotionUsageDescription</key>
+	<string>FITKEY counts your daily steps with your phone's motion sensor.</string>
+	<key>NSContactsUsageDescription</key>
+	<string>FITKEY shows which of your contacts are already on FITKEY so you can work out together. Numbers are hashed on your phone before matching.</string>
+	<key>UIBackgroundModes</key>
+	<array>
+		<string>location</string>
+	</array>
 	<key>NSPhotoLibraryUsageDescription</key>
 	<string>Choose photos for your FitFeed posts and meal scans.</string>
 	<key>NSCameraUsageDescription</key>

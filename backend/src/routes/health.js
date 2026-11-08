@@ -83,7 +83,7 @@ async function bodyWeight(userId) {
 }
 
 // ---- Steps & Movement Tracking (Health Connect / Apple HealthKit / manual) ----
-const DEVICE_SOURCES = ['health_connect', 'apple_healthkit', 'google_fit'];
+const DEVICE_SOURCES = ['health_connect', 'apple_healthkit', 'google_fit', 'phone_sensor'];
 
 const stepDaySchema = z.object({
   date: dateSchema.optional(),

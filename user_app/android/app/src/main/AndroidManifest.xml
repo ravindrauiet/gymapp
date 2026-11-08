@@ -4,6 +4,16 @@
     <!-- Circles near me -->
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+    <!-- Move tracker: keeps recording a walk / run / ride with the screen off (foreground service + notification) -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION" />
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- Step counter (phone motion sensor) -->
+    <uses-permission android:name="android.permission.ACTIVITY_RECOGNITION" />
+    <uses-feature android:name="android.hardware.sensor.stepcounter" android:required="false" />
+    <!-- Find friends already on FITKEY (numbers are hashed on the phone before matching) -->
+    <uses-permission android:name="android.permission.READ_CONTACTS" />
     <!-- AI Arena proof clips and Circle voice notes -->
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
     <application
