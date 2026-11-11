@@ -203,20 +203,22 @@ class _ProveItShareScreenState extends State<ProveItShareScreen> {
       bottomNavigationBar: BottomActionBar(
         child: Row(children: [
           Expanded(
+            flex: 5,
             child: SizedBox(
               height: 54,
               child: OutlinedButton.icon(
+                style: OutlinedButton.styleFrom(padding: const EdgeInsets.symmetric(horizontal: 10)),
                 onPressed: _posting || _posted ? null : _postToFeed,
                 icon: _posting
                     ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2))
                     : Icon(_posted ? Icons.check_rounded : Icons.dynamic_feed_rounded),
-                label: Text(_posted ? 'Posted' : 'FitFeed'),
+                label: FittedBox(child: Text(_posted ? 'Posted' : 'FitFeed', maxLines: 1, softWrap: false)),
               ),
             ),
           ),
           const SizedBox(width: 12),
           Expanded(
-            flex: 2,
+            flex: 7,
             child: AppButton(label: 'Share to apps', icon: Icons.ios_share_rounded, busy: _sharing, onPressed: _shareToApps),
           ),
         ]),

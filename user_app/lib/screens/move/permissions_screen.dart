@@ -215,6 +215,8 @@ class _PermissionsScreenState extends State<PermissionsScreen> with WidgetsBindi
                   onPressed: _busy == null ? () => _ask(i) : null,
                   style: FilledButton.styleFrom(
                     backgroundColor: i.color,
+                    // The app theme makes buttons full-width; beside text in a Row that crushes the text.
+                    minimumSize: const Size(0, 34),
                     padding: const EdgeInsets.symmetric(horizontal: 14),
                     textStyle: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13),
                   ),

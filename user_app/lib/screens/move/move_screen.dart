@@ -486,6 +486,7 @@ class _StepsTodayCardState extends State<StepsTodayCard> with WidgetsBindingObse
                         child: FilledButton(
                           onPressed: _asking ? null : _enable,
                           style: FilledButton.styleFrom(
+                            minimumSize: const Size(0, 38),
                             backgroundColor: AppColors.green,
                             padding: const EdgeInsets.symmetric(horizontal: 16),
                           ),

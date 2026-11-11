@@ -68,3 +68,10 @@ kotlin {
 flutter {
     source = "../.."
 }
+
+dependencies {
+    // Recording API on mobile: Google Play services records steps on the phone in the background (no Health
+    // Connect, no Google account, only ACTIVITY_RECOGNITION). Read by MainActivity's "fitkey/steps" channel.
+    implementation("com.google.android.gms:play-services-fitness:21.2.0")
+    implementation("com.google.android.gms:play-services-base:18.5.0")
+}

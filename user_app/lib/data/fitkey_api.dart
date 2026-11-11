@@ -17,7 +17,18 @@ class FitkeyApi {
   /// Reads bytes rather than a path so it also works on Flutter web.
   Future<String> upload(XFile file) async {
     final bytes = await file.readAsBytes();
-    final name = file.name.toLowerCase();
+    // In-memory files (XFile.fromData, e.g. the ProveIt share card) have an empty name on Android. A multipart part
+    // without a filename is treated as a plain form field by the server, so always send one.
+    final mime = (file.mimeType ?? '').toLowerCase();
+    final ext = switch (mime) {
+      'image/png' => 'png',
+      'image/webp' => 'webp',
+      'video/mp4' => 'mp4',
+      'audio/mp4' || 'audio/m4a' || 'audio/x-m4a' => 'm4a',
+      _ => 'jpg',
+    };
+    final filename = file.name.trim().isEmpty ? 'upload-${DateTime.now().millisecondsSinceEpoch}.$ext' : file.name;
+    final name = filename.toLowerCase();
     final type = name.endsWith('.mp4')
         ? DioMediaType('video', 'mp4')
         : name.endsWith('.m4a') || name.endsWith('.aac')
@@ -29,7 +40,7 @@ class FitkeyApi {
                     : DioMediaType('image', 'jpeg');
     final r = await _client.post(
       '/uploads',
-      FormData.fromMap({'file': MultipartFile.fromBytes(bytes, filename: file.name, contentType: type)}),
+      FormData.fromMap({'file': MultipartFile.fromBytes(bytes, filename: filename, contentType: type)}),
     );
     return r['url'] as String;
   }

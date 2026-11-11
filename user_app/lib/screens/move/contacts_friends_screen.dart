@@ -189,7 +189,11 @@ class _ContactsFriendsScreenState extends State<ContactsFriendsScreen> {
           leading: PersonAvatar(name: p.name, size: 40),
           title: Text(p.name, style: const TextStyle(fontWeight: FontWeight.w700)),
           subtitle: Text(p.number),
-          trailing: OutlinedButton(onPressed: () => _sendInvite(p), child: const Text('Invite')),
+          trailing: OutlinedButton(
+            onPressed: () => _sendInvite(p),
+            style: OutlinedButton.styleFrom(minimumSize: const Size(0, 36), padding: const EdgeInsets.symmetric(horizontal: 14)),
+            child: const Text('Invite'),
+          ),
         ),
     ]);
   }
