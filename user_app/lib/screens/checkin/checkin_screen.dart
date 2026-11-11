@@ -5,7 +5,10 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
 import 'package:provider/provider.dart';
+import 'package:qr_flutter/qr_flutter.dart';
+import 'package:wakelock_plus/wakelock_plus.dart';
 
+import '../../data/booking_api.dart';
 import '../../data/models.dart';
 import '../../state/session.dart';
 import '../../ui/ui.dart';
@@ -103,6 +106,19 @@ class _CheckinScreenState extends State<CheckinScreen> with SingleTickerProvider
         secondary: venueId == null ? null : 'See centre memberships',
         onSecondary: venueId == null ? null : () => push(context, VenueDetailScreen(venueId: venueId)),
       );
+    } else if (bookingProblem(e, venueName: widget.venueName) case final p?) {
+      // 409 PASS_BLOCKED / VENUE_CLOSED / PASS_SLOT_FULL — the FitKey pass can't be used here right now.
+      final venueId = widget.venueId;
+      await _showProblem(
+        icon: Icons.block_rounded,
+        color: AppColors.amber,
+        title: p.title,
+        message: p.message,
+        cta: 'OK',
+        onCta: () {},
+        secondary: venueId == null ? null : 'See centre timings & plans',
+        onSecondary: venueId == null ? null : () => push(context, VenueDetailScreen(venueId: venueId)),
+      );
     } else if (e is ApiException && e.statusCode == 409) {
       await _showProblem(
         icon: Icons.event_available_rounded,
@@ -166,6 +182,15 @@ class _CheckinScreenState extends State<CheckinScreen> with SingleTickerProvider
     );
     _sheetOpen = false;
     if (go == true && mounted) onCta();
+  }
+
+  /// The centre scans the member's QR instead (BRD §10.1). The camera pauses while the QR is on screen.
+  Future<void> _showMyQr() async {
+    _sheetOpen = true;
+    unawaited(_scanner.stop().catchError((_) {}));
+    await push(context, MemberQrScreen(venueName: widget.venueName));
+    _sheetOpen = false;
+    if (mounted) unawaited(_scanner.start().catchError((_) {}));
   }
 
   Future<void> _openOtp() async {
@@ -295,6 +320,19 @@ class _CheckinScreenState extends State<CheckinScreen> with SingleTickerProvider
                   child: Tag('At ${widget.venueName}',
                       icon: Icons.storefront_rounded, color: Colors.white, bg: Colors.white.withValues(alpha: 0.14)),
                 ),
+              Tap(
+                onTap: _busy ? null : _showMyQr,
+                child: Container(
+                  height: 52,
+                  margin: const EdgeInsets.only(bottom: 10),
+                  decoration: BoxDecoration(color: AppColors.lime, borderRadius: BorderRadius.circular(16)),
+                  child: const Row(mainAxisAlignment: MainAxisAlignment.center, children: [
+                    Icon(Icons.qr_code_2_rounded, color: AppColors.ink),
+                    SizedBox(width: 10),
+                    Text('Show my QR', style: TextStyle(color: AppColors.ink, fontWeight: FontWeight.w800, fontSize: 15.5)),
+                  ]),
+                ),
+              ),
               Tap(
                 onTap: _busy ? null : _openOtp,
                 child: Container(
@@ -968,5 +1006,160 @@ class _Info extends StatelessWidget {
           style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 13.5)),
       Text(label, style: const TextStyle(color: AppColors.text3, fontSize: 11.5, fontWeight: FontWeight.w600)),
     ]);
+  }
+}
+
+/// When to fetch the next member QR: [lead] before it expires, never sooner than [min] from now.
+Duration memberQrRefreshIn(DateTime expiresAt, DateTime now,
+    {Duration lead = const Duration(seconds: 10), Duration min = const Duration(seconds: 5)}) {
+  final d = expiresAt.difference(now) - lead;
+  return d < min ? min : d;
+}
+
+/// The member's own QR for the centre's scanner (BRD §10.1 "scan the member's QR"). Short-lived: refreshed
+/// automatically before it expires, and the screen stays awake while it is shown.
+class MemberQrScreen extends StatefulWidget {
+  const MemberQrScreen({super.key, this.venueName});
+  final String? venueName;
+
+  @override
+  State<MemberQrScreen> createState() => _MemberQrScreenState();
+}
+
+class _MemberQrScreenState extends State<MemberQrScreen> {
+  MemberQr? _qr;
+  Object? _error;
+  bool _loading = true;
+  Timer? _refresh;
+  Timer? _tick;
+
+  @override
+  void initState() {
+    super.initState();
+    WakelockPlus.enable().catchError((_) {});
+    _load();
+    _tick = Timer.periodic(const Duration(seconds: 1), (_) {
+      if (mounted) setState(() {});
+    });
+  }
+
+  @override
+  void dispose() {
+    _refresh?.cancel();
+    _tick?.cancel();
+    WakelockPlus.disable().catchError((_) {});
+    super.dispose();
+  }
+
+  Future<void> _load() async {
+    _refresh?.cancel();
+    setState(() => _loading = true);
+    try {
+      final qr = await context.read<Session>().api.memberQr();
+      if (!mounted) return;
+      setState(() {
+        _qr = qr;
+        _error = null;
+        _loading = false;
+      });
+      _refresh = Timer(memberQrRefreshIn(qr.expiresAt, DateTime.now()), _load);
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _error = e;
+        _loading = false;
+      });
+      // Keep trying quietly while the screen is open (e.g. the network came back).
+      _refresh = Timer(const Duration(seconds: 15), _load);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final qr = _qr;
+    final left = qr == null ? 0 : qr.expiresAt.difference(DateTime.now()).inSeconds;
+    final expired = qr != null && left <= 0;
+    final name = context.watch<Session>().user?.name;
+    return Scaffold(
+      backgroundColor: AppColors.ink,
+      appBar: AppBar(
+        backgroundColor: AppColors.ink,
+        foregroundColor: Colors.white,
+        title: const Text('My check-in QR'),
+      ),
+      body: SafeArea(
+        child: ListView(padding: const EdgeInsets.fromLTRB(24, 8, 24, 24), children: [
+          Text(
+            widget.venueName == null ? 'Show this to the front desk' : 'Show this at ${widget.venueName}',
+            textAlign: TextAlign.center,
+            style: const TextStyle(color: Colors.white, fontSize: 20, fontWeight: FontWeight.w800, letterSpacing: -0.3),
+          ),
+          const SizedBox(height: 6),
+          Text('The centre scans it to check you in.',
+              textAlign: TextAlign.center, style: TextStyle(color: Colors.white.withValues(alpha: 0.7))),
+          const SizedBox(height: 24),
+          Center(
+            child: Container(
+              padding: const EdgeInsets.all(18),
+              decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(24)),
+              child: SizedBox(
+                width: 260,
+                height: 260,
+                child: qr == null
+                    ? Center(
+                        child: _loading
+                            ? const CircularProgressIndicator()
+                            : Column(mainAxisSize: MainAxisSize.min, children: [
+                                const Icon(Icons.qr_code_2_rounded, size: 56, color: AppColors.text3),
+                                const SizedBox(height: 8),
+                                Text(_error == null ? 'QR unavailable' : friendlyError(_error!),
+                                    textAlign: TextAlign.center, style: const TextStyle(color: AppColors.text2)),
+                                const SizedBox(height: 8),
+                                TextButton(onPressed: _load, child: const Text('Try again')),
+                              ]),
+                      )
+                    : Stack(children: [
+                        Opacity(
+                          opacity: expired ? 0.15 : 1,
+                          child: QrImageView(
+                            data: qr.code,
+                            version: QrVersions.auto,
+                            size: 260,
+                            backgroundColor: Colors.white,
+                            eyeStyle: const QrEyeStyle(eyeShape: QrEyeShape.square, color: AppColors.ink),
+                            dataModuleStyle:
+                                const QrDataModuleStyle(dataModuleShape: QrDataModuleShape.square, color: AppColors.ink),
+                          ),
+                        ),
+                        if (expired || _loading)
+                          const Center(child: CircularProgressIndicator()),
+                      ]),
+              ),
+            ),
+          ),
+          const SizedBox(height: 18),
+          if (name != null)
+            Text(name,
+                textAlign: TextAlign.center,
+                style: const TextStyle(color: Colors.white, fontSize: 17, fontWeight: FontWeight.w800)),
+          const SizedBox(height: 6),
+          if (qr != null)
+            Text(
+              expired ? 'Refreshing…' : 'Refreshes automatically · valid ${left ~/ 60}:${(left % 60).toString().padLeft(2, '0')}',
+              textAlign: TextAlign.center,
+              style: TextStyle(color: Colors.white.withValues(alpha: 0.65), fontSize: 13),
+            ),
+          const SizedBox(height: 24),
+          Row(children: [
+            Icon(Icons.lock_outline_rounded, size: 16, color: Colors.white.withValues(alpha: 0.5)),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text("Personal and short-lived — don't share screenshots of it.",
+                  style: TextStyle(color: Colors.white.withValues(alpha: 0.5), fontSize: 12.5)),
+            ),
+          ]),
+        ]),
+      ),
+    );
   }
 }

@@ -2,10 +2,13 @@ import 'package:fitkey_core/fitkey_core.dart' show ApiClient, ApiException;
 import 'package:flutter/foundation.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
+import '../data/brd_api.dart';
 import '../data/models.dart';
 import '../data/partner_api.dart';
 
-enum SessionStatus { loading, signedOut, needsProfile, signedIn }
+/// Onboarding order after login (Partner BRD §2): needsPartnerType ("What are you joining as?") → needsProfile
+/// (About you: name, business email, city) → signedIn.
+enum SessionStatus { loading, signedOut, needsProfile, needsPartnerType, signedIn }
 
 /// Signed-in venue owner + auth token. Uses its own storage key so the member app's login is separate.
 class PartnerSession extends ChangeNotifier {
@@ -44,7 +47,51 @@ class PartnerSession extends ChangeNotifier {
 
   Future<void> refresh() async {
     user = await api.me();
-    _set(user!.name == null || user!.email == null ? SessionStatus.needsProfile : SessionStatus.signedIn);
+    _set(_statusFor(user!));
+  }
+
+  /// FitKey staff accounts (not acting for a partner) skip onboarding; everyone else answers the partner type
+  /// first, then About you.
+  SessionStatus _statusFor(PartnerUser u) {
+    if (u.isFitkeyStaff && !isActingAsPartner) return SessionStatus.signedIn;
+    if (u.partnerType == null) return SessionStatus.needsPartnerType;
+    if ((u.name ?? '').trim().isEmpty || (u.email ?? '').trim().isEmpty) return SessionStatus.needsProfile;
+    return SessionStatus.signedIn;
+  }
+
+  /// Lets a new partner go back from About you to change what they are joining as.
+  void changePartnerType() {
+    if (status == SessionStatus.needsProfile) _set(SessionStatus.needsPartnerType);
+  }
+
+  // ---- Assisted listing (BRD §8): a FitKey employee acts as a partner with a scoped token -------------------
+
+  String? _staffToken;
+  PartnerUser? _staffUser;
+
+  /// True while a FitKey employee is listing on behalf of a partner.
+  bool get isActingAsPartner => _staffToken != null;
+
+  /// The employee's own account while acting (null otherwise).
+  PartnerUser? get staffUser => _staffUser;
+
+  /// Switches API calls to [actAsToken] (from POST /partner/staff/partners). Not persisted: a restart returns to
+  /// the employee's own account.
+  Future<void> startActingAs(String actAsToken) async {
+    _staffToken ??= _client.token;
+    _staffUser ??= user;
+    _client.token = actAsToken;
+    user = await api.me();
+    _set(SessionStatus.signedIn);
+  }
+
+  /// Back to the employee's own account.
+  Future<void> stopActing() async {
+    if (_staffToken == null) return;
+    _client.token = _staffToken;
+    _staffToken = null;
+    _staffUser = null;
+    await refresh();
   }
 
   Future<String?> requestOtp(String phone) => api.requestOtp(phone);
@@ -56,12 +103,30 @@ class PartnerSession extends ChangeNotifier {
     await refresh();
   }
 
+  /// Saves name / email / city via PUT /partner/profile (contract §A); falls back to PATCH /me on older servers.
   Future<void> updateProfile(Json fields) async {
-    user = await api.updateProfile(fields);
-    _set(SessionStatus.signedIn);
+    try {
+      user = await api.updatePartnerProfile(
+        name: fields['name'] as String?,
+        email: fields['email'] as String?,
+        city: fields['city'] as String?,
+      );
+    } on ApiException catch (e) {
+      if (e.statusCode != 404) rethrow;
+      user = await api.updateProfile(fields);
+    }
+    _set(_statusFor(user!));
+  }
+
+  /// Saves the partner type chosen on "What are you joining as?".
+  Future<void> setPartnerType(String partnerType) async {
+    await api.updatePartnerProfile(partnerType: partnerType);
+    await refresh();
   }
 
   Future<void> signOut() async {
+    _staffToken = null;
+    _staffUser = null;
     _client.token = null;
     user = null;
     await _storage.delete(key: _tokenKey);

@@ -6,10 +6,14 @@ import { requireAuth } from '../middleware/auth.js';
 import { badRequest, notFound, validate } from '../utils/http.js';
 import { VENUE_CATEGORY_IDS, VIDEO_CATEGORY_IDS } from '../utils/constants.js';
 import { dateSchema } from '../utils/schemas.js';
+import { LISTING_STATUSES } from '../utils/listing.js';
+import adminListingsRouter, { reviewListing } from './admin_listings.js';
 
 /** FITKEY team operations: venue verification (P8) and content management (plans, videos, contests). */
 const router = Router();
 router.use(requireAuth('admin'));
+// Partner BRD §I: /admin/listings…, /admin/partner-documents/:id, /admin/partner-bank/:id, /admin/users/:id/staff, /admin/staff-report
+router.use(adminListingsRouter);
 
 /** GET /admin/stats — headline numbers for the admin panel. */
 router.get('/stats', async (_req, res) => {
@@ -34,7 +38,7 @@ router.get('/stats', async (_req, res) => {
 
 router.get('/venues', async (req, res) => {
   const { status } = validate(
-    z.object({ status: z.enum(['draft', 'submitted', 'under_review', 'live', 'rejected']).optional() }),
+    z.object({ status: z.enum(LISTING_STATUSES).optional() }),
     req.query,
   );
   const venues = await query(
@@ -45,18 +49,29 @@ router.get('/venues', async (req, res) => {
   res.json({ venues });
 });
 
-/** PATCH /admin/venues/:id/status { status: under_review|live|rejected, note? } */
+/**
+ * PATCH /admin/venues/:id/status { status: under_review|live|approved|changes_needed|rejected, note? } — legacy panel
+ * buttons. Goes through the same review flow as POST /admin/listings/venue/:id/review: "live" = approve, so the venue
+ * goes live only once the owner has also accepted the agreement (else it becomes 'approved' and the owner gets the
+ * app link by SMS). Venues that were already live before the Partner BRD stay live.
+ */
 router.patch('/venues/:id/status', async (req, res) => {
   const { status, note } = validate(
-    z.object({ status: z.enum(['under_review', 'live', 'rejected']), note: z.string().trim().max(500).optional() }),
+    z.object({
+      status: z.enum(['under_review', 'live', 'approved', 'changes_needed', 'rejected']),
+      note: z.string().trim().max(500).optional(),
+    }),
     req.body,
   );
   if (status === 'rejected' && !note) throw badRequest('Add a note explaining the rejection');
-  const venue = await queryOne(
-    `UPDATE venues SET status = $2, review_note = $3, updated_at = now() WHERE id = $1 RETURNING *`,
-    [req.params.id, status, note ?? null],
-  );
-  if (!venue) throw notFound('Venue not found');
+  if (!z.string().uuid().safeParse(req.params.id).success) throw notFound('Venue not found');
+  const current = await queryOne(`SELECT status FROM venues WHERE id = $1`, [req.params.id]);
+  if (!current) throw notFound('Venue not found');
+  if (!(status === 'live' && current.status === 'live')) {
+    const action = { live: 'approve', approved: 'approve', rejected: 'reject' }[status] ?? status;
+    await reviewListing('venue', req.params.id, action, { note: note ?? null, actorId: req.user.id });
+  }
+  const venue = await queryOne(`SELECT * FROM venues WHERE id = $1`, [req.params.id]);
   res.json({ venue });
 });
 

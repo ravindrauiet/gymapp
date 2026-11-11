@@ -8,13 +8,13 @@ export const FILES_PATH = '/api/v1/files/';
 const MAX_BYTES = 3 * 1024 * 1024;
 // Members also upload short ProveIt proof clips (MP4) and Circle chat voice notes (audio).
 const MAX_VIDEO_BYTES = 12 * 1024 * 1024;
-const ALLOWED = new Set(['image/jpeg', 'image/png', 'image/webp', 'video/mp4', 'audio/mp4', 'audio/m4a', 'audio/x-m4a', 'audio/aac', 'audio/mpeg', 'audio/webm', 'audio/ogg']);
+const ALLOWED = new Set(['image/jpeg', 'image/png', 'image/webp', 'video/mp4', 'audio/mp4', 'audio/m4a', 'audio/x-m4a', 'audio/aac', 'audio/mpeg', 'audio/webm', 'audio/ogg', 'application/pdf']);
 
 const upload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: MAX_VIDEO_BYTES, files: 1 },
   fileFilter: (_req, file, cb) =>
-    ALLOWED.has(file.mimetype) ? cb(null, true) : cb(badRequest('Only images (JPEG, PNG, WebP), MP4 clips or audio notes are allowed')),
+    ALLOWED.has(file.mimetype) ? cb(null, true) : cb(badRequest('Only images (JPEG, PNG, WebP), PDF documents, MP4 clips or audio notes are allowed')),
 });
 
 export const uploadsRouter = Router();
@@ -31,6 +31,8 @@ uploadsRouter.post('/', requireAuth('user', 'partner', 'admin'), (req, res, next
       if (err) throw err;
       if (!req.file) throw badRequest('Attach an image in the "file" field');
       if (req.file.mimetype.startsWith('image/') && req.file.size > MAX_BYTES) throw badRequest('Image must be under 3 MB');
+      // Partner documents (licence, GST, FSSAI…): PDFs up to 5 MB.
+      if (req.file.mimetype === 'application/pdf' && req.file.size > 5 * 1024 * 1024) throw badRequest('PDF must be under 5 MB');
       const file = await queryOne(
         `INSERT INTO files (owner_id, mime, size_bytes, data) VALUES ($1, $2, $3, $4) RETURNING id`,
         [req.user.id, req.file.mimetype, req.file.size, req.file.buffer],

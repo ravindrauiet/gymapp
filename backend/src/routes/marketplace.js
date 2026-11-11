@@ -2,37 +2,53 @@ import { Router } from 'express';
 import { z } from 'zod';
 import { query, queryOne, withTransaction } from '../db/index.js';
 import { requireAuth } from '../middleware/auth.js';
-import { notFound, validate, conflict } from '../utils/http.js';
+import { commissionPct } from '../utils/commission.js';
+import { badRequest, forbidden, notFound, validate, conflict } from '../utils/http.js';
 import { notify } from '../utils/notify.js';
+import { earningsSummary, FSSAI_CATEGORIES, PRODUCT_CATEGORIES, todayIst } from '../utils/partner_types.js';
 import { redeemCoins } from '../utils/wallet.js';
 
 export const marketplaceRouter = Router();
+
+/**
+ * Partner BRD §7 — what members may see / buy (p = marketplace_products, v = LEFT JOIN marketplace_vendors):
+ *  - vendors whose listing is not live are hidden (NULL listing_status = legacy vendor, shown);
+ *  - supplements / healthy food need the vendor's verified FSSAI licence (fssai_verified_at). FitKey's own
+ *    products (no vendor) are not affected.
+ */
+const FSSAI_LIST = FSSAI_CATEGORIES.map((c) => `'${c}'`).join(', ');
+const MEMBER_VISIBLE_PRODUCT = `(p.vendor_id IS NULL OR (
+    (v.listing_status IS NULL OR v.listing_status = 'live')
+    AND (p.category NOT IN (${FSSAI_LIST}) OR v.fssai_verified_at IS NOT NULL)))`;
 
 // ============================================================================
 // Consumer App Endpoints (FITKEY)
 // ============================================================================
 
 marketplaceRouter.get('/products', async (req, res) => {
-  const { category, q, limit = 20, page = 1 } = req.query;
-  const conditions = ['is_active = true'];
+  const { category, q } = req.query;
+  const limit = Math.min(100, Math.max(1, parseInt(req.query.limit, 10) || 20));
+  const page = Math.max(1, parseInt(req.query.page, 10) || 1);
+  const conditions = ['p.is_active = true', MEMBER_VISIBLE_PRODUCT];
   const params = [];
 
   if (category && category !== 'all') {
-    params.push(category);
-    conditions.push(`category = $${params.length}`);
+    params.push(String(category));
+    conditions.push(`p.category = $${params.length}`);
   }
-  if (q && q.trim()) {
-    params.push(`%${q.trim()}%`);
-    conditions.push(`(title ILIKE $${params.length} OR brand ILIKE $${params.length} OR description ILIKE $${params.length})`);
+  if (q && String(q).trim()) {
+    params.push(`%${String(q).trim()}%`);
+    conditions.push(`(p.title ILIKE $${params.length} OR p.brand ILIKE $${params.length} OR p.description ILIKE $${params.length})`);
   }
 
-  const offset = (Math.max(1, +page) - 1) * +limit;
-  params.push(+limit, offset);
+  const offset = (page - 1) * limit;
+  params.push(limit, offset);
 
   const products = await query(
-    `SELECT * FROM marketplace_products
+    `SELECT p.* FROM marketplace_products p
+     LEFT JOIN marketplace_vendors v ON v.id = p.vendor_id
      WHERE ${conditions.join(' AND ')}
-     ORDER BY created_at DESC
+     ORDER BY p.created_at DESC
      LIMIT $${params.length - 1} OFFSET $${params.length}`,
     params,
   );
@@ -42,10 +58,10 @@ marketplaceRouter.get('/products', async (req, res) => {
 
 marketplaceRouter.get('/products/:id', async (req, res) => {
   const product = await queryOne(
-    `SELECT p.*, v.business_name AS vendor_name
+    `SELECT p.*, COALESCE(v.brand_name, v.business_name) AS vendor_name, v.dispatch_days
      FROM marketplace_products p
      LEFT JOIN marketplace_vendors v ON v.id = p.vendor_id
-     WHERE p.id = $1`,
+     WHERE p.id = $1 AND ${MEMBER_VISIBLE_PRODUCT}`,
     [req.params.id],
   );
   if (!product) throw notFound('Product not found');
@@ -84,7 +100,9 @@ marketplaceRouter.post('/orders', requireAuth('user'), async (req, res) => {
 
     for (const item of body.items) {
       const pRes = await client.query(
-        `SELECT id, vendor_id, title, price_paise, stock_quantity FROM marketplace_products WHERE id = $1 AND is_active = true FOR UPDATE`,
+        `SELECT p.id, p.vendor_id, p.title, p.price_paise, p.stock_quantity
+           FROM marketplace_products p LEFT JOIN marketplace_vendors v ON v.id = p.vendor_id
+          WHERE p.id = $1 AND p.is_active = true AND ${MEMBER_VISIBLE_PRODUCT} FOR UPDATE OF p`,
         [item.productId],
       );
       const prod = pRes.rows[0];
@@ -165,6 +183,24 @@ marketplaceRouter.post('/orders', requireAuth('user'), async (req, res) => {
     });
   }
 
+  // Low-stock alerts (BRD §10.4): SKUs in this order that dropped to / below their threshold.
+  const low = await query(
+    `SELECT DISTINCT p.id, p.title, p.stock_quantity, v.partner_id
+       FROM marketplace_order_items i
+       JOIN marketplace_products p ON p.id = i.product_id
+       JOIN marketplace_vendors v ON v.id = p.vendor_id
+      WHERE i.order_id = $1 AND p.stock_quantity <= p.low_stock_threshold`,
+    [order.id],
+  );
+  for (const p of low) {
+    await notify(p.partnerId, {
+      type: 'vendor_low_stock',
+      title: p.stockQuantity === 0 ? `Out of stock: ${p.title}` : `Low stock: ${p.title} (${p.stockQuantity} left)`,
+      body: 'Restock it from the Sell tab so members can keep ordering.',
+      data: { productId: p.id },
+    });
+  }
+
   res.status(201).json({ order });
 });
 
@@ -178,7 +214,8 @@ marketplaceRouter.get('/orders/me', requireAuth('user'), async (req, res) => {
                   'productId', i.product_id,
                   'title', i.title,
                   'pricePaise', i.price_paise,
-                  'quantity', i.quantity
+                  'quantity', i.quantity,
+                  'returnStatus', i.return_status
                 )
               ) FILTER (WHERE i.id IS NOT NULL), '[]'
             ) AS items
@@ -202,7 +239,8 @@ marketplaceRouter.get('/orders/:id', requireAuth('user'), async (req, res) => {
                   'productId', i.product_id,
                   'title', i.title,
                   'pricePaise', i.price_paise,
-                  'quantity', i.quantity
+                  'quantity', i.quantity,
+                  'returnStatus', i.return_status
                 )
               ) FILTER (WHERE i.id IS NOT NULL), '[]'
             ) AS items
@@ -224,6 +262,36 @@ marketplaceRouter.get('/orders/:id', requireAuth('user'), async (req, res) => {
   ];
 
   res.json({ order, timeline });
+});
+
+/** POST /marketplace/orders/:id/items/:itemId/return { reason } — member asks to return a delivered item. */
+marketplaceRouter.post('/orders/:id/items/:itemId/return', requireAuth('user'), async (req, res) => {
+  const { reason } = validate(z.object({ reason: z.string().trim().min(3).max(300) }), req.body);
+  const item = await queryOne(
+    `SELECT i.id, i.title, i.return_status, o.status, o.delivered_at, v.partner_id
+       FROM marketplace_order_items i
+       JOIN marketplace_orders o ON o.id = i.order_id
+       LEFT JOIN marketplace_vendors v ON v.id = i.vendor_id
+      WHERE i.id = $1 AND i.order_id = $2 AND o.user_id = $3`,
+    [req.params.itemId, req.params.id, req.user.id],
+  );
+  if (!item) throw notFound('Order item not found');
+  if (item.status !== 'delivered') throw conflict('You can return an item once it is delivered');
+  if (item.returnStatus) throw conflict(`A return is already ${item.returnStatus}`);
+  const updated = await queryOne(
+    `UPDATE marketplace_order_items SET return_status = 'requested', return_reason = $2, return_requested_at = now(), return_updated_at = now()
+      WHERE id = $1 RETURNING *`,
+    [item.id, reason],
+  );
+  if (item.partnerId) {
+    await notify(item.partnerId, {
+      type: 'vendor_return_requested',
+      title: `Return requested: ${item.title}`,
+      body: reason,
+      data: { orderId: req.params.id, itemId: item.id },
+    });
+  }
+  res.status(201).json({ item: updated });
 });
 
 // ============================================================================
@@ -254,8 +322,8 @@ partnerVendorRouter.post('/profile', async (req, res) => {
 
   const vendor = await queryOne(
     `INSERT INTO marketplace_vendors (
-       partner_id, business_name, gstin, bank_name, bank_account_no, ifsc_code, verification_status
-     ) VALUES ($1, $2, $3, $4, $5, $6, 'verified')
+       partner_id, business_name, gstin, bank_name, bank_account_no, ifsc_code, verification_status, listing_status
+     ) VALUES ($1, $2, $3, $4, $5, $6, 'verified', 'draft')
      ON CONFLICT (partner_id) DO UPDATE SET
        business_name = EXCLUDED.business_name,
        gstin = EXCLUDED.gstin,
@@ -274,7 +342,27 @@ partnerVendorRouter.get('/products', async (req, res) => {
   if (!vendor) return res.json({ products: [] });
 
   const products = await query(
-    `SELECT * FROM marketplace_products WHERE vendor_id = $1 ORDER BY created_at DESC`,
+    `SELECT p.*, (p.stock_quantity <= p.low_stock_threshold) AS low_stock,
+            CASE WHEN NOT p.is_active THEN 'unlisted'
+                 WHEN v.listing_status IS NOT NULL AND v.listing_status <> 'live' THEN 'store_not_live'
+                 WHEN p.category IN (${FSSAI_LIST}) AND v.fssai_verified_at IS NULL THEN 'fssai_pending'
+                 WHEN p.stock_quantity = 0 THEN 'out_of_stock'
+            END AS hidden_reason
+       FROM marketplace_products p JOIN marketplace_vendors v ON v.id = p.vendor_id
+      WHERE p.vendor_id = $1 ORDER BY p.created_at DESC`,
+    [vendor.id],
+  );
+  res.json({ products });
+});
+
+/** GET /partner/vendor/low-stock → { products } SKUs at / below their low-stock threshold (active ones). */
+partnerVendorRouter.get('/low-stock', async (req, res) => {
+  const vendor = await queryOne(`SELECT id FROM marketplace_vendors WHERE partner_id = $1`, [req.user.id]);
+  if (!vendor) return res.json({ products: [] });
+  const products = await query(
+    `SELECT id, title, sku, category, stock_quantity, low_stock_threshold, price_paise, images
+       FROM marketplace_products WHERE vendor_id = $1 AND is_active AND stock_quantity <= low_stock_threshold
+      ORDER BY stock_quantity, title`,
     [vendor.id],
   );
   res.json({ products });
@@ -283,11 +371,13 @@ partnerVendorRouter.get('/products', async (req, res) => {
 const productSchema = z.object({
   title: z.string().min(3),
   brand: z.string().min(2),
-  category: z.enum(['supplements', 'apparel', 'wearables', 'gear']),
+  category: z.enum(PRODUCT_CATEGORIES),
   description: z.string().min(10),
-  pricePaise: z.number().int().min(0),
-  originalPricePaise: z.number().int().min(0),
+  pricePaise: z.number().int().min(0), // selling price
+  originalPricePaise: z.number().int().min(0), // MRP
   stockQuantity: z.number().int().min(0),
+  lowStockThreshold: z.number().int().min(0).max(10000).optional(),
+  sku: z.string().trim().max(60).optional(),
   images: z.array(z.string()).default([]),
   specs: z.record(z.string()).default({}),
   isActive: z.boolean().optional(), // PUT only: list / unlist the SKU in the member store
@@ -296,19 +386,21 @@ const productSchema = z.object({
 partnerVendorRouter.post('/products', async (req, res) => {
   let vendor = await queryOne(`SELECT id FROM marketplace_vendors WHERE partner_id = $1`, [req.user.id]);
   if (!vendor) {
+    // New sellers start as a draft listing (Partner BRD §7) — members see their products once it is live.
     vendor = await queryOne(
-      `INSERT INTO marketplace_vendors (partner_id, business_name)
-       VALUES ($1, $2) RETURNING id`,
-      [req.user.id, req.user.name || 'Partner Vendor'],
+      `INSERT INTO marketplace_vendors (partner_id, business_name, listing_status, listed_by)
+       VALUES ($1, $2, 'draft', $3) RETURNING id`,
+      [req.user.id, req.user.name || 'Partner Vendor', req.staffId ?? null],
     );
   }
 
   const p = validate(productSchema, req.body);
+  if (p.pricePaise > p.originalPricePaise) throw badRequest('pricePaise: selling price cannot be more than the MRP');
   const product = await queryOne(
     `INSERT INTO marketplace_products (
        vendor_id, title, brand, category, description, price_paise, original_price_paise,
-       stock_quantity, images, specs
-     ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+       stock_quantity, images, specs, low_stock_threshold, sku
+     ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, COALESCE($11::int, 5), $12)
      RETURNING *`,
     [
       vendor.id,
@@ -321,6 +413,8 @@ partnerVendorRouter.post('/products', async (req, res) => {
       p.stockQuantity,
       p.images,
       JSON.stringify(p.specs),
+      p.lowStockThreshold ?? null,
+      p.sku ?? null,
     ],
   );
   res.status(201).json({ product });
@@ -336,6 +430,9 @@ partnerVendorRouter.put('/products/:id', async (req, res) => {
     [req.params.id, vendor.id],
   );
   if (!existing) throw notFound('Product not found');
+  if ((p.pricePaise ?? existing.pricePaise) > (p.originalPricePaise ?? existing.originalPricePaise)) {
+    throw badRequest('pricePaise: selling price cannot be more than the MRP');
+  }
 
   const updated = await queryOne(
     `UPDATE marketplace_products SET
@@ -348,9 +445,11 @@ partnerVendorRouter.put('/products/:id', async (req, res) => {
        stock_quantity = COALESCE($7, stock_quantity),
        specs = COALESCE($8, specs),
        images = COALESCE($10, images),
-       is_active = COALESCE($11, is_active)
+       is_active = COALESCE($11, is_active),
+       low_stock_threshold = COALESCE($12::int, low_stock_threshold),
+       sku = COALESCE($13::text, sku)
      WHERE id = $9
-     RETURNING *`,
+     RETURNING *, (stock_quantity <= low_stock_threshold) AS low_stock`,
     [
       p.title ?? null,
       p.brand ?? null,
@@ -364,6 +463,8 @@ partnerVendorRouter.put('/products/:id', async (req, res) => {
       // .partial() keeps defaults, so only send images when the client actually included them.
       'images' in req.body ? p.images : null,
       p.isActive ?? null,
+      p.lowStockThreshold ?? null,
+      p.sku ?? null,
     ],
   );
   res.json({ product: updated });
@@ -378,7 +479,7 @@ partnerVendorRouter.get('/orders', async (req, res) => {
     // EXISTS rather than JOIN + DISTINCT: DISTINCT cannot compare the json columns (Postgres 42883).
     `SELECT o.id, o.status, o.total_amount_paise, o.payment_method, o.payment_status,
             o.shipping_address, o.tracking_number, o.created_at, o.dispatched_at,
-            (SELECT json_agg(json_build_object('title', i.title, 'pricePaise', i.price_paise, 'quantity', i.quantity))
+            (SELECT json_agg(json_build_object('id', i.id, 'productId', i.product_id, 'title', i.title, 'pricePaise', i.price_paise, 'quantity', i.quantity, 'returnStatus', i.return_status))
              FROM marketplace_order_items i WHERE i.order_id = o.id AND i.vendor_id = $1) AS vendor_items
      FROM marketplace_orders o
      WHERE EXISTS (SELECT 1 FROM marketplace_order_items oi WHERE oi.order_id = o.id AND oi.vendor_id = $1)
@@ -425,31 +526,105 @@ partnerVendorRouter.patch('/orders/:id/status', async (req, res) => {
   res.json({ order: updated });
 });
 
-// 4. Commission & Earnings Reports
-partnerVendorRouter.get('/commissions', async (req, res) => {
-  const vendor = await queryOne(`SELECT id, commission_rate FROM marketplace_vendors WHERE partner_id = $1`, [req.user.id]);
-  if (!vendor) return res.json({ grossRevenuePaise: 0, commissionRatePercent: 10, commissionPaise: 0, netPayoutPaise: 0, ordersCount: 0 });
+// 3b. Returns (BRD §10.4)
+/** GET /partner/vendor/returns?status= → { returns:[{ itemId, orderId, title, quantity, pricePaise, returnStatus, … }] } */
+partnerVendorRouter.get('/returns', async (req, res) => {
+  const { status } = validate(z.object({ status: z.enum(['requested', 'approved', 'rejected', 'received', 'refunded']).optional() }), req.query);
+  const vendor = await queryOne(`SELECT id FROM marketplace_vendors WHERE partner_id = $1`, [req.user.id]);
+  if (!vendor) return res.json({ returns: [] });
+  const returns = await query(
+    `SELECT i.id AS item_id, i.order_id, i.product_id, i.title, i.quantity, i.price_paise, i.return_status, i.return_reason,
+            i.return_note, i.return_requested_at, i.return_updated_at, o.delivered_at, o.shipping_address, u.name AS member_name
+       FROM marketplace_order_items i
+       JOIN marketplace_orders o ON o.id = i.order_id
+       JOIN users u ON u.id = o.user_id
+      WHERE i.vendor_id = $1 AND i.return_status IS NOT NULL AND ($2::text IS NULL OR i.return_status = $2::text)
+      ORDER BY i.return_requested_at DESC`,
+    [vendor.id, status ?? null],
+  );
+  res.json({ returns });
+});
 
-  const stats = await queryOne(
-    `SELECT COUNT(DISTINCT o.id) AS orders_count,
-            COALESCE(SUM(oi.price_paise * oi.quantity), 0) AS gross_paise
+const RETURN_TRANSITIONS = { requested: ['approved', 'rejected'], approved: ['received', 'rejected'], received: ['refunded'], rejected: [], refunded: [] };
+
+/** POST /partner/vendor/returns/:itemId { status: approved|rejected|received|refunded, note? } — received restocks the SKU. */
+partnerVendorRouter.post('/returns/:itemId', async (req, res) => {
+  const d = validate(z.object({ status: z.enum(['approved', 'rejected', 'received', 'refunded']), note: z.string().trim().max(300).optional() }), req.body);
+  const item = await queryOne(
+    `SELECT i.*, o.user_id FROM marketplace_order_items i
+       JOIN marketplace_orders o ON o.id = i.order_id
+       JOIN marketplace_vendors v ON v.id = i.vendor_id
+      WHERE i.id = $1 AND v.partner_id = $2`,
+    [req.params.itemId, req.user.id],
+  );
+  if (!item || !item.returnStatus) throw notFound('Return not found');
+  if (!(RETURN_TRANSITIONS[item.returnStatus] ?? []).includes(d.status)) {
+    throw conflict(`Cannot change a ${item.returnStatus} return to ${d.status}`);
+  }
+  const updated = await withTransaction(async (client) => {
+    const r = await client.query(
+      `UPDATE marketplace_order_items SET return_status = $2::text, return_note = COALESCE($3::text, return_note), return_updated_at = now()
+        WHERE id = $1 RETURNING *`,
+      [item.id, d.status, d.note ?? null],
+    );
+    if (d.status === 'received' && item.productId) {
+      await client.query(`UPDATE marketplace_products SET stock_quantity = stock_quantity + $2 WHERE id = $1`, [item.productId, item.quantity]);
+    }
+    return r.rows[0];
+  });
+  const label = { approved: 'approved — pickup will be arranged', rejected: 'not approved', received: 'received by the seller', refunded: 'refunded' }[d.status];
+  await notify(item.userId, {
+    type: 'store_return_status',
+    title: `Return ${label}: ${item.title}`,
+    body: d.note ?? null,
+    data: { orderId: item.orderId, itemId: item.id },
+  });
+  res.json({ item: updated });
+});
+
+// 4. Commission & Earnings Reports
+// Commission follows the founding-partner plan (utils/commission.js: 0% year 1, 2.5% year 2, 5% after), counted
+// from the partner's go-live, applied per order date. Returned (received / refunded) lines are excluded.
+const VENDOR_SALES = `SELECT to_char((o.created_at AT TIME ZONE 'Asia/Kolkata')::date, 'YYYY-MM-DD') AS date,
+       (oi.price_paise * oi.quantity) AS gross_paise, o.payment_method AS source, o.id AS order_id
      FROM marketplace_orders o
      JOIN marketplace_order_items oi ON oi.order_id = o.id
-     WHERE oi.vendor_id = $1 AND o.status != 'cancelled'`,
-    [vendor.id],
-  );
+     WHERE oi.vendor_id = $1 AND o.status != 'cancelled'
+       AND (oi.return_status IS NULL OR oi.return_status NOT IN ('received', 'refunded'))`;
 
-  // query helpers camelCase the columns (gross_paise → grossPaise).
-  const grossPaise = +(stats.grossPaise ?? 0);
-  const commissionRate = +(vendor.commissionRate ?? 10.0);
-  const commissionPaise = Math.round(grossPaise * (commissionRate / 100));
-  const netPayoutPaise = grossPaise - commissionPaise;
+const goLiveOf = async (userId) =>
+  (await queryOne(`SELECT partner_go_live_at FROM users WHERE id = $1`, [userId]))?.partnerGoLiveAt ?? null;
 
+partnerVendorRouter.get('/commissions', async (req, res) => {
+  if (req.staffId) throw forbidden('FitKey staff cannot view partner earnings');
+  const goLiveAt = await goLiveOf(req.user.id);
+  const vendor = await queryOne(`SELECT id FROM marketplace_vendors WHERE partner_id = $1`, [req.user.id]);
+  if (!vendor) {
+    return res.json({ grossRevenuePaise: 0, commissionRatePercent: commissionPct(goLiveAt), commissionPaise: 0, netPayoutPaise: 0, ordersCount: 0 });
+  }
+  const rows = await query(VENDOR_SALES, [vendor.id]);
+  const s = earningsSummary(rows, goLiveAt);
   res.json({
-    grossRevenuePaise: grossPaise,
-    commissionRatePercent: commissionRate,
-    commissionPaise,
-    netPayoutPaise,
-    ordersCount: +(stats.ordersCount ?? 0),
+    grossRevenuePaise: s.totals.grossPaise,
+    commissionRatePercent: s.commissionPct,
+    commissionPaise: s.totals.commissionPaise,
+    netPayoutPaise: s.totals.netPaise,
+    ordersCount: new Set(rows.map((r) => r.orderId)).size,
   });
+});
+
+/** GET /partner/vendor/earnings?from=&to= → { from, to, totals, bySource, byDay, commissionPct } */
+partnerVendorRouter.get('/earnings', async (req, res) => {
+  if (req.staffId) throw forbidden('FitKey staff cannot view partner earnings');
+  const f = validate(z.object({ from: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(), to: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional() }), req.query);
+  const to = f.to ?? todayIst();
+  const from = f.from ?? new Date(Date.parse(`${to}T00:00:00Z`) - 29 * 86_400_000).toISOString().slice(0, 10);
+  const vendor = await queryOne(`SELECT id FROM marketplace_vendors WHERE partner_id = $1`, [req.user.id]);
+  const rows = vendor
+    ? await query(
+        `SELECT * FROM (${VENDOR_SALES}) s WHERE s.date BETWEEN $2 AND $3`,
+        [vendor.id, from, to],
+      )
+    : [];
+  res.json({ from, to, ...earningsSummary(rows, await goLiveOf(req.user.id)) });
 });

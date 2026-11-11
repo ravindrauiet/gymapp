@@ -18,14 +18,17 @@ part 'trainer_profile_editor.dart';
 
 /// FITKEY Partner — trainer module: profile & categories, bookings and earnings.
 class PartnerTrainerScreen extends StatefulWidget {
-  const PartnerTrainerScreen({super.key});
+  const PartnerTrainerScreen({super.key, this.initialTab = 0});
+
+  /// 0 Overview · 1 Bookings · 2 Profile.
+  final int initialTab;
 
   @override
   State<PartnerTrainerScreen> createState() => _PartnerTrainerScreenState();
 }
 
 class _PartnerTrainerScreenState extends State<PartnerTrainerScreen> with SingleTickerProviderStateMixin {
-  late final TabController _tabs = TabController(length: 3, vsync: this);
+  late final TabController _tabs = TabController(length: 3, vsync: this, initialIndex: widget.initialTab.clamp(0, 2));
   late Future<TrainerProfileDetails?> _profile;
   late Future<List<TrainerBookingItem>> _bookings;
 

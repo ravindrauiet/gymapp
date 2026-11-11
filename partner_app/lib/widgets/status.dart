@@ -6,6 +6,8 @@ import '../ui/ui.dart';
 Color statusColor(VenueStatus s) => switch (s) {
       VenueStatus.live => AppColors.green,
       VenueStatus.submitted || VenueStatus.underReview => AppColors.blue,
+      VenueStatus.approved => AppColors.teal,
+      VenueStatus.changesNeeded => AppColors.amber,
       VenueStatus.rejected => AppColors.red,
       VenueStatus.draft => AppColors.amber,
     };
@@ -14,6 +16,8 @@ IconData statusIcon(VenueStatus s) => switch (s) {
       VenueStatus.live => Icons.check_circle_rounded,
       VenueStatus.submitted => Icons.schedule_send_rounded,
       VenueStatus.underReview => Icons.manage_search_rounded,
+      VenueStatus.approved => Icons.verified_rounded,
+      VenueStatus.changesNeeded => Icons.edit_notifications_rounded,
       VenueStatus.rejected => Icons.error_rounded,
       VenueStatus.draft => Icons.edit_note_rounded,
     };
@@ -55,9 +59,9 @@ class StatusTimeline extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final step = switch (status) {
-      VenueStatus.draft || VenueStatus.rejected => 0,
+      VenueStatus.draft || VenueStatus.rejected || VenueStatus.changesNeeded => 0,
       VenueStatus.submitted => 1,
-      VenueStatus.underReview => 2,
+      VenueStatus.underReview || VenueStatus.approved => 2,
       VenueStatus.live => 3,
     };
     const labels = ['Submitted', 'Under review', 'Live'];
@@ -105,7 +109,7 @@ class StatusTimeline extends StatelessWidget {
         ),
         const SizedBox(height: 14),
         Text(_message(), style: const TextStyle(color: AppColors.text2, height: 1.45, fontSize: 13.5)),
-        if (status == VenueStatus.rejected && reviewNote != null) ...[
+        if ((status == VenueStatus.rejected || status == VenueStatus.changesNeeded) && reviewNote != null) ...[
           const SizedBox(height: 12),
           Container(
             width: double.infinity,
@@ -130,7 +134,9 @@ class StatusTimeline extends StatelessWidget {
         VenueStatus.submitted => 'Thanks! Your listing is in the queue. We usually review within 2 working days.',
         VenueStatus.underReview => 'Our team is verifying your details. We may call you to confirm.',
         VenueStatus.live => 'Your venue is live — FITKEY members can find you and check in.',
-        VenueStatus.rejected => 'A few changes are needed. Update your listing and submit again.',
+        VenueStatus.changesNeeded => 'A few changes are needed. Fix the steps below and submit again.',
+        VenueStatus.approved => 'Approved! Accept the FitKey partner agreement by OTP to go live.',
+        VenueStatus.rejected => 'This listing was not approved. Contact FITKEY support for details.',
       };
 
   Widget _dot({required bool done, required bool current}) => AnimatedContainer(

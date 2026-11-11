@@ -5,3 +5,11 @@
 export async function sendOtpSms(phone, code) {
   console.log(`[sms] OTP for ${phone}: ${code}`);
 }
+
+/**
+ * Sends a transactional SMS / WhatsApp message (listing status changes, renewal reminders, assisted-listing
+ * handover). No provider is wired up yet, so this logs to the console. Plug in MSG91 / Gupshup / WhatsApp Cloud API here.
+ */
+export async function sendSms(phone, text) {
+  console.log(`[sms] to ${phone}: ${text}`);
+}

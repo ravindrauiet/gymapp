@@ -50,16 +50,46 @@ class _BookSlotScreenState extends State<BookSlotScreen> {
       final b = await context.read<Session>().api.bookSlot(venueId: widget.venueId, date: info.date, start: slot.start);
       if (!mounted) return;
       HapticFeedback.mediumImpact();
-      toast(context, 'Booked ${formatTimeOfDay(b.slotStart)} on ${formatDayDate(parseDay(b.slotDate))} · ${b.costLabel ?? ''}',
-          icon: Icons.event_available_rounded);
+      if (b.isRequested) {
+        toast(context, 'Request sent — the venue will confirm', icon: Icons.hourglass_top_rounded);
+      } else {
+        toast(context, 'Booked ${formatTimeOfDay(b.slotStart)} on ${formatDayDate(parseDay(b.slotDate))} · ${b.costLabel ?? ''}',
+            icon: Icons.event_available_rounded);
+      }
       await Navigator.pushReplacement(context, MaterialPageRoute(builder: (_) => const MyBookingsScreen()));
     } catch (e) {
       if (!mounted) return;
       setState(() => _busy = false);
-      toast(context, friendlyError(e), error: true);
+      final problem = bookingProblem(e, venueName: widget.venueName);
+      if (problem != null) {
+        await _showProblem(problem.title, problem.message);
+      } else {
+        toast(context, friendlyError(e), error: true);
+      }
       _reload();
     }
   }
+
+  Future<void> _showProblem(String title, String message) => showAppSheet<void>(
+        context,
+        builder: (ctx) => SafeArea(
+          top: false,
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(24, 4, 24, 16),
+            child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+              const Center(child: IconBubble(Icons.event_busy_rounded, color: AppColors.amber, size: 64)),
+              const SizedBox(height: 14),
+              Text(title,
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(fontSize: 19, fontWeight: FontWeight.w800, letterSpacing: -0.3)),
+              const SizedBox(height: 8),
+              Text(message, textAlign: TextAlign.center, style: const TextStyle(color: AppColors.text2, height: 1.45)),
+              const SizedBox(height: 20),
+              AppButton(label: 'Pick another slot', onPressed: () => Navigator.pop(ctx)),
+            ]),
+          ),
+        ),
+      );
 
   @override
   Widget build(BuildContext context) {
@@ -123,10 +153,42 @@ class _BookSlotScreenState extends State<BookSlotScreen> {
                     ]),
                   ),
                 ),
+              if (info.passBlockLabels.isNotEmpty && info.cost.method != 'membership')
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+                  child: AppCard(
+                    color: AppColors.amberSoft,
+                    shadow: false,
+                    child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                      const Icon(Icons.block_rounded, color: AppColors.amber),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: Text(
+                          '${info.passBlockLabels.join('\n')}\nYour own ${widget.venueName} membership works at all open hours.',
+                          style: const TextStyle(fontWeight: FontWeight.w700, color: Color(0xFF8A5600), height: 1.4),
+                        ),
+                      ),
+                    ]),
+                  ),
+                ),
+              if (info.autoAccept == false)
+                const Padding(
+                  padding: EdgeInsets.fromLTRB(16, 12, 16, 0),
+                  child: Row(children: [
+                    Icon(Icons.hourglass_top_rounded, size: 16, color: AppColors.blue),
+                    SizedBox(width: 6),
+                    Expanded(
+                      child: Text('This centre confirms each booking — you\'ll be notified when it does.',
+                          style: TextStyle(color: AppColors.text2, fontSize: 12.5, fontWeight: FontWeight.w600)),
+                    ),
+                  ]),
+                ),
               SectionTitle('Time slots',
-                  subtitle: info.slots.isEmpty ? null : '1 hour each · ${info.slots.first.capacity} people per slot',
+                  subtitle: info.slots.isEmpty
+                      ? null
+                      : '${_slotLength(info.slotMinutes)} each · ${info.slots.first.capacity} people per slot',
                   padding: const EdgeInsets.fromLTRB(16, 24, 16, 12)),
-              if (info.slots.isEmpty)
+              if (info.slots.isEmpty || info.slots.every((s) => s.closed))
                 const EmptyView(
                   icon: Icons.event_busy_rounded,
                   title: 'Closed this day',
@@ -143,8 +205,9 @@ class _BookSlotScreenState extends State<BookSlotScreen> {
                           width: w,
                           child: _SlotTile(
                             slot: s,
+                            state: slotStateFor(s, info.cost),
                             selected: s.start == _start,
-                            enabled: s.available && info.myBooking == null,
+                            enabled: slotStateFor(s, info.cost) == SlotState.available && info.myBooking == null,
                             onTap: () => setState(() => _start = s.start),
                           ),
                         ),
@@ -301,22 +364,30 @@ class _CostCard extends StatelessWidget {
   }
 }
 
+String _slotLength(int? minutes) {
+  final m = minutes ?? 60;
+  if (m % 60 == 0) return m == 60 ? '1 hour' : '${m ~/ 60} hours';
+  return m > 60 ? '${m ~/ 60} h ${m % 60} min' : '$m min';
+}
+
 class _SlotTile extends StatelessWidget {
-  const _SlotTile({required this.slot, required this.selected, required this.enabled, required this.onTap});
+  const _SlotTile({
+    required this.slot,
+    required this.state,
+    required this.selected,
+    required this.enabled,
+    required this.onTap,
+  });
   final Slot slot;
+  final SlotState state;
   final bool selected;
   final bool enabled;
   final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) {
-    final sub = slot.past
-        ? 'Started'
-        : slot.left == 0
-            ? 'Full'
-            : slot.left <= 5
-                ? 'Only ${slot.left} left'
-                : '${slot.left} left';
+    final sub = slotStateLabel(state, slot);
+    final passIssue = state == SlotState.passBlocked || state == SlotState.passFull;
     final fg = selected ? Colors.white : (enabled ? AppColors.text : AppColors.text3);
     return Tap(
       onTap: enabled ? onTap : null,
@@ -324,26 +395,55 @@ class _SlotTile extends StatelessWidget {
         duration: const Duration(milliseconds: 160),
         padding: const EdgeInsets.symmetric(vertical: 12),
         decoration: BoxDecoration(
-          color: selected ? AppColors.primary : (enabled ? AppColors.surface : AppColors.surfaceAlt),
+          color: selected
+              ? AppColors.primary
+              : enabled
+                  ? AppColors.surface
+                  : passIssue
+                      ? AppColors.amberSoft
+                      : AppColors.surfaceAlt,
           borderRadius: BorderRadius.circular(14),
-          border: Border.all(color: selected ? AppColors.primary : AppColors.line),
+          border: Border.all(
+              color: selected ? AppColors.primary : (passIssue ? AppColors.amber.withValues(alpha: 0.4) : AppColors.line)),
           boxShadow: selected ? AppShadows.glow(AppColors.primary) : null,
         ),
         child: Column(children: [
-          Text(formatTimeOfDay(slot.start), style: TextStyle(fontWeight: FontWeight.w800, fontSize: 14.5, color: fg)),
+          Text(formatTimeOfDay(slot.start),
+              style: TextStyle(
+                fontWeight: FontWeight.w800,
+                fontSize: 14.5,
+                color: fg,
+                decoration: state == SlotState.closed ? TextDecoration.lineThrough : null,
+              )),
           const SizedBox(height: 2),
           Text(sub,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
               style: TextStyle(
                 fontSize: 11.5,
                 fontWeight: FontWeight.w600,
                 color: selected
                     ? Colors.white70
-                    : !enabled
-                        ? AppColors.text3
-                        : slot.left <= 5
-                            ? AppColors.red
-                            : AppColors.green,
+                    : passIssue
+                        ? const Color(0xFF8A5600)
+                        : !enabled
+                            ? AppColors.text3
+                            : slot.left <= 5
+                                ? AppColors.red
+                                : AppColors.green,
               )),
+          if (slot.ladiesOnly) ...[
+            const SizedBox(height: 4),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
+              decoration: BoxDecoration(
+                color: selected ? Colors.white24 : AppColors.pinkSoft,
+                borderRadius: BorderRadius.circular(6),
+              ),
+              child: Text('Ladies only',
+                  style: TextStyle(fontSize: 10, fontWeight: FontWeight.w800, color: selected ? Colors.white : AppColors.pink)),
+            ),
+          ],
         ]),
       ),
     );
@@ -384,6 +484,18 @@ class _ConfirmSheet extends StatelessWidget {
                     'later cancellations are not refunded.',
             style: const TextStyle(color: AppColors.text2, fontSize: 12.5, height: 1.4),
           ),
+          if (slot.ladiesOnly) ...[
+            const SizedBox(height: 8),
+            const Text('This is a ladies-only slot.',
+                style: TextStyle(color: AppColors.pink, fontSize: 12.5, fontWeight: FontWeight.w700)),
+          ],
+          if (info.autoAccept == false) ...[
+            const SizedBox(height: 8),
+            const Text(
+              'The centre confirms each booking — it shows as "Awaiting confirmation" until they do.',
+              style: TextStyle(color: AppColors.blue, fontSize: 12.5, fontWeight: FontWeight.w700, height: 1.4),
+            ),
+          ],
           const SizedBox(height: 18),
           AppButton(label: 'Confirm · ${cost.label}', icon: Icons.check_rounded, onPressed: () => Navigator.pop(context, true)),
           const SizedBox(height: 4),

@@ -54,25 +54,60 @@ class CentrePlanCard extends StatelessWidget {
             child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
               Text(p.name, style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 15.5)),
               Text(
-                [p.durationLabel, '${p.durationDays} day${p.durationDays == 1 ? '' : 's'}', ?p.limitsLabel].join(' · '),
+                p.duration == 'hourly' ? p.durationLabel : [p.durationLabel, p.validityLabel].join(' · '),
                 style: const TextStyle(color: AppColors.text2, fontSize: 12.5),
               ),
             ]),
           ),
           Column(crossAxisAlignment: CrossAxisAlignment.end, children: [
-            Text(formatPaise(p.effectivePricePaise), style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 16.5)),
+            Text(formatPaise(p.effectivePricePaise) + (p.duration == 'hourly' ? '/hr' : ''),
+                style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 16.5)),
             if (p.offerPct > 0)
               Text(formatPaise(p.pricePaise),
                   style: const TextStyle(color: AppColors.text3, decoration: TextDecoration.lineThrough, fontSize: 12)),
           ]),
         ]),
-        if (p.inclusions.isNotEmpty || p.offerPct > 0) ...[
+        if (p.offerPct > 0) ...[
           const SizedBox(height: 10),
-          Wrap(spacing: 6, runSpacing: 6, children: [
-            if (p.offerPct > 0) Tag('${p.offerPct}% off', color: AppColors.green, icon: Icons.local_offer_rounded, dense: true),
-            for (final i in p.inclusions.take(4)) Tag(i, color: AppColors.text2, dense: true),
-          ]),
+          Align(
+            alignment: Alignment.centerLeft,
+            child: Tag('${p.offerPct}% off', color: AppColors.green, icon: Icons.local_offer_rounded, dense: true),
+          ),
         ],
+        if (p.inclusions.isNotEmpty || p.limitsLabel != null) ...[
+          const SizedBox(height: 10),
+          const Divider(height: 1),
+          const SizedBox(height: 8),
+          if (p.inclusions.isNotEmpty) ...[
+            const Text("WHAT'S INCLUDED",
+                style: TextStyle(fontSize: 10.5, letterSpacing: 1.1, fontWeight: FontWeight.w800, color: AppColors.text3)),
+            const SizedBox(height: 4),
+            for (final i in p.inclusions.take(5)) _Line(Icons.check_circle_rounded, AppColors.green, i),
+            if (p.inclusions.length > 5)
+              Text('+${p.inclusions.length - 5} more',
+                  style: const TextStyle(color: AppColors.text2, fontSize: 12, fontWeight: FontWeight.w600)),
+          ],
+          if (p.limitsLabel != null) _Line(Icons.event_repeat_rounded, AppColors.blue, 'Slot limit: ${p.limitsLabel}'),
+        ],
+      ]),
+    );
+  }
+}
+
+class _Line extends StatelessWidget {
+  const _Line(this.icon, this.color, this.text);
+  final IconData icon;
+  final Color color;
+  final String text;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 2),
+      child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Icon(icon, size: 15, color: color),
+        const SizedBox(width: 6),
+        Expanded(child: Text(text, style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600, height: 1.35))),
       ]),
     );
   }

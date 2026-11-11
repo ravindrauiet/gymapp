@@ -4,10 +4,13 @@ import 'config.dart';
 
 /// Error surfaced to the UI with the server's message.
 class ApiException implements Exception {
-  ApiException(this.message, {this.statusCode});
+  ApiException(this.message, {this.statusCode, this.code});
 
   final String message;
   final int? statusCode;
+
+  /// Machine-readable reason from the server's `{ error, code }` body (e.g. PASS_BLOCKED), when it sends one.
+  final String? code;
 
   bool get needsPlan => statusCode == 402;
 
@@ -72,7 +75,8 @@ class ApiClient {
       final data = e.response?.data;
       if (status == 401 && token != null) onUnauthorized();
       final serverMessage = data is Map ? data['error'] as String? : null;
-      throw ApiException(serverMessage ?? _networkMessage(e), statusCode: status);
+      final code = data is Map && data['code'] is String ? data['code'] as String : null;
+      throw ApiException(serverMessage ?? _networkMessage(e), statusCode: status, code: code);
     }
   }
 

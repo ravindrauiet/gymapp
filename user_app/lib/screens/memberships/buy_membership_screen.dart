@@ -96,7 +96,7 @@ class _BuyMembershipScreenState extends State<BuyMembershipScreen> {
             const SizedBox(height: 6),
             Text(p.name, style: const TextStyle(color: Colors.white, fontSize: 22, fontWeight: FontWeight.w800)),
             const SizedBox(height: 4),
-            Text('${p.durationLabel} · ${p.durationDays} day${p.durationDays == 1 ? '' : 's'} · only at this centre',
+            Text('${p.durationLabel} · ${p.validityLabel} · only at this centre',
                 style: TextStyle(color: Colors.white.withValues(alpha: 0.75), fontSize: 13)),
             const SizedBox(height: 14),
             Row(crossAxisAlignment: CrossAxisAlignment.end, children: [

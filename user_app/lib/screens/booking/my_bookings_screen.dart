@@ -39,7 +39,7 @@ class _MyBookingsScreenState extends State<MyBookingsScreen> {
     final ok = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('Cancel this booking?'),
+        title: Text(b.isRequested ? 'Withdraw this request?' : 'Cancel this booking?'),
         content: Text('${b.venueName}\n${formatDayDate(parseDay(b.slotDate))} · ${formatTimeOfDay(b.slotStart)}\n\n$note'),
         actions: [
           TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Keep it')),
@@ -120,6 +120,19 @@ class _MyBookingsScreenState extends State<MyBookingsScreen> {
   }
 }
 
+/// Status chip text + colour for a booking card.
+(String, Color) bookingStatusLook(SlotBooking b) {
+  final label = bookingStatusLabel(b.status, canCancel: b.canCancel, refunded: b.refunded);
+  final color = switch (b.status) {
+    'attended' => AppColors.green,
+    'cancelled' => AppColors.text2,
+    'requested' => AppColors.amber,
+    'rejected' => AppColors.red,
+    _ => b.canCancel ? AppColors.blue : AppColors.amber,
+  };
+  return (label, color);
+}
+
 class _BookingCard extends StatelessWidget {
   const _BookingCard({required this.booking, required this.onCancel});
   final SlotBooking booking;
@@ -129,11 +142,7 @@ class _BookingCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final b = booking;
     final visual = venueVisual(b.venueCategories.isEmpty ? '' : b.venueCategories.first);
-    final (statusLabel, statusColor) = switch (b.status) {
-      'attended' => ('Attended', AppColors.green),
-      'cancelled' => (b.refunded ? 'Cancelled · refunded' : 'Cancelled', AppColors.text2),
-      _ => b.canCancel ? ('Booked', AppColors.blue) : ('Missed', AppColors.amber),
-    };
+    final (statusLabel, statusColor) = bookingStatusLook(b);
     final isToday = b.slotDate == apiDate(DateTime.now());
     return AppCard(
       padding: const EdgeInsets.all(12),
@@ -157,6 +166,32 @@ class _BookingCard extends StatelessWidget {
             ]),
           ),
         ]),
+        if (b.isRequested) ...[
+          const SizedBox(height: 8),
+          const Text('Request sent — the venue will confirm. We\'ll notify you.',
+              style: TextStyle(color: AppColors.text2, fontSize: 12.5, fontWeight: FontWeight.w600)),
+        ],
+        if (b.status == 'rejected') ...[
+          const SizedBox(height: 8),
+          Text(
+            [
+              if ((b.rejectReason ?? '').isNotEmpty)
+                'Reason: ${b.rejectReason}'
+              else
+                'The centre couldn\'t take this booking. Please pick another slot.',
+              if (b.refunded) '${b.costLabel ?? 'Your visit'} was returned to your FitKey pass.',
+            ].join('\n'),
+            style: const TextStyle(color: AppColors.text2, fontSize: 12.5, height: 1.35),
+          ),
+        ],
+        if (b.isRequested && b.canCancel) ...[
+          const SizedBox(height: 10),
+          OutlinedButton(
+            onPressed: onCancel,
+            style: OutlinedButton.styleFrom(foregroundColor: AppColors.red),
+            child: const Text('Withdraw request'),
+          ),
+        ],
         if (b.status == 'booked' && b.canCancel) ...[
           const SizedBox(height: 10),
           Row(children: [

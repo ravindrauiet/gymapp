@@ -1,9 +1,12 @@
 import { Router } from 'express';
 import { z } from 'zod';
+import { config } from '../config.js';
 import { query, queryOne } from '../db/index.js';
 import { notFound, validate } from '../utils/http.js';
 import { VENUE_CATEGORY_IDS } from '../utils/constants.js';
-import { pagination } from '../utils/schemas.js';
+import { pagination, uuidSchema } from '../utils/schemas.js';
+import { ladiesOnlyLabels, passBlockLabels, passBlocksApply } from '../utils/slots.js';
+import { venueRules } from './bookings.js';
 
 const router = Router();
 
@@ -88,23 +91,50 @@ router.get('/', async (req, res) => {
   res.json({ venues, page: f.page, limit: f.limit });
 });
 
-/** GET /venues/:id — full venue details plus the plans that unlock it. */
+/**
+ * GET /venues/:id — full venue details plus the plans that unlock it. Contract §G adds: sports, videoUrl,
+ * slotMinutes, hours (split shifts / ladies-only), passBlocks + passBlockLabels ("FitKey pass not valid 6–8 PM
+ * (Mon–Fri)"), closures (next 30 days), ladiesOnlyLabels, autoAcceptBookings, passAccepted.
+ */
 router.get('/:id', async (req, res) => {
+  const id = validate(uuidSchema, req.params.id);
   const venue = await queryOne(
     `SELECT id, name, description, categories, address, area, city, latitude, longitude, opens_at, closes_at,
             open_days, contact_phone, contact_email, trainer_available, equipment, amenities, photos,
-            rating_avg, rating_count
+            rating_avg, rating_count, sports, video_url, slot_minutes, fitkey_pass_mode, pass_accepted,
+            auto_accept_bookings
      FROM venues WHERE id = $1 AND status = 'live'`,
-    [req.params.id],
+    [id],
   );
   if (!venue) throw notFound('Venue not found');
 
-  const plans = await query(
-    `SELECT id, name, price_paise, duration_days FROM plans
-     WHERE is_active AND categories && $1 ORDER BY sort_order, price_paise`,
-    [venue.categories],
-  );
-  res.json({ venue, plans });
+  const [plans, rules] = await Promise.all([
+    query(
+      `SELECT id, name, price_paise, duration_days FROM plans
+       WHERE is_active AND categories && $1 ORDER BY sort_order, price_paise`,
+      [venue.categories],
+    ),
+    (async () => {
+      const t = await queryOne(
+        `SELECT to_char(now() AT TIME ZONE $1, 'YYYY-MM-DD') AS today,
+                to_char((now() AT TIME ZONE $1)::date + 30, 'YYYY-MM-DD') AS until`,
+        [config.tz],
+      );
+      return venueRules(venue.id, t.today, t.until);
+    })(),
+  ]);
+  const passBlocksOn = passBlocksApply(venue);
+  res.json({
+    venue: {
+      ...venue,
+      hours: rules.hours,
+      passBlocks: passBlocksOn ? rules.blocks.map(({ id: blockId, days, startsAt, endsAt, note }) => ({ id: blockId, days, startsAt, endsAt, note })) : [],
+      passBlockLabels: passBlockLabels(venue, rules.blocks),
+      closures: rules.closures,
+      ladiesOnlyLabels: ladiesOnlyLabels(rules.hours),
+    },
+    plans,
+  });
 });
 
 export default router;

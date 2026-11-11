@@ -1,11 +1,16 @@
-import 'package:fitkey_core/fitkey_core.dart' show amenityLabels, formatTimeOfDay;
+import 'package:fitkey_core/fitkey_core.dart' show amenityLabels, formatPaise;
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
+import '../../data/listing_api.dart';
 import '../../data/models.dart';
 import '../../state/partner_session.dart';
 import '../../ui/ui.dart';
+import '../../widgets/agreement_sheet.dart';
+import '../../widgets/commission_plan_card.dart';
+import '../../widgets/listing/listing_rules.dart';
 import '../../widgets/status.dart';
+import '../../widgets/status_timeline.dart';
 import '../attendance/attendance_screen.dart';
 import '../bookings/partner_bookings_screen.dart';
 import '../checkin/checkin_code_screen.dart';
@@ -26,10 +31,10 @@ class VenueOverviewScreen extends StatefulWidget {
 }
 
 class _VenueOverviewScreenState extends State<VenueOverviewScreen> {
-  late Future<PartnerVenue> _future = _load();
+  late Future<VenueListing> _future = _load();
   bool _busy = false;
 
-  Future<PartnerVenue> _load() => context.read<PartnerSession>().api.venue(widget.venueId);
+  Future<VenueListing> _load() => context.read<PartnerSession>().api.venueListing(widget.venueId);
 
   Future<void> _reload() async {
     if (!mounted) return;
@@ -42,18 +47,15 @@ class _VenueOverviewScreenState extends State<VenueOverviewScreen> {
     }
   }
 
-  Future<void> _submit(PartnerVenue v) async {
-    setState(() => _busy = true);
-    try {
-      await context.read<PartnerSession>().api.submitVenue(v.id!);
-      if (!mounted) return;
-      toast(context, 'Submitted for review — we usually respond within 2 working days');
-      await _reload();
-    } catch (e) {
-      if (mounted) toast(context, friendlyError(e), error: true);
-    } finally {
-      if (mounted) setState(() => _busy = false);
-    }
+  /// Opens the listing wizard on a 1-based step (fixes from "changes needed", checklist items, submit = 10).
+  Future<void> _edit(PartnerVenue v, {int? step}) => _push(VenueEditorScreen(existing: v, initialStep: step));
+
+  /// Approved listing waiting for the owner's OTP acceptance (assisted listing handover).
+  Future<void> _accept(PartnerVenue v) async {
+    final ok = await showAgreementSheet(context, entityType: 'venue', entityId: v.id!);
+    if (!ok || !mounted) return;
+    toast(context, 'Agreement accepted', icon: Icons.verified_rounded);
+    await _reload();
   }
 
   Future<void> _delete(PartnerVenue v) async {
@@ -93,7 +95,7 @@ class _VenueOverviewScreenState extends State<VenueOverviewScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return FutureBuilder<PartnerVenue>(
+    return FutureBuilder<VenueListing>(
       future: _future,
       builder: (context, snap) {
         final failed = snap.connectionState == ConnectionState.done && snap.hasError;
@@ -121,8 +123,12 @@ class _VenueOverviewScreenState extends State<VenueOverviewScreen> {
     );
   }
 
-  Widget _body(PartnerVenue v) {
-    final missing = _missing(v);
+  Widget _body(VenueListing listing) {
+    final v = listing.venue;
+    final checklist = listing.checklist;
+    final missing = checklist?.missing ?? _missing(v);
+    final firstMissingStep = missing.isEmpty ? null : missing.first.step;
+    final schedule = WeekSchedule.fromVenue(v);
     final visual = venueVisual(v.categories.firstOrNull ?? '');
     final live = v.status == VenueStatus.live;
 
@@ -133,19 +139,26 @@ class _VenueOverviewScreenState extends State<VenueOverviewScreen> {
         icon: Icons.qr_code_2_rounded,
         onPressed: () => _push(CheckinCodeScreen(venueId: v.id!, venueName: v.name)),
       );
+    } else if (v.status == VenueStatus.approved && v.partnerAcceptedAt == null) {
+      primary = AppButton(
+        label: 'Accept agreement & go live',
+        icon: Icons.verified_user_rounded,
+        color: AppColors.green,
+        onPressed: () => _accept(v),
+      );
     } else if (v.status.canSubmit) {
       primary = AppButton(
-        label: missing.isEmpty ? 'Submit for review' : 'Complete listing to submit',
+        label: missing.isEmpty ? 'Review & submit' : 'Continue listing',
         icon: missing.isEmpty ? Icons.send_rounded : Icons.edit_rounded,
         busy: _busy,
-        onPressed: missing.isEmpty ? () => _submit(v) : () => _push(VenueEditorScreen(existing: v)),
+        onPressed: () => _edit(v, step: missing.isEmpty ? 10 : firstMissingStep),
       );
     } else {
       primary = AppButton(
         label: 'Edit listing',
         icon: Icons.edit_rounded,
         color: AppColors.ink,
-        onPressed: () => _push(VenueEditorScreen(existing: v)),
+        onPressed: () => _edit(v),
       );
     }
 
@@ -168,7 +181,7 @@ class _VenueOverviewScreenState extends State<VenueOverviewScreen> {
                 _CircleBtn(
                   icon: Icons.edit_rounded,
                   tooltip: 'Edit listing',
-                  onTap: () => _push(VenueEditorScreen(existing: v)),
+                  onTap: () => _edit(v),
                 ),
                 const SizedBox(width: 10),
               ],
@@ -218,21 +231,32 @@ class _VenueOverviewScreenState extends State<VenueOverviewScreen> {
                     Tag('${v.ratingAvg!.toStringAsFixed(1)} ★ · ${v.ratingCount}', color: AppColors.amber),
                 ]),
                 const SizedBox(height: 18),
-                StatusTimeline(status: v.status, reviewNote: v.reviewNote),
-                if (v.status.canSubmit && missing.isNotEmpty) ...[
-                  const SizedBox(height: 12),
-                  Container(
-                    padding: const EdgeInsets.all(12),
-                    decoration: BoxDecoration(color: AppColors.amberSoft, borderRadius: BorderRadius.circular(14)),
-                    child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                      const Icon(Icons.checklist_rounded, color: AppColors.amber, size: 20),
-                      const SizedBox(width: 10),
-                      Expanded(
-                        child: Text('Before submitting: ${missing.join(' · ')}',
-                            style: const TextStyle(color: Color(0xFF9A5B00), fontWeight: FontWeight.w700, height: 1.4)),
-                      ),
-                    ]),
+                if (v.status == VenueStatus.draft)
+                  _ChecklistCard(
+                    percent: checklist?.percent ?? (missing.isEmpty ? 100 : 0),
+                    missing: missing,
+                    onStep: (step) => _edit(v, step: step),
+                  )
+                else ...[
+                  ListingStatusTimeline(
+                    entityType: 'venue',
+                    entityId: v.id!,
+                    status: v.status,
+                    onFix: (step) => _edit(v, step: step),
+                    onAccept: v.partnerAcceptedAt == null ? () => _accept(v) : null,
                   ),
+                  if (v.status.canSubmit && missing.isNotEmpty) ...[
+                    const SizedBox(height: 12),
+                    _ChecklistCard(
+                      percent: checklist?.percent ?? 0,
+                      missing: missing,
+                      onStep: (step) => _edit(v, step: step),
+                    ),
+                  ],
+                ],
+                if (v.status != VenueStatus.live) ...[
+                  const SizedBox(height: 12),
+                  const CommissionPlanCard(compact: true),
                 ],
                 const SectionTitle('Manage'),
                 GridView.count(
@@ -301,7 +325,7 @@ class _VenueOverviewScreenState extends State<VenueOverviewScreen> {
                       color: AppColors.primary,
                       title: 'Edit listing',
                       subtitle: 'Photos, hours, facilities',
-                      onTap: () => _push(VenueEditorScreen(existing: v)),
+                      onTap: () => _edit(v),
                     ),
                   ],
                 ),
@@ -322,8 +346,29 @@ class _VenueOverviewScreenState extends State<VenueOverviewScreen> {
                 AppCard(
                   padding: const EdgeInsets.symmetric(vertical: 6),
                   child: Column(children: [
-                    _detail(Icons.schedule_rounded, AppColors.primary, 'Timings',
-                        '${formatTimeOfDay('${v.opensAt}:00')} – ${formatTimeOfDay('${v.closesAt}:00')} · ${_days(v.openDays)}'),
+                    _detail(Icons.schedule_rounded, AppColors.primary, 'Timings', scheduleSummary(schedule)),
+                    if (schedule.ladies.isNotEmpty)
+                      _detail(Icons.woman_rounded, AppColors.pink, 'Ladies-only hours',
+                          schedule.ladies.map((w) => '${prettyRange(w.start, w.end)} (${prettyDays(w.days)})').join('\n')),
+                    _detail(Icons.confirmation_number_rounded, AppColors.purple, 'FitKey pass access',
+                        v.fitkeyPassMode == 'blocked' && v.passBlocks.isNotEmpty
+                            ? v.passBlocks.map(passBlockLabel).join('\n')
+                            : 'Valid at all open hours'),
+                    if (v.closures.isNotEmpty)
+                      _detail(Icons.event_busy_rounded, AppColors.red, 'Closed dates',
+                          v.closures.map((c) => c.wholeDay ? c.closedOn : '${c.closedOn} ${prettyRange(c.slotStart!, c.slotEnd!)}').join(', ')),
+                    _detail(Icons.currency_rupee_rounded, AppColors.green, 'FitKey pass payout',
+                        v.monthlyFeePaise == null
+                            ? 'Monthly fee not set'
+                            : '${formatPaise(v.monthlyFeePaise!)}/month · '
+                                '${listing.passPayoutPreview != null ? '${formatPaise(listing.passPayoutPreview!.netPaise)} per check-in now' : passPreviewLine(v.monthlyFeePaise!, 1)}'),
+                    _detail(Icons.event_seat_rounded, AppColors.blue, 'Slots',
+                        '${v.slotMinutes}-min slots · up to ${v.slotCapacity} per slot'
+                        '${v.passSlotCap != null ? ' (${v.passSlotCap} FitKey pass)' : ''}'
+                        '${v.categories.contains('sports_club') ? ' · ${courtsLine(v.courts, v.sports.firstOrNull, v.slotMinutes)}' : ''}'),
+                    if (v.sports.isNotEmpty)
+                      _detail(Icons.sports_tennis_rounded, AppColors.green, 'Sports',
+                          v.sports.map((s) => sportLabels[s] ?? s).join(', ')),
                     _detail(Icons.sports_rounded, AppColors.teal, 'Trainer', v.trainerAvailable ? 'Available on the floor' : 'Not available'),
                     _detail(Icons.check_circle_outline_rounded, AppColors.green, 'Amenities',
                         v.amenities.isEmpty ? 'None added' : v.amenities.map((a) => amenityLabels[a]?.$1 ?? a).join(', ')),
@@ -356,19 +401,13 @@ class _VenueOverviewScreenState extends State<VenueOverviewScreen> {
 
   static String _orElse(String s, String fallback) => s.isEmpty ? fallback : s;
 
-  static const _dayOrder = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'];
-  static const _dayShort = {'mon': 'Mon', 'tue': 'Tue', 'wed': 'Wed', 'thu': 'Thu', 'fri': 'Fri', 'sat': 'Sat', 'sun': 'Sun'};
-
-  String _days(List<String> days) {
-    if (days.length == 7) return 'Open all week';
-    if (days.isEmpty) return 'No days set';
-    final sorted = _dayOrder.where(days.contains).map((d) => _dayShort[d]!).toList();
-    return sorted.join(', ');
-  }
-
-  List<String> _missing(PartnerVenue v) => [
-        if (v.photos.length < 4) 'add ${4 - v.photos.length} more photo${v.photos.length == 3 ? '' : 's'}',
-        if (v.categories.isEmpty) 'choose a category',
+  /// Fallback when the server sends no checklist (older API).
+  List<ChecklistItem> _missing(PartnerVenue v) => [
+        if (v.categories.isEmpty) const ChecklistItem(1, 'Choose a category'),
+        if (v.description.trim().length < minDescriptionLength) const ChecklistItem(2, 'Describe your venue (40+ characters)'),
+        if (v.latitude == null) const ChecklistItem(3, 'Drop a map pin'),
+        if (v.photos.length < minPhotosToSubmit) ChecklistItem(5, 'Add ${minPhotosToSubmit - v.photos.length} more photos'),
+        if (v.monthlyFeePaise == null || !v.passAccepted) const ChecklistItem(7, 'Set pricing & FitKey pass'),
       ];
 
   Widget _detail(IconData icon, Color color, String title, String value, {bool last = false}) => Container(
@@ -434,6 +473,79 @@ class _ManageTile extends StatelessWidget {
                 maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 11.5, color: AppColors.text2)),
           ]),
         ),
+      ]),
+    );
+  }
+}
+
+/// Setup checklist (percent + what's missing); each item opens the wizard on that step.
+class _ChecklistCard extends StatelessWidget {
+  const _ChecklistCard({required this.percent, required this.missing, required this.onStep});
+
+  final int percent;
+  final List<ChecklistItem> missing;
+  final ValueChanged<int> onStep;
+
+  @override
+  Widget build(BuildContext context) {
+    final done = missing.isEmpty;
+    return AppCard(
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Row(children: [
+          SizedBox(
+            width: 48,
+            height: 48,
+            child: Stack(alignment: Alignment.center, children: [
+              CircularProgressIndicator(
+                value: percent / 100,
+                strokeWidth: 5,
+                color: done ? AppColors.green : AppColors.primary,
+                backgroundColor: AppColors.surfaceAlt,
+              ),
+              Text('$percent%', style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 12)),
+            ]),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Text(done ? 'Listing complete' : 'Finish your listing',
+                  style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 16)),
+              Text(
+                done ? 'Review and submit — we check new listings within 48 hours.' : '${missing.length} step${missing.length == 1 ? '' : 's'} left before you can submit',
+                style: const TextStyle(color: AppColors.text2, fontSize: 12.5, height: 1.35),
+              ),
+            ]),
+          ),
+        ]),
+        if (!done) ...[
+          const SizedBox(height: 10),
+          for (final m in missing)
+            Tap(
+              onTap: () => onStep(m.step),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(vertical: 6),
+                child: Row(children: [
+                  Container(
+                    width: 24,
+                    height: 24,
+                    alignment: Alignment.center,
+                    decoration: const BoxDecoration(color: AppColors.amberSoft, shape: BoxShape.circle),
+                    child: Text('${m.step}',
+                        style: const TextStyle(fontSize: 11.5, fontWeight: FontWeight.w800, color: Color(0xFF9A5B00))),
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                      Text(m.label, style: const TextStyle(fontWeight: FontWeight.w700)),
+                      if (m.hint != null && m.hint!.isNotEmpty)
+                        Text(m.hint!, style: const TextStyle(color: AppColors.text3, fontSize: 12)),
+                    ]),
+                  ),
+                  const Icon(Icons.chevron_right_rounded, color: AppColors.text3),
+                ]),
+              ),
+            ),
+        ],
       ]),
     );
   }

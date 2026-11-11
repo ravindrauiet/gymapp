@@ -21,8 +21,8 @@ import {
 
 const router = Router();
 
-const OTP_TTL_MINUTES = 5;
-const OTP_MAX_ATTEMPTS = 5;
+export const OTP_TTL_MINUTES = 5;
+export const OTP_MAX_ATTEMPTS = 5;
 
 const limiterDefaults = {
   windowMs: 10 * 60 * 1000,
@@ -42,7 +42,7 @@ const otpLimiter = [otpIpLimiter, otpPhoneLimiter];
 
 const roleSchema = z.enum(['user', 'partner', 'admin']).default('user');
 
-const hashOtp = (phone, role, code) =>
+export const hashOtp = (phone, role, code) =>
   crypto.createHmac('sha256', config.otpSecret).update(`${phone}:${role}:${code}`).digest('hex');
 
 /** POST /auth/otp/request { phone, role? } — role is 'user' (member app) or 'partner' (partner app). */
@@ -110,7 +110,8 @@ router.post('/otp/verify', otpLimiter, async (req, res) => {
   const user = await queryOne(
     `INSERT INTO users (phone, role) VALUES ($1, $2)
      ON CONFLICT (phone, role) DO UPDATE SET updated_at = now()
-     RETURNING id, phone, email, name, role, city, gender, birth_date, avatar_url, created_at, (xmax = 0) AS inserted`,
+     RETURNING id, phone, email, name, role, city, gender, birth_date, avatar_url, created_at,
+               partner_type, is_fitkey_staff, partner_go_live_at, (xmax = 0) AS inserted`,
     [phone, role],
   );
   const { inserted, ...publicUser } = user;

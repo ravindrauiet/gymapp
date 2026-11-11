@@ -7,6 +7,7 @@ import '../../data/notifications_api.dart';
 import '../../state/session.dart';
 import '../../ui/ui.dart';
 import '../arena/arena_exercise_screen.dart';
+import '../booking/my_bookings_screen.dart';
 import '../circles/circle_detail_screen.dart';
 import '../community/contest_detail_screen.dart';
 import '../explore/venue_detail_screen.dart';
@@ -27,6 +28,8 @@ Widget? notificationTarget(AppNotification n) {
   if (s('exerciseId') != null) return ArenaExerciseScreen(exerciseId: s('exerciseId')!);
   if (n.type.startsWith('wallet_')) return const WalletScreen();
   if (n.type.startsWith('coins') || n.type.startsWith('referral')) return const ReferEarnScreen();
+  // Slot booking accepted / declined / reminders (they may also carry venueId — My bookings is the better target).
+  if (s('bookingId') != null || n.type.startsWith('booking')) return const MyBookingsScreen();
   if (s('orderId') != null) return OrderTrackingScreen(orderId: s('orderId')!);
   if (s('venueId') != null) return VenueDetailScreen(venueId: s('venueId')!);
   if (s('trainerId') != null) return TrainerDetailScreen(trainerId: s('trainerId')!);
@@ -44,6 +47,7 @@ Widget? notificationTarget(AppNotification n) {
   if (type.startsWith('store')) return (Icons.local_shipping_rounded, AppColors.green);
   if (type.startsWith('rating')) return (Icons.star_rounded, AppColors.amber);
   if (type.startsWith('arena')) return (Icons.sports_gymnastics_rounded, AppColors.green);
+  if (type.startsWith('booking')) return (Icons.event_available_rounded, AppColors.blue);
   return (Icons.notifications_rounded, AppColors.text2);
 }
 

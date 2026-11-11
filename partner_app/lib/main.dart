@@ -5,6 +5,7 @@ import 'package:provider/provider.dart';
 
 import 'screens/auth/login_screen.dart';
 import 'screens/auth/profile_screen.dart';
+import 'screens/auth/partner_type_screen.dart';
 import 'screens/home/dashboard_screen.dart';
 import 'state/partner_session.dart';
 import 'ui/ui.dart';
@@ -72,6 +73,7 @@ class _SessionGate extends StatelessWidget {
           ),
         SessionStatus.signedOut => const LoginScreen(),
         SessionStatus.needsProfile => const ProfileScreen(),
+        SessionStatus.needsPartnerType => const PartnerTypeScreen(),
         SessionStatus.signedIn => const DashboardScreen(),
       },
     );

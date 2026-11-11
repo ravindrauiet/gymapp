@@ -20,14 +20,17 @@ part 'vendor_store_profile.dart';
 
 /// FITKEY Partner — seller hub for marketplace vendors: products, orders, earnings and store profile.
 class VendorPortalScreen extends StatefulWidget {
-  const VendorPortalScreen({super.key});
+  const VendorPortalScreen({super.key, this.initialTab = 0});
+
+  /// 0 Products · 1 Orders · 2 Earnings · 3 Store.
+  final int initialTab;
 
   @override
   State<VendorPortalScreen> createState() => _VendorPortalScreenState();
 }
 
 class _VendorPortalScreenState extends State<VendorPortalScreen> with SingleTickerProviderStateMixin {
-  late final TabController _tabs = TabController(length: 4, vsync: this);
+  late final TabController _tabs = TabController(length: 4, vsync: this, initialIndex: widget.initialTab.clamp(0, 3));
 
   late Future<VendorProfile?> _profile;
   late Future<List<VendorSku>> _skus;

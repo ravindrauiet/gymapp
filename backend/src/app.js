@@ -25,6 +25,7 @@ import { marketplaceRouter, partnerVendorRouter } from './routes/marketplace.js'
 import nutritionRouter from './routes/nutrition.js';
 import { trainersRouter, partnerTrainerRouter } from './routes/trainers.js';
 import healthstopRouter from './routes/healthstop.js';
+import { partnerChemistRouter, partnerClinicRouter, partnerListingRouter } from './routes/partner_types.js';
 import aiRouter from './routes/ai.js';
 import notificationsRouter from './routes/notifications.js';
 import feedRouter from './routes/feed.js';
@@ -37,6 +38,8 @@ import walletRouter from './routes/wallet.js';
 import corporateRouter from './routes/corporate.js';
 import bookingsRouter from './routes/bookings.js';
 import membershipsRouter from './routes/memberships.js';
+import partnerRseRouter from './routes/partner_rse.js';
+import adminPayoutsRouter from './routes/admin_payouts.js';
 
 export function createApp() {
   const app = express();
@@ -97,10 +100,15 @@ export function createApp() {
   api.use('/bookings', bookingsRouter); // Slot booking + visit charging
   api.use('/memberships', membershipsRouter); // Direct centre memberships (member, partner, admin)
   // Venue owner & vendor/trainer (Partner app)
+  api.use('/partner', partnerRseRouter); // Run / Sell / Earn: home, members, slot board, requests, closures, earnings, payouts, member-QR scan
   api.use('/partner', partnerRouter);
   api.use('/partner/vendor', partnerVendorRouter);
   api.use('/partner/trainer', partnerTrainerRouter);
+  api.use('/partner/listing', partnerListingRouter); // BRD §7: trainer / clinic / chemist / store listings
+  api.use('/partner/clinic', partnerClinicRouter);
+  api.use('/partner/chemist', partnerChemistRouter);
   // FITKEY team
+  api.use('/admin/payouts', adminPayoutsRouter); // Partner payouts (run weekly, mark paid)
   api.use('/admin', adminRouter);
   // Corporate Dashboard (company / college HR)
   api.use('/corporate', corporateRouter);

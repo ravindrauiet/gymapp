@@ -1,11 +1,13 @@
-import 'package:fitkey_core/fitkey_core.dart' show amenityLabels, formatPaise, formatTimeOfDay;
+import 'package:fitkey_core/fitkey_core.dart' show amenityLabels, formatDayDate, formatPaise, formatTimeOfDay, resolveMediaUrl;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'package:url_launcher/url_launcher.dart';
+import 'package:video_player/video_player.dart';
 
 import '../../data/booking_api.dart';
 import '../../data/models.dart';
+import '../../data/venue_hours.dart';
 import '../../state/session.dart';
 import '../../ui/ui.dart';
 import '../../widgets/brand.dart';
@@ -29,7 +31,7 @@ class VenueDetailScreen extends StatefulWidget {
 }
 
 class _VenueDetailScreenState extends State<VenueDetailScreen> {
-  late Future<({Venue venue, List<PlanRef> plans})> _future;
+  late Future<({Venue venue, List<PlanRef> plans, VenueTimings timings})> _future;
   // Booking access + the centre's own plans. Failures here never break the page (it falls back to the old CTA).
   late Future<_Extras> _extras;
   final _plansKey = GlobalKey();
@@ -37,7 +39,7 @@ class _VenueDetailScreenState extends State<VenueDetailScreen> {
   @override
   void initState() {
     super.initState();
-    _future = context.read<Session>().api.venue(widget.venueId);
+    _future = context.read<Session>().api.venueWithTimings(widget.venueId);
     _extras = _loadExtras();
   }
 
@@ -51,7 +53,7 @@ class _VenueDetailScreenState extends State<VenueDetailScreen> {
   }
 
   void _retry() => setState(() {
-        _future = context.read<Session>().api.venue(widget.venueId);
+        _future = context.read<Session>().api.venueWithTimings(widget.venueId);
         _extras = _loadExtras();
       });
 
@@ -98,6 +100,7 @@ class _VenueDetailScreenState extends State<VenueDetailScreen> {
         if (snap.hasError) return Scaffold(appBar: AppBar(), body: ErrorView(error: snap.error!, onRetry: _retry));
         final venue = snap.data!.venue;
         final plans = snap.data!.plans;
+        final timings = snap.data!.timings;
         final legacyCovered = sub != null && sub.categories.any(venue.categories.contains);
         return FutureBuilder<_Extras>(
           future: _extras,
@@ -136,6 +139,7 @@ class _VenueDetailScreenState extends State<VenueDetailScreen> {
             ),
             SliverToBoxAdapter(child: _Body(
               venue: venue,
+              timings: timings,
               plans: plans,
               covered: covered,
               access: access,
@@ -276,6 +280,7 @@ class _GalleryState extends State<_Gallery> {
 class _Body extends StatelessWidget {
   const _Body({
     required this.venue,
+    this.timings = const VenueTimings(),
     required this.plans,
     required this.covered,
     required this.onDirections,
@@ -291,6 +296,7 @@ class _Body extends StatelessWidget {
   });
 
   final Venue venue;
+  final VenueTimings timings;
   final List<PlanRef> plans;
   final bool covered;
   final VoidCallback onDirections;
@@ -318,7 +324,15 @@ class _Body extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final open = isOpenNow(venue.opensAt, venue.closesAt);
+    final now = DateTime.now();
+    final open = isOpenNow(venue.opensAt, venue.closesAt, at: now, hours: timings.hours, closures: timings.closures);
+    final window = timings.hasHours ? openWindowAt(timings.hours, now, closures: timings.closures) : null;
+    final hoursText = timings.hasHours
+        ? [
+            if (window?.ladiesOnly ?? false) 'Ladies only now',
+            ?nextChangeLabel(timings.hours, now, closures: timings.closures),
+          ].join(' · ')
+        : '${formatTimeOfDay(venue.opensAt)} – ${formatTimeOfDay(venue.closesAt)}';
     final location = venue.address ?? [venue.area, venue.city].whereType<String>().join(', ');
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 0, 16, 24),
@@ -340,11 +354,21 @@ class _Body extends StatelessWidget {
           if (open != null) ...[
             Text(open ? 'Open now' : 'Closed now',
                 style: TextStyle(color: open ? AppColors.green : AppColors.red, fontWeight: FontWeight.w800)),
-            const Text('  •  ', style: TextStyle(color: AppColors.text3)),
+            if (hoursText.isNotEmpty) const Text('  •  ', style: TextStyle(color: AppColors.text3)),
           ],
-          Text('${formatTimeOfDay(venue.opensAt)} – ${formatTimeOfDay(venue.closesAt)}',
-              style: const TextStyle(color: AppColors.text2, fontWeight: FontWeight.w600)),
+          Flexible(
+            child: Text(hoursText,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(color: AppColors.text2, fontWeight: FontWeight.w600)),
+          ),
         ]),
+        if (timings.sports.isNotEmpty) ...[
+          const SizedBox(height: 12),
+          Wrap(spacing: 6, runSpacing: 6, children: [
+            for (final s in timings.sports) Tag(sportLabel(s), color: AppColors.teal, icon: _sportIcon(s), dense: true),
+          ]),
+        ],
         const SizedBox(height: 16),
         Row(children: [
           Expanded(child: _Action(Icons.directions_rounded, 'Directions', onDirections)),
@@ -387,6 +411,10 @@ class _Body extends StatelessWidget {
             ]),
           ),
         ],
+        if (timings.passBlockLabels.isNotEmpty) ...[
+          const SizedBox(height: 12),
+          _PassBlockNotice(labels: timings.passBlockLabels, venueName: venue.name, hasMembership: hasMembership),
+        ],
         // Case 2 — no FitKey pass: the centre's own plans come first, with the FitKey pass upsell.
         if (!hasPass && !hasMembership && centrePlans.isNotEmpty) ...[
           KeyedSubtree(
@@ -427,19 +455,30 @@ class _Body extends StatelessWidget {
           photoUrl: venue.photos.isEmpty ? null : venue.photos.first,
           fallbackImage: venueVisual(venue.categories.isEmpty ? '' : venue.categories.first).image,
         ),
+        if (timings.videoUrl != null) ...[
+          const SectionTitle('Video tour'),
+          _VideoTour(url: timings.videoUrl!),
+        ],
         const SectionTitle('Timings'),
-        AppCard(
-          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Row(children: [
-              const IconBubble(Icons.schedule_rounded, size: 40),
-              const SizedBox(width: 12),
-              Text('${formatTimeOfDay(venue.opensAt)} – ${formatTimeOfDay(venue.closesAt)}',
-                  style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 16)),
+        if (timings.hasHours)
+          _WeekHours(timings: timings, open: open, statusText: hoursText)
+        else
+          AppCard(
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Row(children: [
+                const IconBubble(Icons.schedule_rounded, size: 40),
+                const SizedBox(width: 12),
+                Text('${formatTimeOfDay(venue.opensAt)} – ${formatTimeOfDay(venue.closesAt)}',
+                    style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 16)),
+              ]),
+              const SizedBox(height: 14),
+              _OpenDays(days: venue.openDays),
             ]),
-            const SizedBox(height: 14),
-            _OpenDays(days: venue.openDays),
-          ]),
-        ),
+          ),
+        if (timings.closures.isNotEmpty) ...[
+          const SectionTitle('Holidays & closed dates', subtitle: 'Coming up in the next 30 days'),
+          _Closures(closures: timings.closures),
+        ],
         if (venue.amenities.isNotEmpty || venue.trainerAvailable) ...[
           const SectionTitle('Amenities'),
           GridView.count(
@@ -605,5 +644,288 @@ class _OpenDays extends StatelessWidget {
           ),
         ),
     ]);
+  }
+}
+
+IconData _sportIcon(String s) => switch (s) {
+      'badminton' || 'tennis' || 'squash' || 'table_tennis' => Icons.sports_tennis_rounded,
+      'cricket' => Icons.sports_cricket_rounded,
+      'football' => Icons.sports_soccer_rounded,
+      'basketball' => Icons.sports_basketball_rounded,
+      'skating' => Icons.roller_skating_rounded,
+      'swimming' => Icons.pool_rounded,
+      _ => Icons.sports_rounded,
+    };
+
+/// "FitKey pass not valid 6–8 PM (Mon–Fri)" — the centre keeps those hours for its own members.
+class _PassBlockNotice extends StatelessWidget {
+  const _PassBlockNotice({required this.labels, required this.venueName, required this.hasMembership});
+  final List<String> labels;
+  final String venueName;
+  final bool hasMembership;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: AppColors.amberSoft,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: AppColors.amber.withValues(alpha: 0.35)),
+      ),
+      child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        const Icon(Icons.block_rounded, color: AppColors.amber),
+        const SizedBox(width: 10),
+        Expanded(
+          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            for (final l in labels)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 3),
+                child: Text(l, style: const TextStyle(fontWeight: FontWeight.w800, color: Color(0xFF8A5600), height: 1.3)),
+              ),
+            const SizedBox(height: 3),
+            Text(
+              hasMembership
+                  ? 'Your $venueName membership works at all open hours.'
+                  : 'Your own $venueName membership works at all open hours.',
+              style: const TextStyle(color: AppColors.text2, fontSize: 12.5, height: 1.35),
+            ),
+          ]),
+        ),
+      ]),
+    );
+  }
+}
+
+/// Seven rows (Mon → Sun) of opening windows: split shifts side by side, ladies-only windows tagged, today highlighted.
+class _WeekHours extends StatelessWidget {
+  const _WeekHours({required this.timings, required this.open, required this.statusText});
+  final VenueTimings timings;
+  final bool? open;
+  final String statusText;
+
+  @override
+  Widget build(BuildContext context) {
+    final today = weekdayOf(DateTime.now());
+    final isOpen = open;
+    return AppCard(
+      child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+        Row(children: [
+          IconBubble(Icons.schedule_rounded,
+              size: 40,
+              color: isOpen == false ? AppColors.red : AppColors.green,
+              bg: isOpen == false ? AppColors.redSoft : AppColors.greenSoft),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Text(isOpen == null ? 'Opening hours' : (isOpen ? 'Open now' : 'Closed'),
+                  style: TextStyle(
+                      fontWeight: FontWeight.w800,
+                      fontSize: 16,
+                      color: isOpen == null ? AppColors.text : (isOpen ? AppColors.green : AppColors.red))),
+              if (statusText.isNotEmpty)
+                Text(statusText, style: const TextStyle(color: AppColors.text2, fontSize: 12.5, fontWeight: FontWeight.w600)),
+            ]),
+          ),
+        ]),
+        const SizedBox(height: 12),
+        for (final d in weekdayKeys) _dayRow(d, d == today),
+        if (timings.hasLadiesOnly) ...[
+          const SizedBox(height: 8),
+          Row(children: [
+            const Icon(Icons.woman_rounded, size: 16, color: AppColors.pink),
+            const SizedBox(width: 6),
+            Expanded(
+              child: Text(
+                timings.ladiesOnlyLabels.isNotEmpty ? timings.ladiesOnlyLabels.join(' · ') : 'Pink windows are for ladies only',
+                style: const TextStyle(color: AppColors.text2, fontSize: 12.5),
+              ),
+            ),
+          ]),
+        ],
+      ]),
+    );
+  }
+
+  Widget _dayRow(String day, bool isToday) {
+    final windows = hoursOn(timings.hours, day);
+    return Container(
+      margin: const EdgeInsets.only(bottom: 4),
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+      decoration: BoxDecoration(
+        color: isToday ? AppColors.primarySoft : null,
+        borderRadius: BorderRadius.circular(10),
+      ),
+      child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        SizedBox(
+          width: 52,
+          child: Text(isToday ? 'Today' : weekdayShort[day]!,
+              style: TextStyle(
+                  fontWeight: isToday ? FontWeight.w800 : FontWeight.w600,
+                  color: isToday ? AppColors.primary : AppColors.text2)),
+        ),
+        Expanded(
+          child: windows.isEmpty
+              ? const Text('Closed',
+                  textAlign: TextAlign.right, style: TextStyle(color: AppColors.text3, fontWeight: FontWeight.w600))
+              : Wrap(spacing: 6, runSpacing: 4, alignment: WrapAlignment.end, children: [
+                  for (final w in windows)
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                      decoration: BoxDecoration(
+                        color: w.ladiesOnly ? AppColors.pinkSoft : AppColors.surfaceAlt,
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: Text(
+                        w.ladiesOnly ? '${w.label} · Ladies' : w.label,
+                        style: TextStyle(
+                          fontSize: 12.5,
+                          fontWeight: FontWeight.w700,
+                          color: w.ladiesOnly ? AppColors.pink : AppColors.text,
+                        ),
+                      ),
+                    ),
+                ]),
+        ),
+      ]),
+    );
+  }
+}
+
+/// Upcoming holidays / closed slots (next 30 days, from the server).
+class _Closures extends StatelessWidget {
+  const _Closures({required this.closures});
+  final List<VenueClosure> closures;
+
+  @override
+  Widget build(BuildContext context) {
+    return AppCard(
+      child: Column(children: [
+        for (final c in closures.take(8))
+          Padding(
+            padding: const EdgeInsets.symmetric(vertical: 5),
+            child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Icon(c.fullDay ? Icons.event_busy_rounded : Icons.do_not_disturb_on_rounded,
+                  size: 18, color: c.fullDay ? AppColors.red : AppColors.amber),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  Text(formatDayDate(parseDay(c.closedOn)), style: const TextStyle(fontWeight: FontWeight.w700)),
+                  if ((c.note ?? '').isNotEmpty) Text(c.note!, style: const TextStyle(color: AppColors.text2, fontSize: 12.5)),
+                ]),
+              ),
+              Text(c.fullDay ? 'Closed all day' : 'Closed ${timeRangeLabel(c.slotStart!, c.slotEnd!)}',
+                  style: TextStyle(
+                      fontWeight: FontWeight.w700, fontSize: 12.5, color: c.fullDay ? AppColors.red : AppColors.amber)),
+            ]),
+          ),
+      ]),
+    );
+  }
+}
+
+/// Inline video tour: direct / uploaded videos play here; YouTube and other pages open outside the app.
+class _VideoTour extends StatefulWidget {
+  const _VideoTour({required this.url});
+  final String url;
+
+  @override
+  State<_VideoTour> createState() => _VideoTourState();
+}
+
+class _VideoTourState extends State<_VideoTour> {
+  VideoPlayerController? _c;
+  bool _failed = false;
+  bool _starting = false;
+
+  bool get _external {
+    final u = widget.url.toLowerCase();
+    return u.contains('youtube.com') || u.contains('youtu.be') || u.contains('instagram.com') || u.contains('vimeo.com');
+  }
+
+  void _tick() {
+    if (mounted) setState(() {});
+  }
+
+  Future<void> _play() async {
+    if (_external) {
+      final ok = await launchUrl(Uri.parse(widget.url), mode: LaunchMode.externalApplication).catchError((_) => false);
+      if (!ok && mounted) toast(context, "Couldn't open the video", error: true);
+      return;
+    }
+    final existing = _c;
+    if (existing != null) {
+      existing.value.isPlaying ? await existing.pause() : await existing.play();
+      return;
+    }
+    setState(() => _starting = true);
+    final c = VideoPlayerController.networkUrl(Uri.parse(resolveMediaUrl(widget.url) ?? widget.url));
+    try {
+      await c.initialize();
+      if (!mounted) {
+        await c.dispose();
+        return;
+      }
+      c.addListener(_tick);
+      setState(() {
+        _c = c;
+        _starting = false;
+      });
+      await c.play();
+    } catch (_) {
+      await c.dispose();
+      if (mounted) {
+        setState(() {
+          _failed = true;
+          _starting = false;
+        });
+      }
+    }
+  }
+
+  @override
+  void dispose() {
+    _c?.removeListener(_tick);
+    _c?.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final c = _c;
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(18),
+      child: AspectRatio(
+        aspectRatio: c != null && c.value.isInitialized ? c.value.aspectRatio : 16 / 9,
+        child: Tap(
+          onTap: _failed || _starting ? null : _play,
+          child: Stack(fit: StackFit.expand, children: [
+            if (c != null) VideoPlayer(c) else Container(color: AppColors.ink),
+            if (c == null || !c.value.isPlaying)
+              Center(
+                child: _starting
+                    ? const CircularProgressIndicator(color: Colors.white)
+                    : Column(mainAxisSize: MainAxisSize.min, children: [
+                        Icon(_failed ? Icons.videocam_off_rounded : Icons.play_circle_fill_rounded,
+                            color: Colors.white, size: 56),
+                        const SizedBox(height: 6),
+                        Text(
+                          _failed ? 'Video unavailable' : (_external ? 'Watch the video tour' : 'Play video tour'),
+                          style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w700),
+                        ),
+                      ]),
+              ),
+            if (c != null)
+              Positioned(
+                left: 0,
+                right: 0,
+                bottom: 0,
+                child: VideoProgressIndicator(c,
+                    allowScrubbing: true, colors: const VideoProgressColors(playedColor: AppColors.primary)),
+              ),
+          ]),
+        ),
+      ),
+    );
   }
 }

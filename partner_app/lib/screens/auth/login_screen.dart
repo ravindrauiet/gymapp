@@ -79,12 +79,13 @@ class _LoginScreenState extends State<LoginScreen> {
                             color: Colors.white, fontSize: 36, fontWeight: FontWeight.w800, height: 1.05, letterSpacing: -1.2)),
                     const SizedBox(height: 10),
                     const Text(
-                        'List your gym, pool, studio or club, sell on the FITKEY store, coach members — and track every check-in.',
+                        'List your gym, pool, studio, sports club, clinic or pharmacy, coach members or sell on the FITKEY store.',
                         style: TextStyle(color: Colors.white70, fontSize: 14.5, height: 1.4, fontWeight: FontWeight.w500)),
                     const SizedBox(height: 14),
                     Wrap(spacing: 8, runSpacing: 8, children: [
                       for (final c in const ['gym', 'swimming_pool', 'yoga_studio', 'sports_club', 'mma', 'dance'])
                         _HeroChip(venueVisual(c)),
+                      for (final v in _otherPartnerChips) _HeroChip(v),
                     ]),
                   ]),
                 ),
@@ -161,6 +162,14 @@ class _LoginScreenState extends State<LoginScreen> {
     );
   }
 }
+
+/// Non-venue partner types shown next to the venue categories on the landing page (Partner BRD §2).
+const _otherPartnerChips = [
+  CatVisual('Trainer', Icons.sports_gymnastics_rounded, AppColors.purple, AppColors.purpleSoft, AppImages.strength),
+  CatVisual('Clinic', Icons.local_hospital_rounded, AppColors.blue, AppColors.blueSoft, AppImages.gym),
+  CatVisual('Chemist', Icons.local_pharmacy_rounded, AppColors.teal, AppColors.tealSoft, AppImages.gym),
+  CatVisual('Store', Icons.storefront_rounded, AppColors.amber, AppColors.amberSoft, AppImages.supplements),
+];
 
 class _HeroChip extends StatelessWidget {
   const _HeroChip(this.v);

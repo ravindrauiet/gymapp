@@ -6,6 +6,7 @@ import { requireAuth } from '../middleware/auth.js';
 import { HttpError, badRequest, conflict, notFound, validate } from '../utils/http.js';
 import { VENUE_CATEGORY_IDS } from '../utils/constants.js';
 import { notify } from '../utils/notify.js';
+import { commissionPct as foundingCommissionPct, directSalePayout } from '../utils/commission.js';
 import { dateSchema, uuidSchema } from '../utils/schemas.js';
 import { nowInTz, ownVenue, payoutRatePaise, venueCoinCost } from './bookings.js';
 
@@ -21,21 +22,36 @@ export const MEMBERSHIP_DEFAULTS = {
   commissionPct: 15, // FitKey commission on direct membership sales when no centre/category value is set
   maxStartAheadDays: 60, // a membership can start up to 60 days from today
 };
-export const DURATION_DAYS = { day: 1, monthly: 30, quarterly: 90, annual: 365 };
-export const DURATION_LABELS = { day: 'Day pass', monthly: 'Monthly', quarterly: 'Quarterly', annual: 'Annual' };
+// Centre plan durations (contract enum). 'hourly' = a single 1-hour visit pass: duration_days 1 and the bought
+// membership is limited to 1 visit (max_visits_per_day = max_visits_per_week = 1). 'annual' = legacy alias of yearly.
+export const PLAN_DURATIONS = ['hourly', 'day', 'weekly', 'monthly', 'quarterly', 'yearly', 'annual'];
+export const DURATION_DAYS = { hourly: 1, day: 1, weekly: 7, monthly: 30, quarterly: 90, yearly: 365, annual: 365 };
+export const DURATION_LABELS = {
+  hourly: '1-hour visit',
+  day: 'Day pass',
+  weekly: 'Weekly',
+  monthly: 'Monthly',
+  quarterly: 'Quarterly',
+  yearly: 'Yearly',
+  annual: 'Yearly',
+};
+/** Visit limits a duration forces (hourly = one visit), else the plan's own limits. */
+const visitLimits = (duration, perDay, perWeek) =>
+  duration === 'hourly' ? { perDay: 1, perWeek: 1 } : { perDay: perDay ?? null, perWeek: perWeek ?? null };
 
 const priceAfterOffer = (pricePaise, offerPct) => Math.round((pricePaise * (100 - (offerPct ?? 0))) / 100);
 
-/** Commission % for a venue: centre override → its first category → default. */
+/**
+ * FitKey commission % on a direct plan sale at this venue today: the founding-partner plan (utils/commission.js,
+ * 0% / 2.5% / 5% by year from the owner's go-live). The old per-centre / per-category 15% rule is retired for sales.
+ */
 async function commissionPctFor(venueId, client) {
   const r = await queryOne(
-    `SELECT COALESCE(v.commission_pct, (SELECT commission_pct FROM category_commissions WHERE category = v.categories[1]), $2)
-              AS pct
-     FROM venues v WHERE v.id = $1`,
-    [venueId, MEMBERSHIP_DEFAULTS.commissionPct],
+    `SELECT u.partner_go_live_at FROM venues v JOIN users u ON u.id = v.owner_id WHERE v.id = $1`,
+    [venueId],
     client,
   );
-  return Number(r?.pct ?? MEMBERSHIP_DEFAULTS.commissionPct);
+  return foundingCommissionPct(r?.partnerGoLiveAt ?? null);
 }
 
 const PLAN_FIELDS = `p.id, p.venue_id, p.name, p.description, p.duration, p.duration_days, p.price_paise, p.inclusions,
@@ -47,7 +63,7 @@ const planBody = z
   .object({
     name: z.string().trim().min(2).max(120),
     description: z.string().trim().max(1000).optional().nullable(),
-    duration: z.enum(['day', 'monthly', 'quarterly', 'annual']),
+    duration: z.enum(PLAN_DURATIONS),
     pricePaise: z.number().int().min(100).max(10_000_000),
     inclusions: z.array(z.string().trim().min(1).max(80)).max(20).default([]),
     maxVisitsPerDay: z.number().int().min(1).max(10).optional().nullable(),
@@ -248,7 +264,8 @@ partner.post('/venues/:venueId/plans', async (req, res) => {
                                max_visits_per_day, max_visits_per_week, offer_pct, is_active)
      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11) RETURNING id`,
     [venue.id, b.name, b.description ?? null, b.duration, DURATION_DAYS[b.duration], b.pricePaise, b.inclusions,
-      b.maxVisitsPerDay ?? null, b.maxVisitsPerWeek ?? null, b.offerPct, b.isActive],
+      visitLimits(b.duration, b.maxVisitsPerDay, b.maxVisitsPerWeek).perDay,
+      visitLimits(b.duration, b.maxVisitsPerDay, b.maxVisitsPerWeek).perWeek, b.offerPct, b.isActive],
   );
   res.status(201).json({ plan: await planOut(row.id) });
 });
@@ -263,7 +280,8 @@ partner.put('/plans/:id', async (req, res) => {
        approval_status = 'pending', review_note = NULL, reviewed_at = NULL, updated_at = now()
      WHERE id = $1`,
     [plan.id, b.name, b.description ?? null, b.duration, DURATION_DAYS[b.duration], b.pricePaise, b.inclusions,
-      b.maxVisitsPerDay ?? null, b.maxVisitsPerWeek ?? null, b.offerPct, b.isActive],
+      visitLimits(b.duration, b.maxVisitsPerDay, b.maxVisitsPerWeek).perDay,
+      visitLimits(b.duration, b.maxVisitsPerDay, b.maxVisitsPerWeek).perWeek, b.offerPct, b.isActive],
   );
   res.json({ plan: await planOut(plan.id) });
 });
@@ -351,15 +369,18 @@ async function earningsFor(venueIds, month) {
      )
      SELECT m.month,
             COALESCE(ms.count, 0) AS memberships_sold, COALESCE(ms.gross, 0) AS membership_gross_paise,
-            COALESCE(ms.commission, 0) AS commission_paise, COALESCE(ms.gross, 0) - COALESCE(ms.commission, 0) AS membership_net_paise,
+            COALESCE(ms.commission, 0) AS commission_paise, COALESCE(ms.gst, 0) AS gst_paise,
+            COALESCE(ms.net, 0) AS membership_net_paise,
             COALESCE(vp.count, 0) AS fitkey_visits, COALESCE(vp.total, 0) AS visit_payout_paise,
             COALESCE(vp.coins, 0) AS coins_visits, COALESCE(vp.session, 0) AS session_visits, COALESCE(vp.legacy, 0) AS legacy_visits,
             COALESCE(mv.count, 0) AS membership_visits,
-            COALESCE(ms.gross, 0) - COALESCE(ms.commission, 0) + COALESCE(vp.total, 0) AS total_payable_paise
+            COALESCE(ms.net, 0) + COALESCE(vp.total, 0) AS total_payable_paise
      FROM months m
      LEFT JOIN LATERAL (
-       SELECT COUNT(*) AS count, SUM(amount_paise) AS gross, SUM(commission_paise) AS commission FROM direct_memberships
-       WHERE venue_id = ANY($1) AND (created_at AT TIME ZONE $4)::date >= m.s AND (created_at AT TIME ZONE $4)::date < m.e
+       SELECT COUNT(*) AS count, SUM(amount_paise) AS gross, SUM(commission_paise) AS commission, SUM(gst_paise) AS gst,
+              SUM(COALESCE(partner_net_paise, amount_paise - commission_paise)) AS net
+       FROM direct_memberships
+       WHERE venue_id = ANY($1) AND status <> 'cancelled' AND (created_at AT TIME ZONE $4)::date >= m.s AND (created_at AT TIME ZONE $4)::date < m.e
      ) ms ON true
      LEFT JOIN LATERAL (
        SELECT COUNT(*) AS count, SUM(amount_paise) AS total,
@@ -417,7 +438,7 @@ partner.get('/statement', async (req, res) => {
   const months = await earningsFor(ids, { from: start.toISOString().slice(0, 10), to: end.toISOString().slice(0, 10) });
   const totals = months.reduce(
     (acc, m) => {
-      for (const k of ['membershipGrossPaise', 'commissionPaise', 'membershipNetPaise', 'visitPayoutPaise', 'totalPayablePaise', 'fitkeyVisits', 'membershipsSold']) {
+      for (const k of ['membershipGrossPaise', 'commissionPaise', 'gstPaise', 'membershipNetPaise', 'visitPayoutPaise', 'totalPayablePaise', 'fitkeyVisits', 'membershipsSold']) {
         acc[k] = (acc[k] ?? 0) + m[k];
       }
       return acc;
@@ -512,7 +533,8 @@ async function buyMembership(userId, planId, startDate) {
   if (config.paymentsMode !== 'mock') throw new HttpError(501, 'Payment gateway not configured');
   return withTransaction(async (client) => {
     const plan = await queryOne(
-      `SELECT p.*, v.name AS venue_name, v.owner_id FROM centre_plans p JOIN venues v ON v.id = p.venue_id
+      `SELECT p.*, v.name AS venue_name, v.owner_id, o.partner_go_live_at
+       FROM centre_plans p JOIN venues v ON v.id = p.venue_id JOIN users o ON o.id = v.owner_id
        WHERE p.id = $1 AND v.status = 'live' AND p.is_active AND p.approval_status = 'approved' AND p.archived_at IS NULL`,
       [planId],
       client,
@@ -538,16 +560,18 @@ async function buyMembership(userId, planId, startDate) {
     if (overlap) throw conflict(`Your ${overlap.planName} already runs until ${overlap.endsOn} — start the renewal after that`);
 
     const amount = priceAfterOffer(plan.pricePaise, plan.offerPct);
-    const pct = await commissionPctFor(plan.venueId, client);
+    // Case 1 (contract §F): partner gets price − GST (price × 5/105) − that year's commission on the price.
+    const sale = directSalePayout(amount, plan.partnerGoLiveAt ?? null, new Date());
+    const limits = visitLimits(plan.duration, plan.maxVisitsPerDay, plan.maxVisitsPerWeek);
     const membership = await queryOne(
       `INSERT INTO direct_memberships (user_id, venue_id, plan_id, plan_name, duration, starts_on, ends_on, price_paise,
                                        discount_pct, amount_paise, commission_pct, commission_paise, max_visits_per_day,
-                                       max_visits_per_week, inclusions, payment_ref)
-       VALUES ($1, $2, $3, $4, $5, $6::date, $6::date + ($7::int - 1), $8, $9, $10, $11, $12, $13, $14, $15, $16)
+                                       max_visits_per_week, inclusions, payment_ref, gst_paise, partner_net_paise)
+       VALUES ($1, $2, $3, $4, $5, $6::date, $6::date + ($7::int - 1), $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)
        RETURNING id`,
       [userId, plan.venueId, plan.id, plan.name, plan.duration, start, plan.durationDays, plan.pricePaise, plan.offerPct,
-        amount, pct, Math.round((amount * pct) / 100), plan.maxVisitsPerDay, plan.maxVisitsPerWeek, plan.inclusions,
-        `MOCK-${Date.now()}`],
+        amount, sale.commissionPct, sale.commissionPaise, limits.perDay, limits.perWeek, plan.inclusions,
+        `MOCK-${Date.now()}`, sale.gstPaise, sale.netPaise],
       client,
     );
     return { id: membership.id, plan };

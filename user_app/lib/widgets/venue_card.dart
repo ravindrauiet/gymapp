@@ -3,11 +3,22 @@ import 'package:flutter/material.dart';
 
 import '../data/models.dart';
 import '../data/ratings_api.dart' show isNewRating;
+import '../data/venue_hours.dart';
 import '../ui/ui.dart';
 import 'rating_widgets.dart';
 
-/// Whether a venue is open right now, from its "HH:MM:SS" opening hours.
-bool? isOpenNow(String? opensAt, String? closesAt, [DateTime? at]) {
+/// Whether a venue is open right now. Uses the per-day [hours] (split shifts, ladies-only windows) and
+/// [closures] (holidays / blocked slots) when the venue has them (Partner BRD), else its single
+/// "HH:MM:SS" opensAt / closesAt pair. Null when nothing is known.
+bool? isOpenNow(
+  String? opensAt,
+  String? closesAt, {
+  DateTime? at,
+  List<OpeningHour>? hours,
+  List<VenueClosure> closures = const [],
+}) {
+  if (hours != null && hours.isNotEmpty) return openWindowAt(hours, at ?? DateTime.now(), closures: closures) != null;
+  if (closures.any((c) => c.covers(at ?? DateTime.now()))) return false;
   int? mins(String? t) =>
       t == null || t.length < 5 ? null : int.parse(t.substring(0, 2)) * 60 + int.parse(t.substring(3, 5));
   final o = mins(opensAt), c = mins(closesAt);
@@ -19,9 +30,12 @@ bool? isOpenNow(String? opensAt, String? closesAt, [DateTime? at]) {
 
 /// Full-width venue card with a large photo, in the style of restaurant listings.
 class VenueCard extends StatelessWidget {
-  const VenueCard({super.key, required this.venue, required this.onTap, this.compact = false});
+  const VenueCard({super.key, required this.venue, required this.onTap, this.compact = false, this.hours});
 
   final VenueSummary venue;
+
+  /// Per-day opening hours when the caller has them (split shifts); else opensAt / closesAt are used.
+  final List<OpeningHour>? hours;
   final VoidCallback onTap;
 
   /// Narrower card for horizontal carousels.
@@ -30,7 +44,7 @@ class VenueCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final cat = venueVisual(venue.categories.isEmpty ? '' : venue.categories.first);
-    final open = isOpenNow(venue.opensAt, venue.closesAt);
+    final open = isOpenNow(venue.opensAt, venue.closesAt, hours: hours);
     final labels = venue.categories.map((c) => venueVisual(c).label).join(' • ');
 
     return Tap(
