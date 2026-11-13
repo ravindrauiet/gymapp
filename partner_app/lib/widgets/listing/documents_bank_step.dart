@@ -214,7 +214,7 @@ class _DocumentsBankStepState extends State<DocumentsBankStep> {
         bankOk: _bankOk,
       ),
       const SizedBox(height: 18),
-      _GroupLabel('Documents', trailing: '$requiredDone/${widget.requiredDocTypes.length} required'),
+      _GroupLabel('Documents', trailing: '$requiredDone/${widget.requiredDocTypes.length} added'),
       const SizedBox(height: 8),
       if (_docsError != null && !_docsLoaded)
         AppCard(
@@ -290,7 +290,7 @@ class _StepIntro extends StatelessWidget {
         ]),
         const SizedBox(height: 6),
         const Text(
-          'Upload clear photos or PDFs. Our team checks every document before you go live — your details are never shown to members.',
+          'Optional — add these now or later. Verified documents earn a trust badge, and a verified bank account is needed before your first payout. Never shown to members.',
           style: TextStyle(color: AppColors.text2, fontSize: 12.5, height: 1.4),
         ),
         const SizedBox(height: 10),
@@ -412,7 +412,7 @@ class _DocTypeCard extends StatelessWidget {
               Text(_label, style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 14.5)),
               const SizedBox(height: 2),
               Text(
-                required ? 'Required' : 'Optional',
+                required ? 'Recommended' : 'Optional',
                 style: TextStyle(
                   fontSize: 12,
                   fontWeight: FontWeight.w700,
@@ -423,6 +423,7 @@ class _DocTypeCard extends StatelessWidget {
           ),
           if (docs.isEmpty)
             FilledButton.tonalIcon(
+              style: FilledButton.styleFrom(minimumSize: const Size(0, 40), padding: const EdgeInsets.symmetric(horizontal: 14)),
               onPressed: () => _add(context),
               icon: const Icon(Icons.upload_rounded, size: 18),
               label: const Text('Upload'),

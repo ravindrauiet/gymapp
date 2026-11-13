@@ -4,6 +4,7 @@ import { config } from '../config.js';
 import { query, queryOne, withTransaction } from '../db/index.js';
 import { requireAuth } from '../middleware/auth.js';
 import { HttpError, badRequest, conflict, notFound, validate } from '../utils/http.js';
+import { paymentRequired } from '../utils/payments.js';
 import { VENUE_CATEGORY_IDS } from '../utils/constants.js';
 import { notify } from '../utils/notify.js';
 import { commissionPct as foundingCommissionPct, directSalePayout } from '../utils/commission.js';
@@ -529,8 +530,11 @@ router.get('/me', async (req, res) => {
   res.json({ memberships, fitkeyPass, nonRefundable: true });
 });
 
-async function buyMembership(userId, planId, startDate) {
-  if (config.paymentsMode !== 'mock') throw new HttpError(501, 'Payment gateway not configured');
+/**
+ * Validates (and, unless dryRun, creates) a direct membership. dryRun = the payment quote: same checks, nothing
+ * written, returns the amount to charge.
+ */
+async function buyMembership(userId, planId, startDate, { paymentRef = null, dryRun = false } = {}) {
   return withTransaction(async (client) => {
     const plan = await queryOne(
       `SELECT p.*, v.name AS venue_name, v.owner_id, o.partner_go_live_at
@@ -560,6 +564,7 @@ async function buyMembership(userId, planId, startDate) {
     if (overlap) throw conflict(`Your ${overlap.planName} already runs until ${overlap.endsOn} — start the renewal after that`);
 
     const amount = priceAfterOffer(plan.pricePaise, plan.offerPct);
+    if (dryRun) return { amount, plan, start };
     // Case 1 (contract §F): partner gets price − GST (price × 5/105) − that year's commission on the price.
     const sale = directSalePayout(amount, plan.partnerGoLiveAt ?? null, new Date());
     const limits = visitLimits(plan.duration, plan.maxVisitsPerDay, plan.maxVisitsPerWeek);
@@ -571,7 +576,7 @@ async function buyMembership(userId, planId, startDate) {
        RETURNING id`,
       [userId, plan.venueId, plan.id, plan.name, plan.duration, start, plan.durationDays, plan.pricePaise, plan.offerPct,
         amount, sale.commissionPct, sale.commissionPaise, limits.perDay, limits.perWeek, plan.inclusions,
-        `MOCK-${Date.now()}`, sale.gstPaise, sale.netPaise],
+        paymentRef ?? `MOCK-${Date.now()}`, sale.gstPaise, sale.netPaise],
       client,
     );
     return { id: membership.id, plan };
@@ -579,50 +584,84 @@ async function buyMembership(userId, planId, startDate) {
 }
 
 const buySchema = z.object({ planId: uuidSchema, startDate: dateSchema.optional() });
+const renewSchema = z.object({ membershipId: uuidSchema, startDate: dateSchema.optional() });
 
-/**
- * POST /memberships {planId, startDate?} — buys a centre's membership (mock payment, active instantly, non-refundable).
- */
-router.post('/', async (req, res) => {
-  const body = validate(buySchema, req.body);
-  const { id, plan } = await buyMembership(req.user.id, body.planId, body.startDate);
-  const membership = await queryOne(`${MEMBERSHIP_SELECT} WHERE d.id = $1`, [id, config.tz]);
-  await notify(req.user.id, {
-    type: 'membership',
-    title: `${plan.name} at ${plan.venueName} is yours`,
-    body: `Valid ${membership.startsOn} → ${membership.endsOn}. Book a slot or scan the QR at the centre.`,
-    data: { venueId: plan.venueId, membershipId: id },
-  });
-  const buyer = await queryOne(`SELECT name FROM users WHERE id = $1`, [req.user.id]);
-  await notify(plan.ownerId, {
-    type: 'membership_sale',
-    title: `New member: ${plan.name}`,
-    body: `${buyer?.name ?? 'A member'} bought ${plan.name} (${membership.startsOn} → ${membership.endsOn}).`,
-    data: { venueId: plan.venueId, membershipId: id },
-  });
-  res.status(201).json({ membership, paymentsMode: config.paymentsMode });
-});
-
-/** POST /memberships/:id/renew {startDate?} — buys the same plan again, starting the day after it ends (or today). */
-router.post('/:id/renew', async (req, res) => {
-  const id = validate(uuidSchema, req.params.id);
-  const { startDate } = validate(z.object({ startDate: dateSchema.optional() }), req.body ?? {});
+async function renewTarget(userId, membershipId) {
   const current = await queryOne(
     `SELECT plan_id, to_char(GREATEST(ends_on + 1, (now() AT TIME ZONE $3)::date), 'YYYY-MM-DD') AS next_start
      FROM direct_memberships WHERE id = $1 AND user_id = $2`,
-    [id, req.user.id, config.tz],
+    [membershipId, userId, config.tz],
   );
   if (!current) throw notFound('Membership not found');
   if (!current.planId) throw conflict('This centre no longer offers that plan');
-  const { id: newId, plan } = await buyMembership(req.user.id, current.planId, startDate ?? current.nextStart);
-  const membership = await queryOne(`${MEMBERSHIP_SELECT} WHERE d.id = $1`, [newId, config.tz]);
-  await notify(req.user.id, {
+  return current;
+}
+
+async function afterPurchase(userId, id, plan, { renewal }) {
+  const membership = await queryOne(`${MEMBERSHIP_SELECT} WHERE d.id = $1`, [id, config.tz]);
+  await notify(userId, {
     type: 'membership',
-    title: `Renewed: ${plan.name} at ${plan.venueName}`,
-    body: `Valid ${membership.startsOn} → ${membership.endsOn}.`,
-    data: { venueId: plan.venueId, membershipId: newId },
+    title: renewal ? `Renewed: ${plan.name} at ${plan.venueName}` : `${plan.name} at ${plan.venueName} is yours`,
+    body: renewal
+      ? `Valid ${membership.startsOn} → ${membership.endsOn}.`
+      : `Valid ${membership.startsOn} → ${membership.endsOn}. Book a slot or scan the QR at the centre.`,
+    data: { venueId: plan.venueId, membershipId: id },
   });
-  res.status(201).json({ membership, paymentsMode: config.paymentsMode });
+  if (!renewal) {
+    const buyer = await queryOne(`SELECT name FROM users WHERE id = $1`, [userId]);
+    await notify(plan.ownerId, {
+      type: 'membership_sale',
+      title: `New member: ${plan.name}`,
+      body: `${buyer?.name ?? 'A member'} bought ${plan.name} (${membership.startsOn} → ${membership.endsOn}).`,
+      data: { venueId: plan.venueId, membershipId: id },
+    });
+  }
+  return { membership, paymentsMode: config.paymentsMode };
+}
+
+/** Payments (routes/payments.js): a centre's own plan — quote (checks + price) and fulfill (create once paid). */
+export const membershipPurchase = {
+  async quote(userId, payload) {
+    const body = validate(buySchema, payload);
+    const { amount, plan, start } = await buyMembership(userId, body.planId, body.startDate, { dryRun: true });
+    return { amountPaise: amount, description: `${plan.name} · ${plan.venueName}`, payload: { planId: body.planId, startDate: start } };
+  },
+  async fulfill(userId, payload, { paymentRef }) {
+    const body = validate(buySchema, payload);
+    const { id, plan } = await buyMembership(userId, body.planId, body.startDate, { paymentRef });
+    return afterPurchase(userId, id, plan, { renewal: false });
+  },
+};
+
+export const membershipRenewal = {
+  async quote(userId, payload) {
+    const body = validate(renewSchema, payload);
+    const cur = await renewTarget(userId, body.membershipId);
+    const start = body.startDate ?? cur.nextStart;
+    const { amount, plan } = await buyMembership(userId, cur.planId, start, { dryRun: true });
+    return { amountPaise: amount, description: `Renew ${plan.name} · ${plan.venueName}`, payload: { membershipId: body.membershipId, startDate: start } };
+  },
+  async fulfill(userId, payload, { paymentRef }) {
+    const body = validate(renewSchema, payload);
+    const cur = await renewTarget(userId, body.membershipId);
+    const { id, plan } = await buyMembership(userId, cur.planId, body.startDate ?? cur.nextStart, { paymentRef });
+    return afterPurchase(userId, id, plan, { renewal: true });
+  },
+};
+
+/** POST /memberships {planId, startDate?} — mock mode only; with Razorpay the app pays via /payments (purpose membership). */
+router.post('/', async (req, res) => {
+  if (config.paymentsMode !== 'mock') throw paymentRequired('membership');
+  const body = validate(buySchema, req.body);
+  res.status(201).json(await membershipPurchase.fulfill(req.user.id, body, { paymentRef: `MOCK-${Date.now()}` }));
+});
+
+/** POST /memberships/:id/renew {startDate?} — mock mode only; with Razorpay via /payments (purpose membership_renew). */
+router.post('/:id/renew', async (req, res) => {
+  if (config.paymentsMode !== 'mock') throw paymentRequired('membership_renew');
+  const id = validate(uuidSchema, req.params.id);
+  const { startDate } = validate(z.object({ startDate: dateSchema.optional() }), req.body ?? {});
+  res.status(201).json(await membershipRenewal.fulfill(req.user.id, { membershipId: id, startDate }, { paymentRef: `MOCK-${Date.now()}` }));
 });
 
 export default router;

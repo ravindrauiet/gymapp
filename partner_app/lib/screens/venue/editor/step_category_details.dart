@@ -196,7 +196,7 @@ class _DetailsStepState extends State<_DetailsStep> {
               counter: const SizedBox.shrink(),
               helperText: descOk
                   ? 'Looks good · $descLen characters'
-                  : '$descLen / $minDescriptionLength characters minimum',
+                  : '$descLen / $minDescriptionLength characters recommended',
               helperStyle: TextStyle(
                 color: descOk ? AppColors.green : (descLen == 0 ? AppColors.text3 : AppColors.amber),
                 fontWeight: FontWeight.w700,
@@ -206,9 +206,7 @@ class _DetailsStepState extends State<_DetailsStep> {
               setState(() => venue.description = v);
               widget.onChanged();
             },
-            validator: (v) => (v ?? '').trim().length < minDescriptionLength
-                ? 'Write at least $minDescriptionLength characters'
-                : null,
+            // Optional: a longer description is recommended (counter below), never required.
           ),
           const SizedBox(height: 4),
           ClipRRect(

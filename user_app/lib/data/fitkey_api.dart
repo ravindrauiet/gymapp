@@ -3,6 +3,7 @@ import 'package:fitkey_core/fitkey_core.dart';
 import 'package:image_picker/image_picker.dart' show XFile;
 
 import 'models.dart';
+import '../services/payments.dart';
 
 /// All member-facing endpoints of the FITKEY API.
 class FitkeyApi {
@@ -77,7 +78,11 @@ class FitkeyApi {
       .map((s) => Subscription.fromJson(s))
       .toList();
 
-  Future<void> buyPlan(String planId) => _client.post('/subscriptions', {'planId': planId});
+  /// Buys a FitKey pass plan: Razorpay checkout when payments are live, instant in demo mode.
+  Future<void> buyPlan(String planId) async {
+    await Payments.run(this,
+        purpose: 'subscription', payload: {'planId': planId}, mock: () => _client.post('/subscriptions', {'planId': planId}));
+  }
 
   // ---- Venues ---------------------------------------------------------------
   Future<List<VenueSummary>> venues({String? category, String? city, String? q, int limit = 20, int page = 1}) async {
@@ -225,7 +230,11 @@ class FitkeyApi {
       'shippingAddress': shippingAddress,
       'paymentMethod': paymentMethod,
     };
-    final r = await _client.post('/marketplace/orders', payload);
+    // Cash on delivery is placed directly; online methods pay through Razorpay first (order created once paid).
+    final r = paymentMethod == 'cod'
+        ? await _client.post('/marketplace/orders', payload)
+        : await Payments.run(this,
+            purpose: 'store_order', payload: payload, mock: () => _client.post('/marketplace/orders', payload));
     return MarketplaceOrder.fromJson(r['order']);
   }
 

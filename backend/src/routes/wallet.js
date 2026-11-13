@@ -6,6 +6,7 @@ import { pool, query, queryOne, withTransaction } from '../db/index.js';
 import { requireAuth } from '../middleware/auth.js';
 import { HttpError, badRequest, conflict, notFound, validate } from '../utils/http.js';
 import { notify } from '../utils/notify.js';
+import { paymentRequired } from '../utils/payments.js';
 import { uuidSchema } from '../utils/schemas.js';
 import {
   activateReferralRewards,
@@ -536,85 +537,112 @@ router.get('/redeemable', async (req, res) => {
 });
 
 /**
- * POST /wallet/passes { kind: 'coin_pack'|'session_plan', id, useCoins?: boolean, coins?: number }
- * Buys a FitKey pass. Referral coins (only) may pay up to pass_max_coin_pct% of the price.
- * PAYMENTS_MODE=mock: activates instantly, no money is taken — swap in a gateway order + webhook before launch.
+ * Buying a FitKey pass (coin pack / session plan), split for payments (routes/payments.js):
+ *  quote   → prices it; referral coins (only) may pay up to pass_max_coin_pct% → the rest is charged
+ *  fulfill → creates the purchase once paid (or instantly with PAYMENTS_MODE=mock).
  */
-router.post('/passes', async (req, res) => {
-  const body = validate(
-    z.object({
-      kind: z.enum(['coin_pack', 'session_plan']),
-      id: uuidSchema,
-      useCoins: z.boolean().default(false),
-      coins: z.number().int().min(0).optional(),
-    }),
-    req.body,
+const passSchema = z.object({
+  kind: z.enum(['coin_pack', 'session_plan']),
+  id: uuidSchema,
+  useCoins: z.boolean().default(false),
+  coins: z.number().int().min(0).optional(),
+});
+
+async function passItem(kind, id, client) {
+  const item = await queryOne(
+    kind === 'coin_pack' ? `SELECT * FROM coin_packs WHERE id = $1` : `SELECT * FROM session_plans WHERE id = $1`,
+    [id],
+    client,
   );
-  if (config.paymentsMode !== 'mock') throw new HttpError(501, 'Payment gateway not configured');
+  if (!item) throw notFound(kind === 'coin_pack' ? 'Coin pack not found' : 'Session plan not found');
+  return item;
+}
 
-  const result = await withTransaction(async (client) => {
-    const buyer = await queryOne(`SELECT id, name FROM users WHERE id = $1 FOR UPDATE`, [req.user.id], client);
-    const item = await queryOne(
-      body.kind === 'coin_pack'
-        ? `SELECT * FROM coin_packs WHERE id = $1 AND is_active`
-        : `SELECT * FROM session_plans WHERE id = $1 AND is_active`,
-      [body.id],
-      client,
-    );
-    if (!item) throw notFound(body.kind === 'coin_pack' ? 'Coin pack not found' : 'Session plan not found');
-
-    const id = crypto.randomUUID();
-    const isPack = body.kind === 'coin_pack';
-    const purchase = await queryOne(
-      `INSERT INTO fitkey_purchases (id, user_id, kind, coin_pack_id, session_plan_id, name, price_paise, paid_paise,
-         payment_ref, coins, coins_remaining, sessions_total, expires_at)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $7, $8, $9, $9, $10, now() + make_interval(days => $11)) RETURNING *`,
-      [id, req.user.id, body.kind, isPack ? item.id : null, isPack ? null : item.id, item.name, item.pricePaise,
-        `MOCK-${Date.now()}`, isPack ? item.coins : 0, isPack ? 0 : item.sessions, item.validityDays],
-      client,
-    );
-
-    let used = { coins: 0, referral: 0, proveit: 0 };
+export const walletPassPurchase = {
+  async quote(userId, payload) {
+    const body = validate(passSchema, payload);
+    const item = await passItem(body.kind, body.id);
+    if (!item.isActive) throw notFound(body.kind === 'coin_pack' ? 'Coin pack not found' : 'Session plan not found');
+    let coins = 0;
     if (body.useCoins && (body.coins ?? 1) > 0) {
-      used = await redeemCoins(client, req.user.id, {
-        context: 'pass', amountPaise: item.pricePaise, requested: body.coins ?? null, ref: `purchase:${id}`, purchaseId: id,
-      });
+      const r = await redeemable(userId, 'pass', item.pricePaise);
+      coins = body.coins == null ? r.coins : Math.min(body.coins, r.coins);
     }
-    const final = await queryOne(
-      `UPDATE fitkey_purchases SET coins_redeemed = $2, paid_paise = price_paise - $2 * 100 WHERE id = $1 RETURNING *`,
-      [id, used.coins],
-      client,
-    );
-    if (isPack) {
-      await query(
-        `INSERT INTO coin_ledger (user_id, amount, kind, wallet, status, unlocked_at, purchase_id, ref, note)
-         VALUES ($1, $2, 'pack_purchase', 'fitkey', 'available', now(), $3::uuid, ($3::uuid)::text, $4)`,
-        [req.user.id, item.coins, id, `Bought ${item.name}`],
+    return {
+      amountPaise: item.pricePaise - coins * 100,
+      description: `FITKEY ${item.name}`,
+      payload: { ...body, coins, useCoins: coins > 0 },
+    };
+  },
+
+  async fulfill(userId, payload, { paymentRef }) {
+    const body = validate(passSchema, payload);
+    const result = await withTransaction(async (client) => {
+      const buyer = await queryOne(`SELECT id, name FROM users WHERE id = $1 FOR UPDATE`, [userId], client);
+      const item = await passItem(body.kind, body.id, client);
+      const id = crypto.randomUUID();
+      const isPack = body.kind === 'coin_pack';
+      const purchase = await queryOne(
+        `INSERT INTO fitkey_purchases (id, user_id, kind, coin_pack_id, session_plan_id, name, price_paise, paid_paise,
+           payment_ref, coins, coins_remaining, sessions_total, expires_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $7, $8, $9, $9, $10, now() + make_interval(days => $11)) RETURNING *`,
+        [id, userId, body.kind, isPack ? item.id : null, isPack ? null : item.id, item.name, item.pricePaise,
+          paymentRef, isPack ? item.coins : 0, isPack ? 0 : item.sessions, item.validityDays],
         client,
       );
-    }
-    const activation = await activateReferralRewards(client, req.user.id);
-    const b = await balances(req.user.id, client);
-    return { purchase: final ?? purchase, used, activation, buyerName: buyer?.name, balances: b };
-  });
+      let used = { coins: 0, referral: 0, proveit: 0 };
+      if (body.useCoins && (body.coins ?? 1) > 0) {
+        used = await redeemCoins(client, userId, {
+          context: 'pass', amountPaise: item.pricePaise, requested: body.coins ?? null, ref: `purchase:${id}`, purchaseId: id,
+        });
+      }
+      const final = await queryOne(
+        `UPDATE fitkey_purchases SET coins_redeemed = $2, paid_paise = price_paise - $2 * 100 WHERE id = $1 RETURNING *`,
+        [id, used.coins],
+        client,
+      );
+      if (isPack) {
+        await query(
+          `INSERT INTO coin_ledger (user_id, amount, kind, wallet, status, unlocked_at, purchase_id, ref, note)
+           VALUES ($1, $2, 'pack_purchase', 'fitkey', 'available', now(), $3::uuid, ($3::uuid)::text, $4)`,
+          [userId, item.coins, id, `Bought ${item.name}`],
+          client,
+        );
+      }
+      const activation = await activateReferralRewards(client, userId);
+      const b = await balances(userId, client);
+      return { purchase: final ?? purchase, used, activation, buyerName: buyer?.name, balances: b };
+    });
 
-  await notifyReferralActivation(req.user.id, result.activation, { buyerName: result.buyerName });
-  const p = result.purchase;
-  await notify(req.user.id, {
-    type: 'wallet_purchase',
-    title: p.kind === 'coin_pack' ? `${p.coins.toLocaleString('en-IN')} FitKey coins added` : `${p.name} plan active · ${p.sessionsTotal} sessions`,
-    body: `Valid till ${new Date(p.expiresAt).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric', timeZone: config.tz })}.` +
-      (result.used.coins ? ` ${result.used.coins} referral coins applied.` : ''),
-    data: { screen: 'wallet', purchaseId: p.id },
-  });
-  res.status(201).json({
-    purchase: purchaseOut(p),
-    coinsUsed: result.used.coins,
-    paidPaise: p.paidPaise,
-    coinsActivated: result.activation.unlocked,
-    referralActivated: Boolean(result.activation.referral),
-    balances: result.balances,
-  });
+    await notifyReferralActivation(userId, result.activation, { buyerName: result.buyerName });
+    const p = result.purchase;
+    await notify(userId, {
+      type: 'wallet_purchase',
+      title: p.kind === 'coin_pack' ? `${p.coins.toLocaleString('en-IN')} FitKey coins added` : `${p.name} plan active · ${p.sessionsTotal} sessions`,
+      body: `Valid till ${new Date(p.expiresAt).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric', timeZone: config.tz })}.` +
+        (result.used.coins ? ` ${result.used.coins} referral coins applied.` : ''),
+      data: { screen: 'wallet', purchaseId: p.id },
+    });
+    return {
+      purchase: purchaseOut(p),
+      coinsUsed: result.used.coins,
+      paidPaise: p.paidPaise,
+      coinsActivated: result.activation.unlocked,
+      referralActivated: Boolean(result.activation.referral),
+      balances: result.balances,
+      // Coins planned at checkout but no longer available → the member paid that much too little in coins:
+      // they were charged for it in money already, so refund the difference (routes/payments.js).
+      _overpaidPaise: Math.max(0, ((body.coins ?? 0) - result.used.coins) * 100),
+    };
+  },
+};
+
+/** POST /wallet/passes — mock mode only; with Razorpay the app pays via /payments (purpose wallet_pass). */
+router.post('/passes', async (req, res) => {
+  if (config.paymentsMode !== 'mock') throw paymentRequired('wallet_pass');
+  const q = await walletPassPurchase.quote(req.user.id, req.body);
+  const { _overpaidPaise, ...out } = await walletPassPurchase.fulfill(req.user.id, { ...req.body, coins: q.payload.coins, useCoins: q.payload.useCoins }, { paymentRef: `MOCK-${Date.now()}` });
+  res.status(201).json(out);
 });
 
 /** GET /wallet/referrals — the member's code, share link, stats and invited friends. */

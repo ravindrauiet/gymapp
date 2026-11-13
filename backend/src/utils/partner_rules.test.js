@@ -54,7 +54,7 @@ test('empty venue: every step missing with labels', () => {
   const c = venueChecklist({}, {});
   assert.equal(c.percent, 0);
   assert.equal(c.missing.length, 10);
-  assert.deepEqual(c.missing[0], { step: 1, label: 'Category', hint: 'Pick a category' });
+  assert.deepEqual(c.missing[0], { step: 1, label: 'Category', hint: 'Pick a category', required: true });
 });
 
 test('sports category needs sports', () => {
@@ -176,4 +176,19 @@ test('act-as guard: listing paths allowed', () => {
   ]) {
     assert.ok(!staffBlockedPath('GET', url), url);
   }
+});
+
+test('only the basics block submission; documents, pricing, description length are recommended', () => {
+  const basic = { categories: ['gym'], name: 'Iron Gym', city: 'Delhi', address: 'Delhi', opensAt: '06:00', closesAt: '22:00', photos: ['/api/v1/files/x'] };
+  const c = venueChecklist(basic, { hoursCount: 0 });
+  assert.equal(submitBlockers(c).length, 0);
+  // Still shown as tips.
+  assert.ok(c.missing.some((m) => m.step === 9 && m.required === false));
+  assert.ok(c.missing.some((m) => m.step === 7 && m.required === false));
+});
+
+test('location: a map pin can stand in for a short address', () => {
+  const basic = { categories: ['gym'], name: 'Iron Gym', city: 'Delhi', address: '', latitude: 28.6, longitude: 77.2, opensAt: '06:00', closesAt: '22:00', photos: ['p'] };
+  assert.equal(submitBlockers(venueChecklist(basic, {})).length, 0);
+  assert.ok(submitBlockers(venueChecklist({ ...basic, latitude: null, longitude: null }, {})).some((m) => m.step === 3));
 });

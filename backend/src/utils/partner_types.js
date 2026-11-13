@@ -82,14 +82,15 @@ export function requiredDocs(type, listing = {}) {
 /** Missing requirements for steps 1–3 (type specific). */
 function stepGaps(type, l, ctx) {
   const gaps = [];
-  const need = (ok, step, label) => {
-    if (!ok) gaps.push({ step, label });
+  // Only the basics are required to submit (owner's call, Nov 2026); everything else is a recommended tip.
+  const need = (ok, step, label, required = false) => {
+    if (!ok) gaps.push({ step, label, required });
   };
   if (type === 'trainer') {
     const modes = l.trainingModes ?? [];
-    need(filled(l.name), 1, 'Add your name');
+    need(filled(l.name), 1, 'Add your name', true);
     need(filled(l.photoUrl), 1, 'Add a profile photo');
-    need(nonEmpty(l.subtypes), 1, 'Pick what you train (at least one type)');
+    need(nonEmpty(l.subtypes), 1, 'Pick what you train (at least one type)', true);
     need(l.experienceYears != null, 1, 'Add your years of experience');
     need(nonEmpty(l.languages), 1, 'Add the languages you speak');
     need(nonEmpty(modes), 1, 'Choose how you train: online, at home or at gym');
@@ -98,18 +99,20 @@ function stepGaps(type, l, ctx) {
     need(nonEmpty(l.weeklySlots), 3, 'Add your weekly slots');
     need((l.maxSessionsPerDay ?? 0) > 0, 3, 'Set the maximum sessions per day');
   } else if (type === 'clinic') {
-    need(filled(l.name), 1, 'Add the clinic name');
+    need(filled(l.name), 1, 'Add the clinic name', true);
     need(filled(l.speciality), 1, 'Add the speciality');
     need(nonEmpty(l.doctors), 1, 'Add at least one doctor');
-    need(filled(l.address) && filled(l.city), 1, 'Add the address and city');
+    need(filled(l.city), 1, 'Add your city', true);
+    need(filled(l.address), 1, 'Add the address');
     need(nonEmpty(l.photos), 1, 'Add at least one photo');
     need((l.consultationFeePaise ?? 0) > 0, 2, 'Set the consultation fee');
     need(nonEmpty(l.opdHours), 3, 'Add OPD days & hours');
     need((l.slotMinutes ?? 0) > 0, 3, 'Set the appointment slot length');
   } else if (type === 'chemist') {
     const delivers = l.homeDelivery ?? l.deliveryAvailable;
-    need(filled(l.name), 1, 'Add the store name');
-    need(filled(l.address) && filled(l.city), 1, 'Add the address and city');
+    need(filled(l.name), 1, 'Add the store name', true);
+    need(filled(l.city), 1, 'Add your city', true);
+    need(filled(l.address), 1, 'Add the address');
     need(nonEmpty(l.photos), 1, 'Add at least one photo');
     need(!delivers || (l.deliveryRadiusKm ?? 0) > 0, 1, 'Set the delivery radius');
     // 0 % is a valid choice, so the step counts once the partner moved past it or set a discount.
@@ -119,10 +122,10 @@ function stepGaps(type, l, ctx) {
   } else if (type === 'store') {
     const products = ctx.products ?? [];
     const priced = products.filter((p) => p.isActive !== false && p.pricePaise > 0 && p.pricePaise <= (p.originalPricePaise ?? p.pricePaise));
-    need(filled(l.brandName), 1, 'Add the brand name');
+    need(filled(l.brandName), 1, 'Add the brand name', true);
     need(filled(l.logoUrl), 1, 'Add the brand logo');
     need(filled(l.about) && l.about.trim().length >= 20, 1, 'Tell members about the brand (20+ characters)');
-    need(nonEmpty(l.categories), 1, 'Pick your categories');
+    need(nonEmpty(l.categories), 1, 'Pick your categories', true);
     need(priced.length > 0, 2, 'Add at least one product with MRP and selling price');
     need(products.some((p) => p.isActive !== false && (p.stockQuantity ?? 0) > 0), 3, 'Add stock for your products');
     need(l.dispatchDays != null, 3, 'Set the dispatch time');
@@ -137,10 +140,10 @@ function docGaps(type, l, ctx) {
   const gaps = [];
   const docs = (ctx.docs ?? []).filter((d) => d.status !== 'rejected');
   for (const t of requiredDocs(type, l)) {
-    if (!docs.some((d) => d.docType === t)) gaps.push({ step: 4, label: DOC_LABELS[t] ?? `Upload ${t}` });
+    if (!docs.some((d) => d.docType === t)) gaps.push({ step: 4, label: DOC_LABELS[t] ?? `Upload ${t}`, required: false });
   }
-  if (!ctx.kyc || ctx.kyc.status === 'rejected') gaps.push({ step: 4, label: 'Complete KYC (Aadhaar)' });
-  if (!ctx.bank || ctx.bank.status === 'failed') gaps.push({ step: 4, label: 'Add your bank account' });
+  if (!ctx.kyc || ctx.kyc.status === 'rejected') gaps.push({ step: 4, label: 'Complete KYC (Aadhaar)', required: false });
+  if (!ctx.bank || ctx.bank.status === 'failed') gaps.push({ step: 4, label: 'Add your bank account', required: false });
   return gaps;
 }
 
@@ -153,7 +156,7 @@ export function listingChecklist(type, listing, ctx = {}) {
   const l = listing ?? {};
   const gaps = listing ? [...stepGaps(type, l, ctx), ...docGaps(type, l, ctx)] : [];
   if (!listing) {
-    for (let s = 1; s <= 4; s += 1) gaps.push({ step: s, label: `Complete ${STEP_LABELS[s].toLowerCase()}` });
+    for (let s = 1; s <= 4; s += 1) gaps.push({ step: s, label: `Complete ${STEP_LABELS[s].toLowerCase()}`, required: s === 1 });
   }
   const status = l.listingStatus ?? null;
   const submitted = listing && status != null && !SUBMITTABLE_STATUSES.includes(status);
@@ -164,9 +167,9 @@ export function listingChecklist(type, listing, ctx = {}) {
   return { percent: Math.round((done.length / STEP_COUNT) * 100), done, missing: gaps };
 }
 
-/** What still blocks submission (steps 1–4). Empty array = ready to submit. */
+/** What still blocks submission: only the required basics. Empty array = ready to submit. */
 export function submitMissing(type, listing, ctx = {}) {
-  return listingChecklist(type, listing, ctx).missing.filter((m) => m.step < 5);
+  return listingChecklist(type, listing, ctx).missing.filter((m) => m.step < 5 && m.required);
 }
 
 /**

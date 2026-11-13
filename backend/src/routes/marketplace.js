@@ -6,7 +6,9 @@ import { commissionPct } from '../utils/commission.js';
 import { badRequest, forbidden, notFound, validate, conflict } from '../utils/http.js';
 import { notify } from '../utils/notify.js';
 import { earningsSummary, FSSAI_CATEGORIES, PRODUCT_CATEGORIES, todayIst } from '../utils/partner_types.js';
-import { redeemCoins } from '../utils/wallet.js';
+import { redeemCoins, redeemable } from '../utils/wallet.js';
+import { paymentRequired } from '../utils/payments.js';
+import { config } from '../config.js';
 
 export const marketplaceRouter = Router();
 
@@ -90,9 +92,10 @@ const checkoutSchema = z.object({
   coins: z.number().int().min(0).optional(),
 });
 
-marketplaceRouter.post('/orders', requireAuth('user'), async (req, res) => {
-  const body = validate(checkoutSchema, req.body);
+/** Creates a store order (stock, coins, items, vendor + low-stock alerts). Online orders: only after payment. */
+async function placeOrder(userId, body, { paymentRef = null } = {}) {
 
+  let used = { coins: 0 };
   const order = await withTransaction(async (client) => {
     // 1. Fetch products and calculate total
     let totalPaise = 0;
@@ -134,16 +137,16 @@ marketplaceRouter.post('/orders', requireAuth('user'), async (req, res) => {
     // 2. Insert order
     const orderRes = await client.query(
       `INSERT INTO marketplace_orders (
-         user_id, status, total_amount_paise, payment_method, payment_status, shipping_address, tracking_number
-       ) VALUES ($1, 'placed', $2, $3, $4, $5, $6)
+         user_id, status, total_amount_paise, payment_method, payment_status, shipping_address, tracking_number, payment_ref
+       ) VALUES ($1, 'placed', $2, $3, $4, $5, $6, $7)
        RETURNING *`,
-      [req.user.id, totalPaise, body.paymentMethod, paymentStatus, JSON.stringify(body.shippingAddress), trackingNum],
+      [userId, totalPaise, body.paymentMethod, paymentStatus, JSON.stringify(body.shippingAddress), trackingNum, paymentRef],
     );
     let order = orderRes.rows[0];
 
     // 2b. Coins (FitKey coins bought with money are for visits only and are never used here).
     if (body.useCoins && (body.coins ?? 1) > 0) {
-      const used = await redeemCoins(client, req.user.id, {
+      used = await redeemCoins(client, userId, {
         context: 'store', amountPaise: totalPaise, requested: body.coins ?? null, ref: `order:${order.id}`, orderId: order.id,
       });
       order = (await client.query(
@@ -201,6 +204,58 @@ marketplaceRouter.post('/orders', requireAuth('user'), async (req, res) => {
     });
   }
 
+  return { order, _overpaidPaise: Math.max(0, ((body.coins ?? 0) - used.coins) * 100) };
+}
+
+/** Prices a cart exactly like placeOrder does (visible products, stock, coin cap) without writing anything. */
+async function quoteOrder(userId, body) {
+  let totalPaise = 0;
+  for (const item of body.items) {
+    const prod = await queryOne(
+      `SELECT p.title, p.price_paise, p.stock_quantity
+         FROM marketplace_products p LEFT JOIN marketplace_vendors v ON v.id = p.vendor_id
+        WHERE p.id = $1 AND p.is_active = true AND ${MEMBER_VISIBLE_PRODUCT}`,
+      [item.productId],
+    );
+    if (!prod) throw notFound(`Product not found: ${item.productId}`);
+    if (prod.stockQuantity < item.quantity) throw conflict(`Insufficient stock for "${prod.title}". Only ${prod.stockQuantity} left.`);
+    totalPaise += prod.pricePaise * item.quantity;
+  }
+  let coins = 0;
+  if (body.useCoins && (body.coins ?? 1) > 0) {
+    const r = await redeemable(userId, 'store', totalPaise);
+    coins = body.coins == null ? r.coins : Math.min(body.coins, r.coins);
+  }
+  return { totalPaise, coins };
+}
+
+/** Payments (routes/payments.js): online store orders (UPI / card / netbanking). COD never goes through here. */
+export const storeOrderPurchase = {
+  async quote(userId, payload) {
+    const body = validate(checkoutSchema, payload);
+    if (body.paymentMethod === 'cod') throw badRequest('Cash on delivery orders are placed directly');
+    const q = await quoteOrder(userId, body);
+    const n = body.items.reduce((s, i) => s + i.quantity, 0);
+    return {
+      amountPaise: q.totalPaise - q.coins * 100,
+      description: `FITKEY Store · ${n} item${n === 1 ? '' : 's'}`,
+      payload: { ...body, coins: q.coins, useCoins: q.coins > 0 },
+    };
+  },
+  async fulfill(userId, payload, { paymentRef }) {
+    const body = validate(checkoutSchema, payload);
+    return placeOrder(userId, body, { paymentRef });
+  },
+};
+
+/**
+ * POST /marketplace/orders — cash on delivery always; online methods only in mock mode (with Razorpay the app pays
+ * first via /payments, purpose store_order, and the order is created when the payment is confirmed).
+ */
+marketplaceRouter.post('/orders', requireAuth('user'), async (req, res) => {
+  const body = validate(checkoutSchema, req.body);
+  if (body.paymentMethod !== 'cod' && config.paymentsMode !== 'mock') throw paymentRequired('store_order');
+  const { order } = await placeOrder(req.user.id, body, { paymentRef: body.paymentMethod === 'cod' ? null : `MOCK-${Date.now()}` });
   res.status(201).json({ order });
 });
 

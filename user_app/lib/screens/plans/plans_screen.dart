@@ -6,6 +6,7 @@ import 'package:provider/provider.dart';
 import '../../data/models.dart';
 import '../../data/wallet_api.dart';
 import '../../state/session.dart';
+import '../../services/payments.dart';
 import '../../ui/ui.dart';
 import '../../widgets/venue_card.dart';
 import '../checkin/checkin_screen.dart';
@@ -598,8 +599,16 @@ class _CheckoutSheetState extends State<_CheckoutSheet> {
             Text(formatPaise(_toPay), style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 20)),
           ]),
           const SizedBox(height: 12),
-          _note(Icons.verified_user_rounded, AppColors.green,
-              'Demo payments are enabled — your pass activates instantly and no card is charged.'),
+          FutureBuilder<String>(
+            future: Payments.mode(context.read<Session>().api),
+            builder: (context, snap) => _note(
+              Icons.verified_user_rounded,
+              AppColors.green,
+              snap.data == 'mock'
+                  ? 'Demo payments are enabled — your pass activates instantly and no card is charged.'
+                  : 'Secure payment by Razorpay — UPI, cards, netbanking & wallets. Your pass activates as soon as the payment succeeds.',
+            ),
+          ),
           if (_error != null) ...[
             const SizedBox(height: 10),
             _note(Icons.error_outline_rounded, AppColors.red, _error!, bg: AppColors.redSoft),

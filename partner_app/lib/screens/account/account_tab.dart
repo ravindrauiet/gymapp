@@ -4,6 +4,7 @@ import 'package:url_launcher/url_launcher.dart';
 
 import '../../data/brd_api.dart';
 import '../../state/partner_session.dart';
+import '../permissions/permissions_screen.dart';
 import '../../ui/ui.dart';
 import '../../widgets/brand.dart';
 import '../../widgets/commission_plan_card.dart';
@@ -103,10 +104,17 @@ class AccountTab extends StatelessWidget {
             onTap: () => push(context, const PartnerNotificationsScreen()),
           ),
           ToolRow(
+            icon: Icons.verified_user_rounded,
+            color: AppColors.teal,
+            title: 'Permissions',
+            subtitle: 'Location, camera and notifications',
+            onTap: () => push(context, const PartnerPermissionsScreen()),
+          ),
+          ToolRow(
             icon: Icons.help_outline_rounded,
             color: AppColors.blue,
             title: 'Help & support',
-            subtitle: 'Call, WhatsApp or e-mail the FITKEY partner team',
+            subtitle: 'E-mail the FITKEY partner team',
             onTap: () => showAppSheet<void>(context, builder: (_) => const _HelpSheet()),
           ),
           const SizedBox(height: 18),

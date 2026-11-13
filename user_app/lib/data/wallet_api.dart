@@ -7,6 +7,7 @@ import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
 import 'fitkey_api.dart';
 import 'models.dart';
+import '../services/payments.dart';
 
 int _i(dynamic v) => v == null ? 0 : (v as num).toInt();
 DateTime? _d(dynamic v) => v == null ? null : DateTime.parse(v as String).toLocal();
@@ -336,8 +337,11 @@ extension WalletApi on FitkeyApi {
       (await client.get('/wallet/redeemable', query: {'context': context, 'amountPaise': '$amountPaise'}))['redeemable']);
 
   /// Buys a coin pack ([kind] 'coin_pack') or a session plan ('session_plan'). Demo payments: activates instantly.
-  Future<PassPurchaseResult> buyPass({required String kind, required String id, bool useCoins = false}) async =>
-      PassPurchaseResult.fromJson(await client.post('/wallet/passes', {'kind': kind, 'id': id, 'useCoins': useCoins}));
+  Future<PassPurchaseResult> buyPass({required String kind, required String id, bool useCoins = false}) async {
+    final body = {'kind': kind, 'id': id, 'useCoins': useCoins};
+    return PassPurchaseResult.fromJson(await Payments.run(this,
+        purpose: 'wallet_pass', payload: body, mock: () => client.post('/wallet/passes', body)));
+  }
 
   /// Store checkout with optional coin redemption (ProveIt first, then referral, max 50% — enforced by the server).
   Future<({MarketplaceOrder order, int coinsRedeemed, int payablePaise})> placeStoreOrder({
@@ -346,12 +350,16 @@ extension WalletApi on FitkeyApi {
     required String paymentMethod,
     bool useCoins = false,
   }) async {
-    final r = await client.post('/marketplace/orders', {
+    final body = {
       'items': items.map((i) => {'productId': i.productId, 'quantity': i.quantity}).toList(),
       'shippingAddress': shippingAddress,
       'paymentMethod': paymentMethod,
       'useCoins': useCoins,
-    });
+    };
+    // Cash on delivery is placed directly; online methods pay through Razorpay first (order created once paid).
+    final r = paymentMethod == 'cod'
+        ? await client.post('/marketplace/orders', body)
+        : await Payments.run(this, purpose: 'store_order', payload: body, mock: () => client.post('/marketplace/orders', body));
     final o = r['order'] as Json;
     final order = MarketplaceOrder.fromJson(o);
     return (

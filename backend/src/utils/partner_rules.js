@@ -82,17 +82,31 @@ export function venueChecklist(venue, ctx = {}) {
           : null,
     10: ['draft', 'changes_needed', 'rejected', undefined, null].includes(v.status) ? 'Review and submit' : null,
   };
+  // Only the basics block submission (owner's call, Nov 2026: "don't make everything compulsory"): category, name,
+  // where it is, opening hours and one photo. Everything else — description length, more photos, facilities,
+  // pricing / FitKey pass consent, slots, documents / KYC / bank — is recommended: shown as a tip, never blocking.
+  // Payouts still need a verified bank account (admin_payouts puts them on hold without one).
+  const required = {
+    1: cats.length > 0 ? null : 'Pick a category',
+    2: str(v.name).length >= 2 ? null : 'Add your centre name',
+    3: str(v.city).length >= 2 && (str(v.address).length >= 3 || (v.latitude != null && v.longitude != null))
+      ? null
+      : 'Add your city and address (or use your current location)',
+    4: (ctx.hoursCount ?? 0) > 0 || (v.opensAt && v.closesAt) ? null : 'Add your opening hours',
+    5: len(v.photos) >= 1 ? null : 'Add at least one photo',
+  };
   const done = [];
   const missing = [];
   for (const s of VENUE_STEPS) {
-    if (checks[s.step]) missing.push({ step: s.step, label: s.label, hint: checks[s.step] });
+    const hint = required[s.step] ?? checks[s.step];
+    if (hint) missing.push({ step: s.step, label: s.label, hint, required: Boolean(required[s.step]) });
     else done.push(s.step);
   }
   return { percent: Math.round((done.length / VENUE_STEPS.length) * 100), done, missing };
 }
 
-/** Steps that block submission (everything but step 10 itself). */
-export const submitBlockers = (checklist) => checklist.missing.filter((m) => m.step !== 10);
+/** What blocks submission: only the required basics (step 10 itself never blocks). */
+export const submitBlockers = (checklist) => checklist.missing.filter((m) => m.step !== 10 && m.required !== false);
 
 // ------------------------------------------------------------------------------------------------------- KYC
 

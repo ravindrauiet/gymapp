@@ -19,6 +19,65 @@ class _LocationStepState extends State<_LocationStep> {
   late final _area = TextEditingController(text: widget.venue.area);
   late final _city = TextEditingController(text: widget.venue.city);
 
+  bool _locating = false;
+
+  @override
+  void initState() {
+    super.initState();
+    // No pin yet: take the partner's current location straight away (they usually list from their venue).
+    if (widget.venue.latitude == null || widget.venue.longitude == null) {
+      WidgetsBinding.instance.addPostFrameCallback((_) => _useCurrentLocation(auto: true));
+    }
+  }
+
+  /// GPS → map pin, and fills empty address / area / city from the reverse-geocoded place.
+  Future<void> _useCurrentLocation({bool auto = false}) async {
+    if (_locating) return;
+    setState(() => _locating = true);
+    try {
+      if (!await Geolocator.isLocationServiceEnabled()) {
+        if (!auto && mounted) toast(context, 'Turn on location (GPS) to use your current location', error: true);
+        if (!auto) await Geolocator.openLocationSettings();
+        return;
+      }
+      var perm = await Geolocator.checkPermission();
+      if (perm == LocationPermission.denied) perm = await Geolocator.requestPermission();
+      if (perm == LocationPermission.denied || perm == LocationPermission.deniedForever) {
+        if (!auto && mounted) toast(context, 'Allow location for FITKEY Partner in Settings to use this', error: true);
+        if (perm == LocationPermission.deniedForever && !auto) await Geolocator.openAppSettings();
+        return;
+      }
+      final pos = await Geolocator.getCurrentPosition(
+        locationSettings: const LocationSettings(accuracy: LocationAccuracy.high, timeLimit: Duration(seconds: 15)),
+      );
+      final v = widget.venue;
+      PlaceResult? place;
+      try {
+        place = await PlaceSearch().reverse(pos.latitude, pos.longitude);
+      } catch (_) {}
+      if (!mounted) return;
+      setState(() {
+        v.latitude = double.parse(pos.latitude.toStringAsFixed(6));
+        v.longitude = double.parse(pos.longitude.toStringAsFixed(6));
+        // Only fill blanks — never overwrite what the partner typed.
+        if (place != null) {
+          if (v.area.trim().isEmpty && place.area != null) _area.text = v.area = place.area!;
+          if (v.city.trim().isEmpty && place.city != null) _city.text = v.city = place.city!;
+          if (v.address.trim().isEmpty) {
+            final line = [place.road, place.area, if (place.postcode != null) place.postcode].whereType<String>().join(', ');
+            _address.text = v.address = line.isNotEmpty ? line : place.displayName;
+          }
+        }
+      });
+      widget.onChanged();
+      toast(context, 'Current location added — adjust the pin if needed', icon: Icons.my_location_rounded);
+    } catch (_) {
+      if (!auto && mounted) toast(context, 'Could not get your location. Try again outdoors or drop the pin.', error: true);
+    } finally {
+      if (mounted) setState(() => _locating = false);
+    }
+  }
+
   @override
   void dispose() {
     _address.dispose();
@@ -77,7 +136,7 @@ class _LocationStepState extends State<_LocationStep> {
               v.address = s;
               widget.onChanged();
             },
-            validator: (s) => (s ?? '').trim().length < 5 ? 'Enter the full address' : null,
+            validator: (s) => null, // optional when the map pin / current location is set
           ),
           const SizedBox(height: 14),
           Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
@@ -116,7 +175,7 @@ class _LocationStepState extends State<_LocationStep> {
                 const SizedBox(width: 12),
                 Expanded(
                   child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                    Text(pinned ? 'Map pin set' : 'Drop a pin on the map *',
+                    Text(pinned ? 'Map pin set' : 'Drop a pin on the map',
                         style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 15)),
                     Text(
                       pinned
@@ -152,6 +211,14 @@ class _LocationStepState extends State<_LocationStep> {
                     ]),
                   ),
                 ),
+              const SizedBox(height: 10),
+              OutlinedButton.icon(
+                onPressed: _locating ? null : () => _useCurrentLocation(),
+                icon: _locating
+                    ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2))
+                    : const Icon(Icons.my_location_rounded),
+                label: Text(_locating ? 'Finding you…' : 'Use my current location'),
+              ),
               const SizedBox(height: 10),
               const Text('Tip: stand at your entrance and use "my location" for the most accurate pin.',
                   style: TextStyle(color: AppColors.text3, fontSize: 12, height: 1.4)),

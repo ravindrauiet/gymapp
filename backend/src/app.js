@@ -35,6 +35,7 @@ import circlesRouter from './routes/circles.js';
 import pointsRouter from './routes/points.js';
 import ratingsRouter from './routes/ratings.js';
 import walletRouter from './routes/wallet.js';
+import paymentsRouter from './routes/payments.js';
 import corporateRouter from './routes/corporate.js';
 import bookingsRouter from './routes/bookings.js';
 import membershipsRouter from './routes/memberships.js';
@@ -57,7 +58,8 @@ export function createApp() {
     }),
   );
   app.use(cors({ origin: config.corsOrigins.includes('*') ? true : config.corsOrigins }));
-  app.use(express.json({ limit: '15mb' }));
+  // Razorpay webhooks are verified against the exact raw body, so keep it.
+  app.use(express.json({ limit: '15mb', verify: (req, _res, buf) => { if (req.originalUrl.includes('/payments/webhook')) req.rawBody = buf; } }));
   app.use(morgan(config.isProd ? 'combined' : 'dev'));
 
   app.get('/health', async (_req, res) => {
@@ -97,6 +99,7 @@ export function createApp() {
   api.use('/points', pointsRouter); // Trophy: overall points board
   api.use('/ratings', ratingsRouter); // Venue & trainer ratings
   api.use('/wallet', walletRouter); // Coins & Refer-and-Earn
+  api.use('/payments', paymentsRouter); // Razorpay checkout, verify, webhook
   api.use('/bookings', bookingsRouter); // Slot booking + visit charging
   api.use('/memberships', membershipsRouter); // Direct centre memberships (member, partner, admin)
   // Venue owner & vendor/trainer (Partner app)

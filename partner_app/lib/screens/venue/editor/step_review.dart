@@ -123,7 +123,7 @@ class _ReviewStep extends StatelessWidget {
               v.autoAcceptBookings ? 'Bookings auto-accepted' : 'You accept each booking',
             ].join(' · ')),
         _section(8, Icons.verified_user_rounded, AppColors.teal, 'Documents & bank',
-            todo.any((t) => t.step == 8) ? 'Licence, KYC or bank still missing' : 'Licence, KYC and bank added'),
+            todo.any((t) => t.step == 8) ? 'Optional · add licence, KYC and bank before your first payout' : 'Licence, KYC and bank added'),
         const SizedBox(height: 4),
         const CommissionPlanCard(showPayoutRule: true),
         if (v.status.canSubmit) ...[

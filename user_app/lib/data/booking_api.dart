@@ -3,6 +3,7 @@ import 'package:fitkey_core/fitkey_core.dart' show ApiException;
 import 'fitkey_api.dart';
 import 'models.dart';
 import 'venue_hours.dart';
+import '../services/payments.dart';
 
 // Slot booking + direct centre memberships (BRD §2). Backend: routes/bookings.js, routes/memberships.js.
 
@@ -457,12 +458,16 @@ extension BookingApi on FitkeyApi {
           .toList();
 
   Future<DirectMembership> buyMembership(String planId, {String? startDate}) async {
-    final r = await client.post('/memberships', {'planId': planId, 'startDate': ?startDate});
+    final body = {'planId': planId, 'startDate': ?startDate};
+    final r = await Payments.run(this, purpose: 'membership', payload: body, mock: () => client.post('/memberships', body));
     return DirectMembership.fromJson(r['membership']);
   }
 
   Future<DirectMembership> renewMembership(String membershipId, {String? startDate}) async {
-    final r = await client.post('/memberships/$membershipId/renew', {'startDate': ?startDate});
+    final r = await Payments.run(this,
+        purpose: 'membership_renew',
+        payload: {'membershipId': membershipId, 'startDate': ?startDate},
+        mock: () => client.post('/memberships/$membershipId/renew', {'startDate': ?startDate}));
     return DirectMembership.fromJson(r['membership']);
   }
 

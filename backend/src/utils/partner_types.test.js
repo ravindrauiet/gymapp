@@ -34,6 +34,10 @@ const trainer = {
   listingStatus: 'draft',
 };
 
+
+/** Checklist tips for steps 1–4 (what used to block submission; now shown as recommendations). */
+const tips = (type, listing, ctx) => listingChecklist(type, listing, ctx).missing.filter((m) => m.step < 5);
+
 test('empty listing: 0% and every step missing', () => {
   const c = listingChecklist('clinic', null);
   assert.equal(c.percent, 0);
@@ -45,7 +49,7 @@ test('complete trainer draft: steps 1–4 done, only review left; submit has not
   const c = listingChecklist('trainer', trainer, ctx);
   assert.deepEqual(c.done, [1, 2, 3, 4]);
   assert.equal(c.percent, 80);
-  assert.deepEqual(submitMissing('trainer', trainer, ctx), []);
+  assert.deepEqual(tips('trainer', trainer, ctx), []);
 });
 
 test('submitted listing counts step 5 done', () => {
@@ -55,15 +59,15 @@ test('submitted listing counts step 5 done', () => {
 
 test('trainer: service area needed only for home / gym; rejected docs do not count', () => {
   const online = { ...trainer, trainingModes: ['online'], serviceArea: null };
-  assert.deepEqual(submitMissing('trainer', online, { docs: docs('certificate'), kyc, bank }), []);
+  assert.deepEqual(tips('trainer', online, { docs: docs('certificate'), kyc, bank }), []);
   const home = { ...trainer, serviceArea: '' };
-  const miss = submitMissing('trainer', home, { docs: [{ docType: 'certificate', status: 'rejected' }], kyc, bank });
+  const miss = tips('trainer', home, { docs: [{ docType: 'certificate', status: 'rejected' }], kyc, bank });
   assert.ok(miss.some((m) => m.step === 1 && /service area/.test(m.label)));
   assert.ok(miss.some((m) => m.step === 4 && /certificates/.test(m.label)));
 });
 
-test('KYC and bank are required for every type', () => {
-  const miss = submitMissing('trainer', trainer, { docs: docs('certificate'), kyc: null, bank: { status: 'failed' } });
+test('KYC and bank are flagged for every type (as recommendations)', () => {
+  const miss = tips('trainer', trainer, { docs: docs('certificate'), kyc: null, bank: { status: 'failed' } });
   assert.deepEqual(miss.map((m) => m.label), ['Complete KYC (Aadhaar)', 'Add your bank account']);
 });
 
@@ -77,11 +81,11 @@ test('required docs per type; FSSAI only for supplements / healthy food sellers'
 test('store: pricing needs a product with price ≤ MRP; availability needs stock + dispatch time', () => {
   const store = { brandName: 'FitFuel', logoUrl: 'l.png', about: 'Clean protein made in India.', categories: ['supplements'], listingStatus: 'draft' };
   const ctx = { docs: docs('gst', 'trademark'), kyc, bank, products: [{ pricePaise: 200000, originalPricePaise: 150000, stockQuantity: 0, isActive: true }] };
-  const steps = submitMissing('store', store, ctx).map((m) => m.step);
+  const steps = tips('store', store, ctx).map((m) => m.step);
   assert.deepEqual(steps, [2, 3, 3, 4]); // bad price, no stock, no dispatch days, no FSSAI
   const ok = { ...store, dispatchDays: 2 };
   const okCtx = { ...ctx, docs: docs('gst', 'trademark', 'fssai'), products: [{ pricePaise: 150000, originalPricePaise: 200000, stockQuantity: 5, isActive: true }] };
-  assert.deepEqual(submitMissing('store', ok, okCtx), []);
+  assert.deepEqual(tips('store', ok, okCtx), []);
   assert.equal(goLiveBlockers('store', ok).length, 1);
   assert.equal(goLiveBlockers('store', { ...ok, fssaiVerifiedAt: '2026-11-11T00:00:00Z' }).length, 0);
   assert.equal(goLiveBlockers('store', { ...ok, categories: ['activewear'] }).length, 0);
@@ -89,9 +93,9 @@ test('store: pricing needs a product with price ≤ MRP; availability needs stoc
 
 test('chemist: delivery radius only when delivering; 0% discount accepted once past step 2', () => {
   const chem = { name: 'Apollo', address: '12 MG Road', city: 'Pune', photos: ['a'], openHours: [{ weekday: 'mon', opensAt: '09:00', closesAt: '21:00' }], homeDelivery: false, discountPct: 0, listingStep: 3, listingStatus: 'draft' };
-  assert.deepEqual(submitMissing('chemist', chem, { docs: docs('drug_licence', 'gst'), kyc, bank }), []);
+  assert.deepEqual(tips('chemist', chem, { docs: docs('drug_licence', 'gst'), kyc, bank }), []);
   const delivering = { ...chem, homeDelivery: true, listingStep: 2 };
-  const steps = submitMissing('chemist', delivering, { docs: docs('drug_licence', 'gst'), kyc, bank }).map((m) => m.step);
+  const steps = tips('chemist', delivering, { docs: docs('drug_licence', 'gst'), kyc, bank }).map((m) => m.step);
   assert.deepEqual(steps, [1, 2]);
 });
 
@@ -148,4 +152,13 @@ test('chemist bill applies the store discount; transitions are one-way', () => {
   assert.deepEqual(chemistBill(50000, 10), { mrpPaise: 50000, discountPaise: 5000, amountPaise: 45000 });
   assert.ok(CHEMIST_TRANSITIONS.requested.includes('accepted'));
   assert.deepEqual(CHEMIST_TRANSITIONS.delivered, []);
+});
+
+test('submission needs only the basics: documents, KYC, bank, prices and hours are optional', () => {
+  assert.deepEqual(submitMissing('trainer', { name: 'Asha', subtypes: ['yoga_master'] }, {}), []);
+  assert.deepEqual(submitMissing('clinic', { name: 'Care Clinic', city: 'Delhi' }, {}), []);
+  assert.deepEqual(submitMissing('chemist', { name: 'MedPlus', city: 'Delhi' }, {}), []);
+  assert.deepEqual(submitMissing('store', { brandName: 'Whey Co', categories: ['activewear'] }, {}), []);
+  assert.ok(submitMissing('clinic', { name: 'Care Clinic' }, {}).some((m) => m.label === 'Add your city'));
+  assert.ok(submitMissing('trainer', { subtypes: ['boxing'] }, {}).length === 1);
 });

@@ -136,7 +136,9 @@ ThemeData buildAppTheme() {
         foregroundColor: Colors.white,
         disabledBackgroundColor: AppColors.line,
         disabledForegroundColor: AppColors.text3,
-        minimumSize: const Size.fromHeight(54),
+        // Not Size.fromHeight: an infinite minimum width crushes any text placed beside a button in a Row.
+        // Full-width buttons use AppButton (or sit in a ListView / stretched Column, which widens them anyway).
+        minimumSize: const Size(64, 48),
         elevation: 0,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
         textStyle: const TextStyle(fontFamily: kFont, fontSize: 16, fontWeight: FontWeight.w800, letterSpacing: 0.1),
@@ -144,7 +146,7 @@ ThemeData buildAppTheme() {
     ),
     outlinedButtonTheme: OutlinedButtonThemeData(
       style: OutlinedButton.styleFrom(
-        minimumSize: const Size.fromHeight(50),
+        minimumSize: const Size(64, 46),
         foregroundColor: AppColors.text,
         side: const BorderSide(color: AppColors.line, width: 1.2),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),

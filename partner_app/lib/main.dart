@@ -7,6 +7,7 @@ import 'screens/auth/login_screen.dart';
 import 'screens/auth/profile_screen.dart';
 import 'screens/auth/partner_type_screen.dart';
 import 'screens/home/dashboard_screen.dart';
+import 'screens/permissions/permissions_screen.dart';
 import 'state/partner_session.dart';
 import 'ui/ui.dart';
 import 'widgets/brand.dart';
@@ -74,8 +75,30 @@ class _SessionGate extends StatelessWidget {
         SessionStatus.signedOut => const LoginScreen(),
         SessionStatus.needsProfile => const ProfileScreen(),
         SessionStatus.needsPartnerType => const PartnerTypeScreen(),
-        SessionStatus.signedIn => const DashboardScreen(),
+        SessionStatus.signedIn => const _PermissionsGate(child: DashboardScreen()),
       },
     );
   }
+}
+
+/// Asks for the partner app permissions once, right after the first sign-in.
+class _PermissionsGate extends StatefulWidget {
+  const _PermissionsGate({required this.child});
+  final Widget child;
+
+  @override
+  State<_PermissionsGate> createState() => _PermissionsGateState();
+}
+
+class _PermissionsGateState extends State<_PermissionsGate> {
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) PartnerPermissionsScreen.showOnce(context);
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) => widget.child;
 }

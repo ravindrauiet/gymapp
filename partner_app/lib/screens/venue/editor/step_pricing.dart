@@ -108,6 +108,17 @@ class _PricingState {
     }
   }
 
+  /// Only wrongly entered prices block (a plan switched on without a price). Plans, the monthly fee and the FitKey
+  /// pass consent are optional — shown as recommendations by [validate].
+  String? formatError() {
+    for (final d in offered) {
+      final p = d.pricePaise;
+      if (p == null || p < 100) return 'Enter a price for the ${d.label} plan, or switch it off';
+    }
+    return null;
+  }
+
+  /// Recommendations for the pricing step (not blocking).
   String? validate(PartnerVenue v, {bool forSubmit = false}) {
     if (offered.isEmpty) return 'Offer at least one plan of your own (e.g. Monthly)';
     for (final d in offered) {

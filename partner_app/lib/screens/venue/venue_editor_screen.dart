@@ -4,6 +4,7 @@ import 'package:fitkey_core/fitkey_core.dart' show amenityLabels, formatPaise;
 import 'package:flutter/foundation.dart' show compute;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:geolocator/geolocator.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:provider/provider.dart';
 
@@ -18,6 +19,7 @@ import '../../widgets/agreement_sheet.dart';
 import '../../widgets/commission_plan_card.dart';
 import '../../widgets/listing/documents_bank_step.dart';
 import '../../widgets/listing/listing_rules.dart';
+import '../../widgets/listing/place_search.dart';
 import '../../widgets/listing/photo_quality.dart';
 import '../../widgets/status.dart';
 import '../../widgets/status_timeline.dart';
@@ -133,40 +135,37 @@ class _VenueEditorScreenState extends State<VenueEditorScreen> {
 
   // ---- Validation --------------------------------------------------------------------------------------------
 
-  /// Problems with step [step] (0-based). [forSubmit] adds the checks that only matter when submitting.
+  /// Problems with step [step] (0-based) that BLOCK moving on / submitting. Only the basics are required (category,
+  /// name, city + address or map pin, opening hours, one photo) and wrongly formatted input; everything else
+  /// (description length, more photos, facilities, pricing, documents / KYC / bank) is a recommendation — see
+  /// shown as tips from the server checklist — matching the server's checklist (backend utils/partner_rules.js).
   String? _validateStep(int step, {bool forSubmit = false}) {
     final v = _v;
     switch (step) {
       case 0:
         if (v.categories.isEmpty) return 'Pick at least one category';
-        if (v.categories.contains('sports_club') && v.sports.isEmpty) return 'Pick the sports you offer';
         return null;
       case 1:
         if (v.name.trim().length < 2) return 'Enter the venue name';
-        if (v.description.trim().length < minDescriptionLength) {
-          return 'Write at least $minDescriptionLength characters about your venue';
-        }
         if (v.contactPhone.trim().isNotEmpty && !_validPhone(v.contactPhone)) return 'Enter a valid front-desk phone';
         if (v.contactEmail.trim().isNotEmpty && !isValidEmail(v.contactEmail)) return 'Enter a valid venue email';
         return null;
       case 2:
-        if (v.address.trim().length < 5) return 'Enter the full address';
         if (v.city.trim().length < 2) return 'Enter the city';
-        if (v.latitude == null || v.longitude == null) return 'Drop a pin on the map so members can find you';
+        if (v.address.trim().length < 3 && (v.latitude == null || v.longitude == null)) {
+          return 'Enter your address or use your current location';
+        }
         return null;
       case 3:
         return validateSchedule(_schedule) ?? validatePassBlocks(v.fitkeyPassMode, v.passBlocks);
       case 4:
         if (_uploads > 0) return 'Wait for uploads to finish';
-        if (forSubmit && v.photos.length < minPhotosToSubmit) {
-          return 'Add at least $minPhotosToSubmit photos (you have ${v.photos.length})';
-        }
+        if (forSubmit && v.photos.isEmpty) return 'Add at least one photo';
         return null;
       case 5:
-        if (forSubmit && v.amenities.isEmpty && v.equipment.isEmpty) return 'Add at least one amenity or equipment item';
         return null;
       case 6:
-        return _pricing.validate(v, forSubmit: forSubmit);
+        return _pricing.formatError();
       case 7:
         if (v.slotCapacity < 1) return 'Enter how many members fit in one slot';
         if (v.passSlotCap != null && v.passSlotCap! > v.slotCapacity) {
@@ -175,8 +174,7 @@ class _VenueEditorScreenState extends State<VenueEditorScreen> {
         if (v.categories.contains('sports_club') && v.courts < 1) return 'Enter how many courts / lanes you have';
         return null;
       case 8:
-        if (forSubmit && !_docsReady && !(_checklist?.isDone(9) ?? false)) return 'Upload your business licence, verify KYC and add a bank account';
-        return null;
+        return null; // documents, KYC and bank are optional (needed before the first payout)
       default:
         return null;
     }
@@ -400,7 +398,7 @@ class _VenueEditorScreenState extends State<VenueEditorScreen> {
                 : DocumentsBankStep(
                     entityType: 'venue',
                     entityId: _v.id!,
-                    requiredDocTypes: const ['licence'],
+                    requiredDocTypes: const ['licence'], // shown as 'Recommended' — nothing here blocks submitting
                     optionalDocTypes: const ['gst'],
                     onReadyChanged: (ready) {
                       if (mounted && ready != _docsReady) setState(() => _docsReady = ready);

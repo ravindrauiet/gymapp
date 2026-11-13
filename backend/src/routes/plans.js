@@ -4,6 +4,7 @@ import { config } from '../config.js';
 import { query, queryOne, withTransaction } from '../db/index.js';
 import { requireAuth } from '../middleware/auth.js';
 import { HttpError, notFound, validate } from '../utils/http.js';
+import { paymentRequired } from '../utils/payments.js';
 import { uuidSchema } from '../utils/schemas.js';
 import { activateReferralRewards, notifyReferralActivation } from '../utils/wallet.js';
 
@@ -57,47 +58,58 @@ subscriptionsRouter.get('/me', async (req, res) => {
 });
 
 /**
- * POST /subscriptions { planId } — buys a plan. Renewing the same plan stacks after the current one.
- * PAYMENTS_MODE=mock activates instantly; replace with a Razorpay order + webhook before launch.
- * Legacy (category, unlimited-visit) plans: kept for existing members and old app builds. Since wallet v2 a purchase
- * no longer earns "1 coin per ₹1" (only coin packs credit coins, via POST /wallet/passes); it still counts as a
- * FitKey pass for activating the welcome / referral coins. When a real gateway lands, move this into the webhook.
+ * Buying a FitKey pass plan, split for payments (routes/payments.js):
+ *  quote   → validates and prices it (nothing written)
+ *  fulfill → creates the subscription once the money is in (or instantly with PAYMENTS_MODE=mock).
+ * Legacy (category, unlimited-visit) plans: kept for existing members and old app builds. A purchase no longer earns
+ * "1 coin per ₹1" (only coin packs credit coins); it still counts as a FitKey pass for activating welcome / referral coins.
  */
-subscriptionsRouter.post('/', async (req, res) => {
-  const { planId } = validate(z.object({ planId: uuidSchema }), req.body);
-  if (config.paymentsMode !== 'mock') {
-    throw new HttpError(501, 'Payment gateway not configured');
-  }
+const subscriptionSchema = z.object({ planId: uuidSchema });
 
-  const { subscription, coins, planName, buyerName } = await withTransaction(async (client) => {
-    const plan = await queryOne(`SELECT * FROM plans WHERE id = $1 AND is_active`, [planId], client);
+export const subscriptionPurchase = {
+  async quote(userId, payload) {
+    const { planId } = validate(subscriptionSchema, payload);
+    const plan = await queryOne(`SELECT id, name, price_paise FROM plans WHERE id = $1 AND is_active`, [planId]);
     if (!plan) throw notFound('Plan not found');
+    return { amountPaise: plan.pricePaise, description: `FITKEY ${plan.name}`, payload: { planId } };
+  },
 
-    // Serialise concurrent purchases for this user so stacking is computed correctly.
-    const buyer = await queryOne(`SELECT id, name FROM users WHERE id = $1 FOR UPDATE`, [req.user.id], client);
-    const latest = await queryOne(
-      `SELECT MAX(ends_at) AS ends_at FROM subscriptions
-       WHERE user_id = $1 AND plan_id = $2 AND status = 'active' AND ends_at > now()`,
-      [req.user.id, planId],
-      client,
-    );
-    const startsAt = latest?.endsAt ?? new Date();
+  async fulfill(userId, payload, { paymentRef }) {
+    const { planId } = validate(subscriptionSchema, payload);
+    const { subscription, coins, planName, buyerName } = await withTransaction(async (client) => {
+      const plan = await queryOne(`SELECT * FROM plans WHERE id = $1`, [planId], client);
+      if (!plan) throw notFound('Plan not found');
+      // Serialise concurrent purchases for this user so stacking is computed correctly.
+      const buyer = await queryOne(`SELECT id, name FROM users WHERE id = $1 FOR UPDATE`, [userId], client);
+      const latest = await queryOne(
+        `SELECT MAX(ends_at) AS ends_at FROM subscriptions
+         WHERE user_id = $1 AND plan_id = $2 AND status = 'active' AND ends_at > now()`,
+        [userId, planId],
+        client,
+      );
+      const startsAt = latest?.endsAt ?? new Date();
+      const sub = await queryOne(
+        `INSERT INTO subscriptions (user_id, plan_id, status, starts_at, ends_at, amount_paise, payment_ref)
+         VALUES ($1, $2, 'active', $3, $3::timestamptz + make_interval(days => $4), $5, $6)
+         RETURNING *`,
+        [userId, planId, startsAt, plan.durationDays, plan.pricePaise, paymentRef],
+        client,
+      );
+      const credit = await activateReferralRewards(client, userId);
+      return { subscription: sub, coins: credit, planName: plan.name, buyerName: buyer?.name };
+    });
+    await notifyReferralActivation(userId, coins, { buyerName });
+    return {
+      subscription,
+      planName,
+      coins: { earned: 0, unlocked: coins.unlocked, referralRewarded: Boolean(coins.referral) },
+    };
+  },
+};
 
-    const sub = await queryOne(
-      `INSERT INTO subscriptions (user_id, plan_id, status, starts_at, ends_at, amount_paise, payment_ref)
-       VALUES ($1, $2, 'active', $3, $3::timestamptz + make_interval(days => $4), $5, $6)
-       RETURNING *`,
-      [req.user.id, planId, startsAt, plan.durationDays, plan.pricePaise, `MOCK-${Date.now()}`],
-      client,
-    );
-    const credit = await activateReferralRewards(client, req.user.id);
-    return { subscription: sub, coins: credit, planName: plan.name, buyerName: buyer?.name };
-  });
-
-  await notifyReferralActivation(req.user.id, coins, { buyerName });
-  res.status(201).json({
-    subscription,
-    planName,
-    coins: { earned: 0, unlocked: coins.unlocked, referralRewarded: Boolean(coins.referral) },
-  });
+/** POST /subscriptions { planId } — mock mode only; with Razorpay the app pays via /payments (purpose subscription). */
+subscriptionsRouter.post('/', async (req, res) => {
+  if (config.paymentsMode !== 'mock') throw paymentRequired('subscription');
+  await subscriptionPurchase.quote(req.user.id, req.body);
+  res.status(201).json(await subscriptionPurchase.fulfill(req.user.id, req.body, { paymentRef: `MOCK-${Date.now()}` }));
 });
