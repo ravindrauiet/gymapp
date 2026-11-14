@@ -12,6 +12,11 @@ function required(name) {
 
 const isProd = process.env.NODE_ENV === 'production';
 
+/** Env values pasted into a dashboard often carry spaces or quotes: "Razorpay ", 'rzp_live_…'. */
+function clean(v) {
+  return String(v ?? '').trim().replace(/^['"]|['"]$/g, '').trim();
+}
+
 export const config = {
   isProd,
   port: Number(process.env.PORT ?? 4000),
@@ -22,11 +27,11 @@ export const config = {
   tz: process.env.APP_TZ ?? 'Asia/Kolkata',
   exposeDevOtp: !isProd && process.env.EXPOSE_DEV_OTP === 'true',
   // mock = purchases activate instantly without payment (dev / demo); razorpay = real payments via Razorpay.
-  paymentsMode: process.env.PAYMENTS_MODE ?? 'mock',
+  paymentsMode: clean(process.env.PAYMENTS_MODE).toLowerCase() || 'mock',
   // Razorpay (set on the server only — never in the apps or the repo). Key ID is public; the secrets are not.
-  razorpayKeyId: process.env.RAZORPAY_KEY_ID || '',
-  razorpayKeySecret: process.env.RAZORPAY_KEY_SECRET || '',
-  razorpayWebhookSecret: process.env.RAZORPAY_WEBHOOK_SECRET || '',
+  razorpayKeyId: clean(process.env.RAZORPAY_KEY_ID),
+  razorpayKeySecret: clean(process.env.RAZORPAY_KEY_SECRET),
+  razorpayWebhookSecret: clean(process.env.RAZORPAY_WEBHOOK_SECRET),
   adminPhone: process.env.ADMIN_PHONE,
   openaiApiKey: process.env.OPENAI_API_KEY || '',
   // Model used by Mansi and the meal / label scanner. gpt-4o-mini handles vision well at low cost.
