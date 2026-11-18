@@ -170,6 +170,12 @@ const STAFF_BLOCKED = [
   /^\/memberships\/partner\/statement(\/|$)/,
   /^\/memberships\/partner\/venues\/[^/]+\/(members|fitkey-visitors)(\/|$)/,
   /^\/bookings\/partner\/venues\/[^/]+\/visits(\/|$)/,
+  /^\/partner\/home(\/|$)/, // earnings + renewals summary
+  /^\/partner\/venues\/[^/]+\/attendance(\/|$)/,
+  /^\/partner\/trainer\/(clients|earnings)(\/|$)/,
+  /^\/partner\/clinic\/(patients|earnings)(\/|$)/,
+  /^\/partner\/chemist\/earnings(\/|$)/,
+  /^\/partner\/vendor\/earnings(\/|$)/,
   /^\/partner\/staff(\/|$)/, // staff tools need the employee's own token
 ];
 

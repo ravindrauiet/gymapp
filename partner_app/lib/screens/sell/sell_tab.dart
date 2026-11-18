@@ -138,13 +138,15 @@ class SellTab extends StatelessWidget {
         ),
       ],
       const TabSection('Reputation & reach'),
-      ToolRow(
-        icon: Icons.star_rounded,
-        color: AppColors.amber,
-        title: 'Ratings & reviews',
-        subtitle: 'What members say about you',
-        onTap: () => shell.open(PartnerRatingsScreen(trainer: t == PartnerType.trainer)),
-      ),
+      // Member ratings exist for venues and trainers only (no clinic / chemist / store ratings yet).
+      if (t == PartnerType.trainer)
+        ToolRow(
+          icon: Icons.star_rounded,
+          color: AppColors.amber,
+          title: 'Ratings & reviews',
+          subtitle: 'What members say about you',
+          onTap: () => shell.open(const PartnerRatingsScreen(trainer: true)),
+        ),
       if (t == PartnerType.trainer)
         ToolRow(
           icon: Icons.event_rounded,

@@ -1,4 +1,4 @@
-import 'package:fitkey_core/fitkey_core.dart' show formatPaise, formatDayDate;
+import 'package:fitkey_core/fitkey_core.dart' show formatPaise, formatDayDate, formatTimeOfDay;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:image_picker/image_picker.dart';
@@ -7,6 +7,7 @@ import 'package:url_launcher/url_launcher.dart';
 
 import '../../data/models.dart';
 import '../../data/partner_api.dart';
+import '../../data/rse_api.dart' show RseApi, TrainerCalendar, TrainerCalendarDay;
 import '../../data/vendor_trainer_api.dart';
 import '../../state/partner_session.dart';
 import '../../ui/ui.dart';
@@ -198,6 +199,7 @@ class _OverviewTab extends StatelessWidget {
               bookings: bSnap.data!,
               onEditProfile: onEditProfile,
               onOpenBookings: onOpenBookings,
+              onChanged: onReload,
             ),
           );
         },
@@ -255,11 +257,18 @@ class _Onboarding extends StatelessWidget {
 }
 
 class _OverviewBody extends StatelessWidget {
-  const _OverviewBody({required this.details, required this.bookings, required this.onEditProfile, required this.onOpenBookings});
+  const _OverviewBody({
+    required this.details,
+    required this.bookings,
+    required this.onEditProfile,
+    required this.onOpenBookings,
+    required this.onChanged,
+  });
   final TrainerProfileDetails details;
   final List<TrainerBookingItem> bookings;
   final VoidCallback onEditProfile;
   final VoidCallback onOpenBookings;
+  final Future<void> Function() onChanged;
 
   @override
   Widget build(BuildContext context) {
@@ -402,7 +411,7 @@ class _OverviewBody extends StatelessWidget {
           )
         else
           for (final b in upcoming.take(3))
-            Padding(padding: const EdgeInsets.only(bottom: 10), child: _BookingCard(booking: b)),
+            Padding(padding: const EdgeInsets.only(bottom: 10), child: _BookingCard(booking: b, onChanged: onChanged)),
         const SizedBox(height: 14),
         const _FitFeedCard(),
       ],

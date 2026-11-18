@@ -5,6 +5,7 @@ import { query, queryOne, withTransaction } from '../db/index.js';
 import { requireAuth } from '../middleware/auth.js';
 import { badRequest, conflict, notFound, validate } from '../utils/http.js';
 import { notify } from '../utils/notify.js';
+import { commissionPct } from '../utils/commission.js';
 import { PAYOUT_SCHEDULE, lastFullWeek, nextMonday, rupees } from '../utils/partner_money.js';
 import { dateSchema, uuidSchema } from '../utils/schemas.js';
 
@@ -64,6 +65,15 @@ router.get('/', async (req, res) => {
 });
 
 /** POST /admin/payouts/run { periodStart?, periodEnd? } → { periodStart, periodEnd, created:[…], skipped } */
+/**
+ * Store order items that can be paid out for a period ($1 start, $2 end, $3 tz): delivered in the period, money
+ * collected (paid online, or cash on delivery once delivered), not returned or under a return, not paid yet.
+ */
+const STORE_PAYABLE = `i.payout_id IS NULL AND i.vendor_id IS NOT NULL AND o.status = 'delivered'
+  AND (o.payment_status = 'paid' OR o.payment_method = 'cod')
+  AND (i.return_status IS NULL OR i.return_status = 'rejected')
+  AND (COALESCE(o.delivered_at, o.created_at) AT TIME ZONE $3)::date BETWEEN $1::date AND $2::date`;
+
 router.post('/run', async (req, res) => {
   const body = validate(z.object({ periodStart: dateSchema.optional(), periodEnd: dateSchema.optional() }), req.body ?? {});
   const d = await today();
@@ -78,7 +88,11 @@ router.post('/run', async (req, res) => {
      WHERE p.payout_id IS NULL AND p.visit_date BETWEEN $1::date AND $2::date
      UNION
      SELECT DISTINCT v.owner_id FROM direct_memberships m JOIN venues v ON v.id = m.venue_id
-     WHERE m.payout_id IS NULL AND m.status <> 'cancelled' AND (m.created_at AT TIME ZONE $3)::date BETWEEN $1::date AND $2::date`,
+     WHERE m.payout_id IS NULL AND m.status <> 'cancelled' AND (m.created_at AT TIME ZONE $3)::date BETWEEN $1::date AND $2::date
+     UNION
+     SELECT DISTINCT mv.partner_id FROM marketplace_order_items i
+       JOIN marketplace_orders o ON o.id = i.order_id JOIN marketplace_vendors mv ON mv.id = i.vendor_id
+     WHERE ${STORE_PAYABLE}`,
     [periodStart, periodEnd, config.tz],
   );
 
@@ -99,6 +113,25 @@ router.post('/run', async (req, res) => {
          WHERE v.id = p.venue_id AND v.owner_id = $2 AND p.payout_id IS NULL AND p.visit_date BETWEEN $3::date AND $4::date`,
         [row.id, ownerId, periodStart, periodEnd],
       );
+      // Store sellers: delivered items (not returned / not under return), commission by the seller's plan year.
+      const items = await query(
+        `SELECT i.id, i.price_paise * i.quantity AS gross, o.delivered_at, u.partner_go_live_at
+           FROM marketplace_order_items i
+           JOIN marketplace_orders o ON o.id = i.order_id
+           JOIN marketplace_vendors mv ON mv.id = i.vendor_id
+           JOIN users u ON u.id = mv.partner_id
+          WHERE mv.partner_id = $4 AND ${STORE_PAYABLE}
+          FOR UPDATE OF i`,
+        [periodStart, periodEnd, config.tz, ownerId],
+        client,
+      );
+      for (const it of items) {
+        const pct = commissionPct(it.partnerGoLiveAt, it.deliveredAt);
+        await client.query(
+          `UPDATE marketplace_order_items SET payout_id = $2, commission_pct = $3, commission_paise = $4 WHERE id = $1`,
+          [it.id, row.id, pct, Math.round((Number(it.gross) * pct) / 100)],
+        );
+      }
       await client.query(
         `UPDATE direct_memberships m SET payout_id = $1 FROM venues v
          WHERE v.id = m.venue_id AND v.owner_id = $2 AND m.payout_id IS NULL AND m.status <> 'cancelled'
@@ -117,6 +150,9 @@ router.post('/run', async (req, res) => {
              UNION ALL
              SELECT amount_paise, commission_paise, gst_paise, COALESCE(partner_net_paise, amount_paise - commission_paise)
              FROM direct_memberships WHERE payout_id = $1
+             UNION ALL
+             SELECT price_paise * quantity, COALESCE(commission_paise, 0), 0, price_paise * quantity - COALESCE(commission_paise, 0)
+             FROM marketplace_order_items WHERE payout_id = $1
            ) x
          ) t
          WHERE partner_payouts.id = $1

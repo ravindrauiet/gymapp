@@ -24,7 +24,8 @@ class _PhotosStep extends StatefulWidget {
 
 class _PhotosStepState extends State<_PhotosStep> {
   static const _maxPhotoBytes = 3 * 1024 * 1024;
-  static const _maxVideoBytes = 50 * 1024 * 1024;
+  // Must match the server's upload limit (backend/src/routes/files.js MAX_VIDEO_BYTES).
+  static const _maxVideoBytes = 12 * 1024 * 1024;
 
   final _picker = ImagePicker();
 
@@ -123,7 +124,7 @@ class _PhotosStepState extends State<_PhotosStep> {
       }
       final size = await f.length();
       if (size > _maxVideoBytes) {
-        if (mounted) toast(context, 'Keep the video under 50 MB (about 1 minute)', error: true);
+        if (mounted) toast(context, 'Keep the video under 12 MB (about 30 seconds)', error: true);
         return;
       }
       if (!mounted) return;

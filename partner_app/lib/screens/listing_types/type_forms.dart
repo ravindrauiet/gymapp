@@ -9,6 +9,7 @@ import '../../data/brd_api.dart';
 import '../../data/models.dart';
 import '../../state/partner_session.dart';
 import '../../ui/ui.dart';
+import '../../widgets/listing/documents_bank_step.dart' show ListingValidators, UpperCaseFormatter;
 import '../vendor/vendor_portal_screen.dart';
 import 'listing_fields.dart';
 
@@ -130,10 +131,13 @@ class TrainerForm extends TypeForm {
   final serviceArea = TextEditingController();
   final rate = TextEditingController();
   final maxPerDay = TextEditingController();
+  final buffer = TextEditingController();
   String? photoUrl;
   Set<String> subtypes = {};
   List<String> achievements = [];
   List<String> languages = [];
+  List<String> certifications = [];
+  List<String> specializations = [];
   Set<String> modes = {'gym'};
   final List<TrainerPackageRow> packages = [];
   List<TimeWindow> slots = [];
@@ -142,7 +146,7 @@ class TrainerForm extends TypeForm {
 
   @override
   List<TextEditingController> get _controllers =>
-      [name, bio, experience, serviceArea, rate, maxPerDay, for (final p in packages) ...p.all, ..._removed];
+      [name, bio, experience, serviceArea, rate, maxPerDay, buffer, for (final p in packages) ...p.all, ..._removed];
 
   @override
   void load(Json? l) {
@@ -157,6 +161,9 @@ class TrainerForm extends TypeForm {
     subtypes = {...strList(l['subtypes'])}..retainWhere(trainerSubtypes.containsKey);
     achievements = strList(l['achievements']);
     languages = strList(l['languages']);
+    certifications = strList(l['certifications']);
+    specializations = strList(l['specializations']);
+    buffer.text = l['bufferMinutes'] == null ? '' : '${intOf(l['bufferMinutes'])}';
     final m = strList(l['trainingModes'] ?? l['modes']);
     if (m.isNotEmpty) modes = {...m}..retainWhere(trainerModes.containsKey);
     packages.addAll([for (final p in (l['packages'] as List? ?? const [])) TrainerPackageRow(p as Json)]);
@@ -173,12 +180,15 @@ class TrainerForm extends TypeForm {
         'experienceYears': int.tryParse(experience.text) ?? 0,
         'achievements': achievements,
         'languages': languages,
+        'certifications': certifications,
+        'specializations': specializations,
         'trainingModes': modes.toList(),
         'serviceArea': serviceArea.text.trim(),
         'hourlyRatePaise': paiseOf(rate.text),
         'packages': [for (final p in packages) if (!p.empty) p.toJson()],
         'weeklySlots': [for (final s in slots) s.toJson()],
         'maxSessionsPerDay': int.tryParse(maxPerDay.text),
+        if (int.tryParse(buffer.text) != null) 'bufferMinutes': int.parse(buffer.text).clamp(0, 120),
       };
 
   @override
@@ -223,6 +233,33 @@ class TrainerForm extends TypeForm {
             selected: subtypes,
             onChanged: (s) {
               subtypes = s;
+              changed();
+            },
+          ),
+        ),
+        FieldSection(
+          title: 'Specializations',
+          subtitle: 'Optional — what you are best at.',
+          icon: Icons.star_rounded,
+          child: TagInput(
+            values: specializations,
+            hint: 'e.g. Weight loss',
+            suggestions: const ['Weight loss', 'Muscle gain', 'Strength', 'Rehab', 'Prenatal', 'Seniors', 'Flexibility'],
+            onChanged: (v) {
+              specializations = v;
+              changed();
+            },
+          ),
+        ),
+        FieldSection(
+          title: 'Certifications',
+          subtitle: 'Optional — e.g. ACE CPT, ISSA, K11. Upload the certificates on the Documents step.',
+          icon: Icons.workspace_premium_rounded,
+          child: TagInput(
+            values: certifications,
+            hint: 'Add a certification',
+            onChanged: (v) {
+              certifications = v;
               changed();
             },
           ),
@@ -372,14 +409,23 @@ class TrainerForm extends TypeForm {
         FieldSection(
           title: 'Daily limit',
           icon: Icons.speed_rounded,
-          child: _text(this, maxPerDay, 'Max sessions per day',
-              icon: Icons.format_list_numbered_rounded, keyboard: TextInputType.number),
+          child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+            _text(this, maxPerDay, 'Max sessions per day',
+                icon: Icons.format_list_numbered_rounded, keyboard: TextInputType.number),
+            _gap,
+            _text(this, buffer, 'Break between sessions (minutes)',
+                icon: Icons.timer_outlined,
+                keyboard: TextInputType.number,
+                helper: 'Optional · 0–120 minutes, e.g. travel time between home sessions'),
+          ]),
         ),
       ]);
 
   @override
   List<(String, String)> reviewRows() => [
         ('Teaches', subtypes.map((s) => trainerSubtypes[s]).join(', ')),
+        ('Specializations', specializations.join(', ')),
+        ('Certifications', certifications.join(', ')),
         ('Experience', experience.text.isEmpty ? '' : '${experience.text} years'),
         ('Modes', modes.map((m) => trainerModes[m]).join(' · ')),
         ('Service area', serviceArea.text),
@@ -388,6 +434,7 @@ class TrainerForm extends TypeForm {
         ('Packages', '${packages.where((p) => !p.empty).length}'),
         ('Weekly slots', '${slots.length} windows'),
         ('Max / day', maxPerDay.text),
+        ('Break', buffer.text.isEmpty ? '' : '${buffer.text} min'),
       ];
 }
 
@@ -488,6 +535,7 @@ class DoctorRow {
 class ClinicForm extends TypeForm {
   ClinicForm(PartnerUser? user) : super(PartnerType.clinic) {
     city.text = user?.city ?? '';
+    phone.text = user?.phone ?? '';
   }
 
   final name = TextEditingController();
@@ -496,9 +544,11 @@ class ClinicForm extends TypeForm {
   final area = TextEditingController();
   final city = TextEditingController();
   final fee = TextEditingController();
+  final phone = TextEditingController();
   final List<DoctorRow> doctors = [];
   final List<TextEditingController> _removed = [];
   List<String> photos = [];
+  List<String> facilities = [];
   List<TimeWindow> opd = [];
   int slotMinutes = 15;
   double? lat;
@@ -506,7 +556,7 @@ class ClinicForm extends TypeForm {
 
   @override
   List<TextEditingController> get _controllers =>
-      [name, speciality, address, area, city, fee, for (final d in doctors) ...d.all, ..._removed];
+      [name, speciality, address, area, city, fee, phone, for (final d in doctors) ...d.all, ..._removed];
 
   @override
   void load(Json? l) {
@@ -523,6 +573,8 @@ class ClinicForm extends TypeForm {
     doctors.addAll([for (final d in (l['doctors'] as List? ?? const [])) if (d is Map) DoctorRow(Json.from(d))]);
     if (doctors.isEmpty) doctors.add(DoctorRow(const {}));
     photos = strList(l['photos']);
+    facilities = strList(l['facilities']);
+    if ('${l['phone'] ?? ''}'.isNotEmpty) phone.text = '${l['phone']}';
     opd = [for (final s in (l['opdHours'] as List? ?? const [])) TimeWindow.fromJson(s as Json)];
     slotMinutes = intOf(l['slotMinutes']) == 0 ? 15 : intOf(l['slotMinutes']);
     lat = doubleOf(l['latitude']);
@@ -540,6 +592,8 @@ class ClinicForm extends TypeForm {
         'latitude': lat,
         'longitude': lng,
         'photos': photos,
+        'facilities': facilities,
+        if (phone.text.trim().isNotEmpty) 'phone': phone.text.trim(),
         'consultationFeePaise': paiseOf(fee.text),
         'opdHours': [for (final w in opd) w.toJson(opensCloses: true)],
         'slotMinutes': slotMinutes,
@@ -656,6 +710,9 @@ class ClinicForm extends TypeForm {
               Expanded(child: _text(this, city, 'City')),
             ]),
             _gap,
+            _text(this, phone, 'Clinic phone (optional)',
+                icon: Icons.call_rounded, keyboard: TextInputType.phone, helper: 'Shown to members for queries'),
+            _gap,
             _LocationPin(lat: lat, lng: lng, onChanged: (a, b) {
               lat = a;
               lng = b;
@@ -671,6 +728,20 @@ class ClinicForm extends TypeForm {
             photos = u;
             changed();
           }),
+        ),
+        FieldSection(
+          title: 'Facilities',
+          subtitle: 'Optional — what patients find at your clinic.',
+          icon: Icons.checklist_rounded,
+          child: TagInput(
+            values: facilities,
+            hint: 'Add a facility',
+            suggestions: const ['Parking', 'Wheelchair access', 'Pharmacy', 'Lab tests', 'X-ray', 'Physiotherapy', 'AC waiting area'],
+            onChanged: (v) {
+              facilities = v;
+              changed();
+            },
+          ),
         ),
       ]);
 
@@ -725,7 +796,9 @@ class ClinicForm extends TypeForm {
         ('Speciality', speciality.text),
         ('Doctors', doctors.where((d) => !d.empty).map((d) => 'Dr. ${d.name.text.trim()}').join(', ')),
         ('Address', [address.text, area.text, city.text].where((s) => s.trim().isNotEmpty).join(', ')),
+        ('Phone', phone.text.trim()),
         ('Photos', '${photos.length}'),
+        ('Facilities', facilities.join(', ')),
         ('Consultation', fee.text.isEmpty ? '' : '₹${fee.text}'),
         ('OPD', '${opd.length} windows · $slotMinutes-min slots'),
       ];
@@ -738,6 +811,7 @@ class ClinicForm extends TypeForm {
 class ChemistForm extends TypeForm {
   ChemistForm(PartnerUser? user) : super(PartnerType.chemist) {
     city.text = user?.city ?? '';
+    phone.text = user?.phone ?? '';
   }
 
   final name = TextEditingController();
@@ -746,6 +820,8 @@ class ChemistForm extends TypeForm {
   final city = TextEditingController();
   final radius = TextEditingController();
   final discount = TextEditingController();
+  final phone = TextEditingController();
+  final deliveryTime = TextEditingController();
   List<String> photos = [];
   List<TimeWindow> hours = [];
   bool delivery = true;
@@ -753,7 +829,7 @@ class ChemistForm extends TypeForm {
   double? lng;
 
   @override
-  List<TextEditingController> get _controllers => [name, address, area, city, radius, discount];
+  List<TextEditingController> get _controllers => [name, address, area, city, radius, discount, phone, deliveryTime];
 
   @override
   void load(Json? l) {
@@ -768,6 +844,8 @@ class ChemistForm extends TypeForm {
     photos = strList(l['photos']);
     hours = [for (final s in (l['openHours'] as List? ?? const [])) TimeWindow.fromJson(s as Json)];
     delivery = (l['homeDelivery'] ?? l['deliveryAvailable']) != false;
+    if ('${l['phone'] ?? ''}'.isNotEmpty) phone.text = '${l['phone']}';
+    deliveryTime.text = '${l['deliveryTimeEst'] ?? ''}';
     lat = doubleOf(l['latitude']);
     lng = doubleOf(l['longitude']);
   }
@@ -785,6 +863,8 @@ class ChemistForm extends TypeForm {
         'discountPct': int.tryParse(discount.text) ?? 0,
         'openHours': [for (final w in hours) w.toJson(opensCloses: true)],
         'homeDelivery': delivery,
+        if (phone.text.trim().isNotEmpty) 'phone': phone.text.trim(),
+        'deliveryTimeEst': deliveryTime.text.trim(),
       };
 
   @override
@@ -815,6 +895,9 @@ class ChemistForm extends TypeForm {
               const SizedBox(width: 10),
               Expanded(child: _text(this, city, 'City')),
             ]),
+            _gap,
+            _text(this, phone, 'Store phone (optional)',
+                icon: Icons.call_rounded, keyboard: TextInputType.phone, helper: 'Members call this number about orders'),
             _gap,
             _LocationPin(lat: lat, lng: lng, onChanged: (a, b) {
               lat = a;
@@ -897,6 +980,11 @@ class ChemistForm extends TypeForm {
             subtitle: Text(delivery ? 'Members can order for delivery' : 'Store pickup only'),
           ),
         ),
+        if (delivery) ...[
+          const SizedBox(height: 12),
+          _text(this, deliveryTime, 'Usual delivery time (optional)',
+              icon: Icons.timer_outlined, maxLength: 60, helper: 'e.g. Within 2 hours'),
+        ],
       ]);
 
   @override
@@ -905,7 +993,12 @@ class ChemistForm extends TypeForm {
         ('Photos', '${photos.length}'),
         ('Discount', discount.text.isEmpty ? '' : '${discount.text}% on MRP'),
         ('Hours', '${hours.length} windows'),
-        ('Delivery', delivery ? 'Yes${radius.text.isEmpty ? '' : ' · within ${radius.text} km'}' : 'No'),
+        ('Phone', phone.text.trim()),
+        ('Delivery',
+            delivery
+                ? 'Yes${radius.text.isEmpty ? '' : ' · within ${radius.text} km'}'
+                    '${deliveryTime.text.trim().isEmpty ? '' : ' · ${deliveryTime.text.trim()}'}'
+                : 'No'),
       ];
 }
 
@@ -928,13 +1021,14 @@ class StoreForm extends TypeForm {
   final brand = TextEditingController();
   final about = TextEditingController();
   final dispatch = TextEditingController();
+  final gstin = TextEditingController();
   String? logoUrl;
   Set<String> categories = {};
 
   bool get needsFssai => categories.contains('supplements') || categories.contains('healthy_food');
 
   @override
-  List<TextEditingController> get _controllers => [brand, about, dispatch];
+  List<TextEditingController> get _controllers => [brand, about, dispatch, gstin];
 
   @override
   void load(Json? l) {
@@ -943,6 +1037,7 @@ class StoreForm extends TypeForm {
     about.text = '${l['about'] ?? ''}';
     dispatch.text = l['dispatchDays'] == null ? '' : '${intOf(l['dispatchDays'])}';
     logoUrl = l['logoUrl'];
+    gstin.text = '${l['gstin'] ?? ''}';
     categories = {...strList(l['categories'])}..retainWhere(storeCategories.containsKey);
   }
 
@@ -954,6 +1049,7 @@ class StoreForm extends TypeForm {
         'about': about.text.trim(),
         'categories': categories.toList(),
         'dispatchDays': int.tryParse(dispatch.text),
+        'gstin': gstin.text.trim().isEmpty ? null : gstin.text.trim().toUpperCase(),
       };
 
   @override
@@ -985,6 +1081,21 @@ class StoreForm extends TypeForm {
             _text(this, brand, 'Brand name', icon: Icons.sell_rounded),
             _gap,
             _text(this, about, 'About the brand', icon: Icons.notes_rounded, maxLines: 4, maxLength: 2000),
+            _gap,
+            TextField(
+              controller: gstin,
+              maxLength: 15,
+              textCapitalization: TextCapitalization.characters,
+              inputFormatters: const [UpperCaseFormatter()],
+              onChanged: (_) => changed(),
+              decoration: InputDecoration(
+                labelText: 'GSTIN (optional)',
+                helperText: 'Printed on your invoices, e.g. 27AAPFU0939F1ZV',
+                errorText: ListingValidators.gstinOptional(gstin.text),
+                prefixIcon: const Icon(Icons.receipt_long_rounded),
+                counterText: '',
+              ),
+            ),
           ]),
         ),
         FieldSection(
@@ -1048,6 +1159,7 @@ class StoreForm extends TypeForm {
         ('Categories', categories.map((c) => storeCategories[c]).join(', ')),
         ('About', about.text.length > 80 ? '${about.text.substring(0, 80)}…' : about.text),
         ('Dispatch', dispatch.text.isEmpty ? '' : 'within ${dispatch.text} days'),
+        ('GSTIN', gstin.text.trim().toUpperCase()),
         ('FSSAI', needsFssai ? 'Required' : 'Not required'),
       ];
 }

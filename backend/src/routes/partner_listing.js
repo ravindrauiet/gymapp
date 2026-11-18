@@ -249,7 +249,7 @@ router.post('/agreement/otp', async (req, res) => {
   const b = validate(entityBody, req.body ?? {});
   const listing = await assertOwnListing(b.entityType, b.entityId, req.user.id);
   if (listing.partnerAcceptedAt) throw conflict('You have already accepted the agreement for this listing');
-  if (['live', 'rejected'].includes(listing.status)) throw badRequest(`This listing is ${listing.status}`);
+  if (listing.status === 'live') throw badRequest('This listing is already live');
   const phone = await ownerPhone(req.user.id);
 
   const recent = await queryOne(
@@ -282,7 +282,7 @@ router.post('/agreement/otp', async (req, res) => {
 router.post('/agreement/accept', async (req, res) => {
   const b = validate(entityBody.extend({ otp: z.string().trim().regex(/^\d{6}$/, 'OTP must be 6 digits') }), req.body ?? {});
   const listing = await assertOwnListing(b.entityType, b.entityId, req.user.id);
-  if (listing.status === 'rejected') throw badRequest('This listing was not approved');
+
   const phone = await ownerPhone(req.user.id);
 
   const record = await queryOne(

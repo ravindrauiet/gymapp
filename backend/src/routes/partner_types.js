@@ -323,7 +323,7 @@ async function updateListing(type, id, data) {
 
 /** Staff acting for a partner (act-as token, req.staffId) may not see money. */
 function denyStaff(req) {
-  if (req.staffId) throw forbidden('FitKey staff cannot view partner earnings');
+  if (req.staffId && !req.actingAdmin) throw forbidden('FitKey staff cannot view partner earnings');
 }
 
 const rangeSchema = z.object({ from: dateSchema.optional(), to: dateSchema.optional() });

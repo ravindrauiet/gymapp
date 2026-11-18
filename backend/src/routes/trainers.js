@@ -578,7 +578,7 @@ partnerTrainerRouter.post('/bookings/:id/status', async (req, res) => {
 
 /** GET /partner/trainer/earnings?from=&to= — sessions (confirmed / completed), commission by founding-partner year. */
 partnerTrainerRouter.get('/earnings', async (req, res) => {
-  if (req.staffId) throw forbidden('FitKey staff cannot view partner earnings');
+  if (req.staffId && !req.actingAdmin) throw forbidden('FitKey staff cannot view partner earnings');
   const f = validate(z.object({ from: dateSchema.optional(), to: dateSchema.optional() }), req.query);
   const trainer = await myTrainer(req);
   const to = f.to ?? todayIst();

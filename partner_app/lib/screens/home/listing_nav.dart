@@ -24,8 +24,9 @@ Future<Widget?> venueEditorFor(BuildContext context, String? venueId, {int? step
   }
 }
 
-/// The listing editor for a non-venue partner type (trainer / clinic / chemist / store seller).
-Widget typeListingScreen(PartnerType type) => TypeListingScreen(type: type);
+/// The listing editor for a non-venue partner type (trainer / clinic / chemist / store seller), opened at 1-based
+/// [step] when given (e.g. the step a "changes needed" fix points at).
+Widget typeListingScreen(PartnerType type, {int? step}) => TypeListingScreen(type: type, initialStep: step);
 
 /// Staff home ("List on behalf of a partner").
 Widget staffHomeScreen() => const StaffHomeScreen();

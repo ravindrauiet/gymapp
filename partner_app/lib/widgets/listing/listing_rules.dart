@@ -76,6 +76,20 @@ String prettyTime(String hhmm) {
 
 String prettyRange(String start, String end) => '${prettyTime(start)} – ${prettyTime(end)}';
 
+/// "Open 24 hours" is stored as 00:00–23:59: the server needs closesAt > opensAt and has no 24:00.
+const allDayOpensAt = '00:00';
+const allDayClosesAt = '23:59';
+const open24Label = 'Open 24 hours';
+
+/// True for a whole-day range (00:00 → 23:59, seconds ignored: "00:00:00"–"23:59:00" counts too).
+bool isAllDayRange(String start, String end) => toMinutes(start) == 0 && toMinutes(end) >= 24 * 60 - 1;
+
+/// Opening hours for display: "Open 24 hours" for a whole day, else "6 AM – 10 PM".
+String prettyHours(String start, String end) => isAllDayRange(start, end) ? open24Label : prettyRange(start, end);
+
+/// True when a day's shifts are one whole-day shift.
+bool isOpen24(List<Shift> shifts) => shifts.length == 1 && shifts.first.allDay;
+
 /// "Mon–Fri", "All days", "Mon, Wed, Sat", "Weekends".
 String prettyDays(Iterable<String> days) {
   final set = days.toSet();
@@ -94,8 +108,14 @@ String prettyDays(Iterable<String> days) {
 /// A [start, end) time range on one day.
 class Shift {
   Shift(this.start, this.end);
+
+  /// The whole day (00:00–23:59) — "Open 24 hours".
+  Shift.allDay() : start = allDayOpensAt, end = allDayClosesAt;
+
   String start;
   String end;
+
+  bool get allDay => isAllDayRange(start, end);
 
   Shift copy() => Shift(start, end);
   int get startMin => toMinutes(start);
@@ -274,10 +294,17 @@ String scheduleSummary(WeekSchedule s) {
   final days = s.openDays;
   if (days.isEmpty) return 'Closed all week';
   if (s.sameEveryDay) {
-    return '${prettyDays(days)} · ${s.open[days.first]!.map((x) => prettyRange(x.start, x.end)).join(', ')}';
+    return '${prettyDays(days)} · ${s.open[days.first]!.map((x) => prettyHours(x.start, x.end)).join(', ')}';
   }
+  final allDay = days.where((d) => isOpen24(s.open[d]!)).toList();
+  if (allDay.isNotEmpty) return '${prettyDays(days)} · different hours per day ($open24Label ${prettyDays(allDay)})';
   return '${prettyDays(days)} · different hours per day';
 }
+
+/// Per-day lines for a schedule with different hours per day: "Mon: Open 24 hours", "Sat: 6 AM – 1 PM, 4 PM – 9 PM".
+List<String> scheduleDayLines(WeekSchedule s) => [
+      for (final d in s.openDays) '${weekdayShort[d]}: ${s.open[d]!.map((x) => prettyHours(x.start, x.end)).join(', ')}',
+    ];
 
 // ---------------------------------------------------------------------------------------------------------------
 // Description, categories, equipment

@@ -8,6 +8,7 @@ import 'package:provider/provider.dart';
 import '../../data/rse_api.dart';
 import '../../state/partner_session.dart';
 import '../../ui/ui.dart';
+import '../attendance/attendance_screen.dart' show MemberVisitHistoryScreen;
 import '../bookings/paid_via.dart' show NoteStrip;
 
 Color sourceColor(MemberSource s) => switch (s) {
@@ -90,6 +91,12 @@ class _MemberRegisterScreenState extends State<MemberRegisterScreen> {
 
   Future<void> _edit(VenueMember? m) async {
     if (m != null && !m.manual) {
+      // FitKey-pass visitors carry their FitKey user id → open their visit history.
+      final userId = memberUserId(m.key);
+      if (userId != null) {
+        await push(context, MemberVisitHistoryScreen(venueId: widget.venueId, userId: userId, memberName: m.name));
+        return;
+      }
       toast(context, 'FitKey members are added automatically and can\'t be edited', icon: Icons.info_outline_rounded);
       return;
     }
@@ -511,7 +518,16 @@ class _MemberFormSheetState extends State<MemberFormSheet> {
       child: Tap(
         onTap: () => _pick(renewal: renewal),
         child: InputDecorator(
-          decoration: InputDecoration(labelText: label, suffixIcon: const Icon(Icons.calendar_today_rounded, size: 18)),
+          decoration: InputDecoration(
+            labelText: label,
+            suffixIcon: renewal && v != null
+                ? IconButton(
+                    tooltip: 'Clear renewal date',
+                    icon: const Icon(Icons.close_rounded, size: 18),
+                    onPressed: () => setState(() => _renewal = null),
+                  )
+                : const Icon(Icons.calendar_today_rounded, size: 18),
+          ),
           child: Text(v == null ? 'Not set' : formatDate(v), style: const TextStyle(fontWeight: FontWeight.w600)),
         ),
       ),

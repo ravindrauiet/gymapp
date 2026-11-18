@@ -442,10 +442,11 @@ partnerVendorRouter.post('/products', async (req, res) => {
   let vendor = await queryOne(`SELECT id FROM marketplace_vendors WHERE partner_id = $1`, [req.user.id]);
   if (!vendor) {
     // New sellers start as a draft listing (Partner BRD §7) — members see their products once it is live.
+    const owner = await queryOne(`SELECT name FROM users WHERE id = $1`, [req.user.id]);
     vendor = await queryOne(
       `INSERT INTO marketplace_vendors (partner_id, business_name, listing_status, listed_by)
        VALUES ($1, $2, 'draft', $3) RETURNING id`,
-      [req.user.id, req.user.name || 'Partner Vendor', req.staffId ?? null],
+      [req.user.id, owner?.name || 'Partner Vendor', req.staffId ?? null],
     );
   }
 
@@ -479,7 +480,9 @@ partnerVendorRouter.put('/products/:id', async (req, res) => {
   const vendor = await queryOne(`SELECT id FROM marketplace_vendors WHERE partner_id = $1`, [req.user.id]);
   if (!vendor) throw notFound('Vendor not found');
 
+  // .partial() keeps field defaults (specs: {}), which would wipe saved specs on every edit — drop unsent keys.
   const p = validate(productSchema.partial(), req.body);
+  for (const k of Object.keys(p)) if (!(k in (req.body ?? {}))) delete p[k];
   const existing = await queryOne(
     `SELECT * FROM marketplace_products WHERE id = $1 AND vendor_id = $2`,
     [req.params.id, vendor.id],
@@ -651,7 +654,7 @@ const goLiveOf = async (userId) =>
   (await queryOne(`SELECT partner_go_live_at FROM users WHERE id = $1`, [userId]))?.partnerGoLiveAt ?? null;
 
 partnerVendorRouter.get('/commissions', async (req, res) => {
-  if (req.staffId) throw forbidden('FitKey staff cannot view partner earnings');
+  if (req.staffId && !req.actingAdmin) throw forbidden('FitKey staff cannot view partner earnings');
   const goLiveAt = await goLiveOf(req.user.id);
   const vendor = await queryOne(`SELECT id FROM marketplace_vendors WHERE partner_id = $1`, [req.user.id]);
   if (!vendor) {
@@ -670,7 +673,7 @@ partnerVendorRouter.get('/commissions', async (req, res) => {
 
 /** GET /partner/vendor/earnings?from=&to= → { from, to, totals, bySource, byDay, commissionPct } */
 partnerVendorRouter.get('/earnings', async (req, res) => {
-  if (req.staffId) throw forbidden('FitKey staff cannot view partner earnings');
+  if (req.staffId && !req.actingAdmin) throw forbidden('FitKey staff cannot view partner earnings');
   const f = validate(z.object({ from: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(), to: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional() }), req.query);
   const to = f.to ?? todayIst();
   const from = f.from ?? new Date(Date.parse(`${to}T00:00:00Z`) - 29 * 86_400_000).toISOString().slice(0, 10);

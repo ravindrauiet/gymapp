@@ -17,8 +17,30 @@ class _BookingsTabState extends State<_BookingsTab> with AutomaticKeepAliveClien
   /// A day picked in the strip; null shows the whole Upcoming / Past list.
   DateTime? _day;
 
+  /// GET /partner/trainer/calendar for the strip's 14 days (free slots, full days). Null when it failed / isn't set up.
+  TrainerCalendar? _calendar;
+
   @override
   bool get wantKeepAlive => true;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadCalendar();
+  }
+
+  Future<void> _loadCalendar() async {
+    try {
+      final c = await context.read<PartnerSession>().api.trainerCalendar(from: DateUtils.dateOnly(DateTime.now()), days: 14);
+      if (mounted) setState(() => _calendar = c);
+    } catch (_) {
+      // The calendar only adds free-slot hints; the bookings list works without it.
+    }
+  }
+
+  Future<void> _reload() async {
+    await Future.wait([widget.onReload(), _loadCalendar()]);
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -28,12 +50,12 @@ class _BookingsTabState extends State<_BookingsTab> with AutomaticKeepAliveClien
       builder: (context, snap) {
         if (snap.connectionState != ConnectionState.done) return const SkeletonList(itemHeight: 120);
         if (snap.hasError) {
-          return _RefreshableFill(onRefresh: widget.onReload, child: ErrorView(error: snap.error!, onRetry: widget.onReload));
+          return _RefreshableFill(onRefresh: _reload, child: ErrorView(error: snap.error!, onRetry: _reload));
         }
         final all = snap.data!;
         if (all.isEmpty) {
           return _RefreshableFill(
-            onRefresh: widget.onReload,
+            onRefresh: _reload,
             child: const EmptyView(
               icon: Icons.event_available_rounded,
               title: 'No bookings yet',
@@ -57,13 +79,14 @@ class _BookingsTabState extends State<_BookingsTab> with AutomaticKeepAliveClien
         }
 
         return RefreshIndicator(
-          onRefresh: widget.onReload,
+          onRefresh: _reload,
           child: ListView(
             physics: const AlwaysScrollableScrollPhysics(),
             padding: const EdgeInsets.only(bottom: 24),
             children: [
               _DayStrip(
                 bookings: all,
+                calendar: _calendar,
                 selected: _day,
                 onSelected: (d) => setState(() => _day = d == _day ? null : d),
               ),
@@ -93,6 +116,7 @@ class _BookingsTabState extends State<_BookingsTab> with AutomaticKeepAliveClien
                             : 'Past & cancelled · ${all.where((b) => !_isUpcoming(b)).length}',
                       ),
               ),
+              if (_day != null && _calendar?.dayOf(_day!) != null) _FreeSlots(day: _calendar!.dayOf(_day!)!, max: _calendar!.maxSessionsPerDay),
               if (shown.isEmpty)
                 EmptyView(
                   icon: Icons.event_busy_rounded,
@@ -102,7 +126,10 @@ class _BookingsTabState extends State<_BookingsTab> with AutomaticKeepAliveClien
                 )
               else
                 for (final b in shown)
-                  Padding(padding: const EdgeInsets.fromLTRB(16, 5, 16, 5), child: _BookingCard(booking: b)),
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(16, 5, 16, 5),
+                    child: _BookingCard(booking: b, onChanged: _reload),
+                  ),
             ],
           ),
         );
@@ -113,8 +140,11 @@ class _BookingsTabState extends State<_BookingsTab> with AutomaticKeepAliveClien
 
 /// Two weeks starting today, with a dot per booked session.
 class _DayStrip extends StatelessWidget {
-  const _DayStrip({required this.bookings, required this.selected, required this.onSelected});
+  const _DayStrip({required this.bookings, required this.calendar, required this.selected, required this.onSelected});
   final List<TrainerBookingItem> bookings;
+
+  /// Marks fully booked days (max sessions per day reached) when loaded.
+  final TrainerCalendar? calendar;
   final DateTime? selected;
   final ValueChanged<DateTime> onSelected;
 
@@ -160,6 +190,11 @@ class _DayStrip extends StatelessWidget {
                 Text('${d.day}',
                     style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800, color: on ? Colors.white : AppColors.text)),
                 const SizedBox(height: 4),
+                if (calendar?.dayOf(d)?.full ?? false)
+                  Text('FULL',
+                      style: TextStyle(
+                          fontSize: 8.5, letterSpacing: 0.4, fontWeight: FontWeight.w800, color: on ? AppColors.lime : AppColors.red))
+                else
                 Row(mainAxisSize: MainAxisSize.min, children: [
                   for (var k = 0; k < (n > 3 ? 3 : n); k++)
                     Container(
@@ -179,13 +214,75 @@ class _DayStrip extends StatelessWidget {
   }
 }
 
-class _BookingCard extends StatelessWidget {
-  const _BookingCard({required this.booking});
+class _BookingCard extends StatefulWidget {
+  const _BookingCard({required this.booking, required this.onChanged});
   final TrainerBookingItem booking;
+
+  /// Reloads the list after the session's status changed.
+  final Future<void> Function() onChanged;
+
+  @override
+  State<_BookingCard> createState() => _BookingCardState();
+}
+
+class _BookingCardState extends State<_BookingCard> {
+  bool _busy = false;
+
+  /// Confirms, then POST /partner/trainer/bookings/:id/status ('completed' | 'cancelled').
+  Future<void> _setStatus(String status) async {
+    final b = widget.booking;
+    final cancel = status == 'cancelled';
+    final note = TextEditingController();
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text(cancel ? 'Cancel this session?' : 'Mark session completed?'),
+        content: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Text(cancel
+              ? '${b.memberName} will be notified that you cancelled the ${b.slotTime} session. This can\'t be undone.'
+              : 'Confirm that you took ${b.memberName}\'s ${b.slotTime} session. It then counts towards your earnings.'),
+          if (cancel) ...[
+            const SizedBox(height: 12),
+            TextField(
+              controller: note,
+              maxLength: 300,
+              maxLines: 2,
+              minLines: 1,
+              textCapitalization: TextCapitalization.sentences,
+              decoration: const InputDecoration(labelText: 'Message to the member (optional)'),
+            ),
+          ],
+        ]),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: Text(cancel ? 'Keep it' : 'Not yet')),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            style: TextButton.styleFrom(foregroundColor: cancel ? AppColors.red : AppColors.green),
+            child: Text(cancel ? 'Cancel session' : 'Mark completed'),
+          ),
+        ],
+      ),
+    );
+    final text = note.text.trim();
+    note.dispose();
+    if (ok != true || !mounted) return;
+    setState(() => _busy = true);
+    try {
+      await context.read<PartnerSession>().api.setTrainerBookingStatus(b.id, status, note: text.isEmpty ? null : text);
+      if (!mounted) return;
+      toast(context, cancel ? 'Session cancelled · member notified' : 'Session marked completed',
+          icon: cancel ? Icons.event_busy_rounded : Icons.check_circle_rounded);
+      await widget.onChanged();
+    } catch (e) {
+      if (mounted) toast(context, friendlyError(e), error: true);
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
-    final b = booking;
+    final b = widget.booking;
     final mode = _mode(b.mode);
     final day = _sessionDay(b);
     final upcoming = _isUpcoming(b);
@@ -235,7 +332,72 @@ class _BookingCard extends StatelessWidget {
           const SizedBox(height: 8),
           Text(b.memberPhone, style: const TextStyle(color: AppColors.text3, fontSize: 12)),
         ],
+        if (b.status == 'confirmed') ...[
+          const SizedBox(height: 10),
+          if (_busy)
+            const Align(
+              alignment: Alignment.centerRight,
+              child: SizedBox(width: 22, height: 22, child: CircularProgressIndicator(strokeWidth: 2.4)),
+            )
+          else
+            Row(children: [
+              TextButton(
+                onPressed: () => _setStatus('cancelled'),
+                style: TextButton.styleFrom(foregroundColor: AppColors.red),
+                child: const Text('Cancel session'),
+              ),
+              const Spacer(),
+              // A session can be marked done from its day on (not ahead of time).
+              if (day != null && !day.isAfter(DateUtils.dateOnly(DateTime.now())))
+                FilledButton.icon(
+                  onPressed: () => _setStatus('completed'),
+                  icon: const Icon(Icons.check_rounded, size: 18),
+                  label: const Text('Mark completed'),
+                ),
+            ]),
+        ],
       ]),
+    );
+  }
+}
+
+/// The still-free slots of the picked day (GET /partner/trainer/calendar), or "fully booked".
+class _FreeSlots extends StatelessWidget {
+  const _FreeSlots({required this.day, required this.max});
+  final TrainerCalendarDay day;
+  final int? max;
+
+  static String _label(String t) => RegExp(r'^\d{2}:\d{2}').hasMatch(t) ? formatTimeOfDay(t) : t;
+
+  @override
+  Widget build(BuildContext context) {
+    final String title;
+    if (day.full) {
+      title = 'Fully booked${max == null ? '' : ' · $max session${max == 1 ? '' : 's'} a day max'}';
+    } else if (day.freeSlots.isEmpty) {
+      title = 'No free slots in your weekly availability';
+    } else {
+      title = '${day.freeSlots.length} free slot${day.freeSlots.length == 1 ? '' : 's'}';
+    }
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+      child: AppCard(
+        padding: const EdgeInsets.all(12),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Row(children: [
+            Icon(day.full ? Icons.event_busy_rounded : Icons.event_available_rounded,
+                size: 18, color: day.full ? AppColors.red : AppColors.green),
+            const SizedBox(width: 8),
+            Expanded(child: Text(title, style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 13.5))),
+          ]),
+          if (!day.full && day.freeSlots.isNotEmpty) ...[
+            const SizedBox(height: 8),
+            Wrap(spacing: 6, runSpacing: 6, children: [
+              for (final t in day.freeSlots) Tag(_label(t), color: AppColors.green, bg: AppColors.greenSoft, dense: true),
+            ]),
+          ],
+        ]),
+      ),
     );
   }
 }

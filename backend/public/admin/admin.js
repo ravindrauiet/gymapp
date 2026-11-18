@@ -997,7 +997,7 @@ window.FitkeyAdmin = {
     if (!document.querySelector(`#tabs [data-tab="${key}"]`)) $('#tabs').append(h('button', { 'data-tab': key }, title));
   },
 };
-const EXTENSIONS = ['ext-passes.js', 'ext-memberships.js', 'ext-studio-import.js', 'ext-mansi.js', 'ext-food.js', 'ext-partners.js'];
+const EXTENSIONS = ['ext-passes.js', 'ext-memberships.js', 'ext-studio-import.js', 'ext-mansi.js', 'ext-food.js', 'ext-partners.js', 'ext-vendors.js'];
 for (const file of EXTENSIONS) import(`./${file}`).catch(() => {}); // a missing extension is simply skipped
 
 async function render() {

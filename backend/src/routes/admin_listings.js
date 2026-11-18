@@ -5,7 +5,9 @@ import { badRequest, notFound, validate } from '../utils/http.js';
 import { notify } from '../utils/notify.js';
 import { sendSms } from '../utils/sms.js';
 import { LISTING_ENTITIES, LISTING_STATUSES, listingTimeline, maybeGoLive, setListingStatus } from '../utils/listing.js';
-import { ENTITY_TYPES } from '../utils/partner_rules.js';
+import { ENTITY_TYPES, PARTNER_TYPES } from '../utils/partner_rules.js';
+import { signAccessToken } from '../middleware/auth.js';
+import { phoneSchema } from '../utils/schemas.js';
 import { goLiveBlockers, onDocumentVerified } from '../utils/partner_types.js';
 import { listingsUnionSql, loadListingMeta } from './partner_listing.js';
 import { venueDetail } from './partner.js';
@@ -231,6 +233,77 @@ router.post('/partner-bank/:id', async (req, res) => {
 });
 
 // --------------------------------------------------------------------------------------------- staff
+
+// --------------------------------------------------------------------------------------- register a vendor (admin)
+
+/**
+ * POST /admin/partners { phone, name, partnerType, city?, email? } — registers a vendor on their behalf (or finds the
+ * existing partner account for that phone) and returns an act-as token so the admin panel can fill in everything:
+ * listing, photos, plans, documents, KYC, bank, submit. Uses the normal partner endpoints with that token.
+ * The vendor later logs in to the partner app with this mobile number + OTP (no password is ever shared).
+ */
+router.post('/partners', async (req, res) => {
+  const b = validate(
+    z.object({
+      phone: phoneSchema,
+      name: z.string().trim().min(2).max(120),
+      partnerType: z.enum(PARTNER_TYPES),
+      city: z.string().trim().min(2).max(80).optional(),
+      email: z
+        .string()
+        .trim()
+        .transform((v) => v.toLowerCase())
+        .pipe(z.string().email())
+        .optional()
+        .or(z.literal('').transform(() => undefined)),
+    }),
+    req.body ?? {},
+  );
+  const partner = await queryOne(
+    `INSERT INTO users (phone, role, name, partner_type, city, email) VALUES ($1, 'partner', $2, $3, $4, $5)
+     ON CONFLICT (phone, role) DO UPDATE SET name = COALESCE(users.name, EXCLUDED.name),
+       partner_type = COALESCE(users.partner_type, EXCLUDED.partner_type), city = COALESCE(users.city, EXCLUDED.city),
+       email = COALESCE(users.email, EXCLUDED.email), updated_at = now()
+     RETURNING id, phone, name, email, role, city, partner_type, is_fitkey_staff, partner_go_live_at, (xmax = 0) AS inserted`,
+    [b.phone, b.name, b.partnerType, b.city ?? null, b.email ?? null],
+  );
+  const { inserted, ...publicPartner } = partner;
+  res.status(inserted ? 201 : 200).json({
+    partner: { ...publicPartner, isNew: inserted },
+    actAsToken: signAccessToken({ id: partner.id, role: 'partner' }, { staffId: req.user.id, actingAdmin: true }),
+  });
+});
+
+/** POST /admin/partners/:id/act-as — a fresh act-as token for an existing partner (manage an existing vendor). */
+router.post('/partners/:id/act-as', async (req, res) => {
+  const partner = await queryOne(
+    `SELECT id, phone, name, email, city, partner_type, partner_go_live_at FROM users WHERE id = $1 AND role = 'partner'`,
+    [req.params.id],
+  ).catch(() => null);
+  if (!partner) throw notFound('Partner not found');
+  res.json({
+    partner,
+    actAsToken: signAccessToken({ id: partner.id, role: 'partner' }, { staffId: req.user.id, actingAdmin: true }),
+  });
+});
+
+/** GET /admin/partners?q= — partner accounts with their listings (name / phone search). */
+router.get('/partners', async (req, res) => {
+  const { q } = validate(z.object({ q: z.string().trim().max(80).default('') }), req.query);
+  const digits = q.replace(/[^0-9]/g, '');
+  const partners = await query(
+    `SELECT u.id, u.name, u.phone, u.email, u.city, u.partner_type, u.partner_go_live_at, u.created_at,
+            COALESCE((SELECT json_agg(json_build_object('entityType', l.entity_type, 'entityId', l.entity_id,
+                        'name', l.name, 'status', l.status) ORDER BY l.created_at DESC)
+                      FROM (${listingsUnionSql()}) l WHERE l.owner_id = u.id), '[]') AS listings
+       FROM users u
+      WHERE u.role = 'partner' AND NOT u.is_fitkey_staff
+        AND ($1 = '' OR u.name ILIKE '%' || $1 || '%' OR ($2 <> '' AND u.phone LIKE '%' || $2 || '%'))
+      ORDER BY u.created_at DESC LIMIT 100`,
+    [q, digits],
+  );
+  res.json({ partners });
+});
 
 /** GET /admin/users?role=partner&q= — find accounts by name or phone (staff toggle in the admin panel). */
 router.get('/users', async (req, res) => {

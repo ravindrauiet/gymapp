@@ -134,7 +134,8 @@ const venueFields = z.object({
   photos: z.array(photoUrlSchema).max(PHOTOS_MAX, `Up to ${PHOTOS_MAX} photos`),
   // BRD v2
   sports: z.array(z.enum(SPORTS)).max(SPORTS.length),
-  videoUrl: z.string().trim().url().max(500).nullish(),
+  // Uploaded clips are server-relative (/api/v1/files/<id>); external https links are allowed too.
+  videoUrl: photoUrlSchema.nullish(),
   fitkeyPassMode: z.enum(['all', 'blocked']),
   passAccepted: z.boolean(),
   monthlyFeePaise: z.number().int().positive().max(100_000_000).nullish(),
@@ -341,7 +342,7 @@ router.post('/venues', async (req, res) => {
   if (v.listingStep !== undefined) {
     params.push(v.listingStep);
     cols.push('listing_step');
-    vals.push(`${params.length}`);
+    vals.push(`$${params.length}`);
   }
   const venue = await withTransaction(async (client) => {
     const row = await queryOne(
@@ -453,6 +454,36 @@ router.get('/venues/:id/attendance', async (req, res) => {
     [venue.id, date ?? null, config.tz],
   );
   res.json({ date: date ?? null, count: checkins.length, checkins });
+});
+
+/**
+ * GET /partner/venues/:id/attendance/members — every member who checked in (last 180 days) with visit counts, and
+ * GET /partner/venues/:id/attendance/members/:userId — that member's visit history (BRD §10.1 "history per member").
+ */
+router.get('/venues/:id/attendance/members', async (req, res) => {
+  const venue = await ownVenue(req.params.id, req.user.id);
+  const members = await query(
+    `SELECT u.id AS user_id, u.name AS member_name, RIGHT(u.phone, 4) AS phone_last4, COUNT(*)::int AS visits,
+            MAX(c.checked_in_at) AS last_visit_at, MIN(c.checked_in_at) AS first_visit_at
+     FROM checkins c JOIN users u ON u.id = c.user_id
+     WHERE c.venue_id = $1 AND c.checkin_date > (now() AT TIME ZONE $2)::date - 180
+     GROUP BY u.id ORDER BY MAX(c.checked_in_at) DESC LIMIT 500`,
+    [venue.id, config.tz],
+  );
+  res.json({ members });
+});
+
+router.get('/venues/:id/attendance/members/:userId', async (req, res) => {
+  const venue = await ownVenue(req.params.id, req.user.id);
+  const userId = validate(z.string().uuid(), req.params.userId);
+  const member = await queryOne(`SELECT id, name, RIGHT(phone, 4) AS phone_last4 FROM users WHERE id = $1`, [userId]);
+  if (!member) throw notFound('Member not found');
+  const visits = await query(
+    `SELECT c.id, c.checkin_date, c.checked_in_at, c.method, c.paid_via, c.cost_label
+     FROM checkins c WHERE c.venue_id = $1 AND c.user_id = $2 ORDER BY c.checked_in_at DESC LIMIT 400`,
+    [venue.id, userId],
+  );
+  res.json({ member, count: visits.length, visits });
 });
 
 /** GET /partner/venues/:id/attendance/summary?month=YYYY-MM — daily counts for a month. */

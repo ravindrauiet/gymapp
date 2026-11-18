@@ -36,7 +36,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
     try {
       await context.read<PartnerSession>().updateProfile({
         'name': _name.text.trim().replaceAll(RegExp(r'\s+'), ' '),
-        'email': email,
+        if (email.isNotEmpty) 'email': email,
         if (_city.text.trim().length >= 2) 'city': _city.text.trim(),
       });
       if (!mounted) return;
@@ -168,11 +168,12 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 autofillHints: const [AutofillHints.email],
                 inputFormatters: const [NoWhitespaceFormatter()],
                 decoration: const InputDecoration(
-                  labelText: 'Business email',
+                  labelText: 'Business email (optional)',
                   hintText: 'name@gmail.com',
+                  helperText: 'For payout statements and invoices',
                   prefixIcon: Icon(Icons.mail_outline_rounded),
                 ),
-                validator: emailValidator,
+                validator: (v) => emailValidator(v, required: false),
               ),
               const SizedBox(height: 14),
               TextFormField(

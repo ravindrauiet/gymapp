@@ -236,7 +236,7 @@ class _HomeTabState extends State<HomeTab> {
         final screen = await venueEditorFor(context, entityId, step: step);
         if (screen != null) await shell.open(screen);
       } else {
-        await shell.open(typeListingScreen(type));
+        await shell.open(typeListingScreen(type, step: step));
       }
     }
 
@@ -425,7 +425,6 @@ class _HomeTabState extends State<HomeTab> {
           AppColors.teal,
           () => shell.open(const ClinicAppointmentsScreen(queue: true)),
         ),
-        a(Icons.star_rounded, 'Ratings', AppColors.amber, () => shell.open(const PartnerRatingsScreen())),
         if (!shell.acting)
           a(Icons.account_balance_wallet_rounded, 'Earnings', AppColors.green, () => shell.goTab(ShellTab.earn)),
       ],
@@ -437,7 +436,6 @@ class _HomeTabState extends State<HomeTab> {
           AppColors.teal,
           () => shell.open(const ChemistOrdersScreen(deliveriesOnly: true)),
         ),
-        a(Icons.star_rounded, 'Ratings', AppColors.amber, () => shell.open(const PartnerRatingsScreen())),
         if (!shell.acting)
           a(Icons.account_balance_wallet_rounded, 'Earnings', AppColors.green, () => shell.goTab(ShellTab.earn)),
       ],

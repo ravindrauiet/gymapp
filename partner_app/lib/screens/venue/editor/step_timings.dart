@@ -312,6 +312,7 @@ class _TimingsStepState extends State<_TimingsStep> {
 
   Widget _shiftEditor(List<Shift> shifts, {required String title, String? day}) {
     final err = validateShifts(shifts);
+    final allDay = isOpen24(shifts);
     return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
       Row(children: [
         Expanded(child: Text(title, style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 15))),
@@ -319,7 +320,35 @@ class _TimingsStepState extends State<_TimingsStep> {
         if (day != null && _s.openDays.length > 1)
           TextButton(onPressed: () => _copyToAll(day), child: const Text('Copy to all')),
       ]),
-      const SizedBox(height: 10),
+      const SizedBox(height: 6),
+      // "Open 24 hours" — stored as 00:00–23:59 (the server has no 24:00).
+      Row(children: [
+        const Icon(Icons.all_inclusive_rounded, size: 18, color: AppColors.primary),
+        const SizedBox(width: 8),
+        Expanded(
+          child: Text(day == null && !_perDay ? '$open24Label on all open days' : open24Label,
+              style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13.5)),
+        ),
+        Switch(
+          value: allDay,
+          onChanged: (on) {
+            shifts
+              ..clear()
+              ..add(on ? Shift.allDay() : Shift('06:00', '22:00'));
+            _afterShiftEdit(shifts);
+          },
+        ),
+      ]),
+      const SizedBox(height: 4),
+      if (allDay)
+        Container(
+          width: double.infinity,
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+          decoration: BoxDecoration(color: AppColors.primarySoft, borderRadius: BorderRadius.circular(12)),
+          child: const Text('Members can book and check in at any time of the day.',
+              style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600, color: AppColors.text2)),
+        )
+      else ...[
       for (var i = 0; i < shifts.length; i++)
         Padding(
           padding: const EdgeInsets.only(bottom: 8),
@@ -339,6 +368,7 @@ class _TimingsStepState extends State<_TimingsStep> {
           icon: const Icon(Icons.add_rounded, size: 18),
           label: Text(shifts.length == 1 ? 'Add a break / second shift' : 'Add another shift'),
         ),
+      ],
     ]);
   }
 

@@ -20,8 +20,11 @@ import 'listing_fields.dart';
 import 'type_forms.dart';
 
 class TypeListingScreen extends StatefulWidget {
-  const TypeListingScreen({super.key, required this.type});
+  const TypeListingScreen({super.key, required this.type, this.initialStep});
   final PartnerType type;
+
+  /// 1-based wizard step to open at (e.g. the step a "changes needed" fix points at). Opens the editor even after submit.
+  final int? initialStep;
 
   @override
   State<TypeListingScreen> createState() => _TypeListingScreenState();
@@ -94,6 +97,11 @@ class _TypeListingScreenState extends State<TypeListingScreen> {
           final st = b.status;
           _editing = st == VenueStatus.draft;
           if (b.listingStep > 1 && st == VenueStatus.draft) _step = (b.listingStep - 1).clamp(0, _stepCount - 1);
+          final jump = widget.initialStep;
+          if (jump != null && jump > 0) {
+            _editing = true;
+            _step = (jump - 1).clamp(0, _stepCount - 1);
+          }
         }
       });
     } catch (e) {

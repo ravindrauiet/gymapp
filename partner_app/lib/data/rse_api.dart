@@ -290,12 +290,14 @@ class MemberInput {
   final int pricePaise;
   final bool remindMember;
 
-  Json toJson() => {
+  /// [edit] = a PUT (partial update): a cleared renewal date is sent as `null` so the server clears it
+  /// (an absent key would keep the old date). A POST simply leaves it out.
+  Json toJson({bool edit = false}) => {
     'name': name,
     'phone': ?phone,
     'joinedOn': apiDate(joinedOn),
     'planLabel': planLabel,
-    if (renewalOn != null) 'renewalOn': apiDate(renewalOn!),
+    if (renewalOn != null) 'renewalOn': apiDate(renewalOn!) else if (edit) 'renewalOn': null,
     'source': source.api,
     'pricePaise': pricePaise,
     'remindMember': remindMember,
@@ -502,6 +504,103 @@ class TrainerClientRow {
   final int totalPaise;
 }
 
+/// One day of GET /partner/trainer/calendar.
+class TrainerCalendarDay {
+  TrainerCalendarDay.fromJson(Json j)
+    : date = _day(j['date']),
+      sessions = (j['sessions'] as List? ?? const []).where((s) => s is Map && s['status'] != 'cancelled').length,
+      freeSlots = [for (final s in (j['freeSlots'] as List? ?? const [])) '$s'],
+      full = j['full'] == true;
+
+  final DateTime? date;
+
+  /// Booked (not cancelled) sessions that day.
+  final int sessions;
+  final List<String> freeSlots;
+  final bool full;
+}
+
+class TrainerCalendar {
+  TrainerCalendar.fromJson(Json j)
+    : maxSessionsPerDay = j['maxSessionsPerDay'] == null ? null : _i(j['maxSessionsPerDay']),
+      days = [for (final d in _list(j['days'])) TrainerCalendarDay.fromJson(d)];
+
+  final int? maxSessionsPerDay;
+  final List<TrainerCalendarDay> days;
+
+  TrainerCalendarDay? dayOf(DateTime d) {
+    for (final x in days) {
+      final xd = x.date;
+      if (xd != null && xd.year == d.year && xd.month == d.month && xd.day == d.day) return x;
+    }
+    return null;
+  }
+}
+
+/// A FitKey member who checked in at a venue (GET /partner/venues/:id/attendance/members, last 180 days).
+class AttendanceMember {
+  AttendanceMember.fromJson(Json j)
+    : userId = '${j['userId'] ?? ''}',
+      name = '${j['memberName'] ?? 'Member'}',
+      phoneLast4 = _s(j['phoneLast4']),
+      visits = _i(j['visits']),
+      lastVisitAt = _ts(j['lastVisitAt']),
+      firstVisitAt = _ts(j['firstVisitAt']);
+
+  final String userId;
+  final String name;
+  final String? phoneLast4;
+  final int visits;
+  final DateTime? lastVisitAt;
+  final DateTime? firstVisitAt;
+}
+
+class MemberVisit {
+  MemberVisit.fromJson(Json j)
+    : id = '${j['id'] ?? ''}',
+      date = _day(j['checkinDate']) ?? _ts(j['checkedInAt']),
+      checkedInAt = _ts(j['checkedInAt']),
+      method = _s(j['method']),
+      paidVia = _s(j['paidVia']),
+      costLabel = _s(j['costLabel']);
+
+  final String id;
+  final DateTime? date;
+  final DateTime? checkedInAt;
+  final String? method;
+  final String? paidVia;
+  final String? costLabel;
+}
+
+class MemberVisitHistory {
+  MemberVisitHistory.fromJson(Json j)
+    : name = '${(j['member'] as Map?)?['name'] ?? 'Member'}',
+      phoneLast4 = _s((j['member'] as Map?)?['phoneLast4']),
+      count = _i(j['count']),
+      visits = [for (final v in _list(j['visits'])) MemberVisit.fromJson(v)];
+
+  final String name;
+  final String? phoneLast4;
+  final int count;
+  final List<MemberVisit> visits;
+}
+
+/// Visits per calendar month, newest month first: [(DateTime(y, m), count)].
+List<(DateTime, int)> visitsPerMonth(Iterable<DateTime?> dates) {
+  final counts = <DateTime, int>{};
+  for (final d in dates) {
+    if (d == null) continue;
+    final k = DateTime(d.year, d.month);
+    counts[k] = (counts[k] ?? 0) + 1;
+  }
+  final keys = counts.keys.toList()..sort((a, b) => b.compareTo(a));
+  return [for (final k in keys) (k, counts[k]!)];
+}
+
+/// The FitKey user id behind a member-register row, when there is one: FitKey-pass visitors are keyed `fp:<userId>`.
+/// (Direct memberships / manual rows carry no user id in GET …/members.)
+String? memberUserId(String key) => key.startsWith('fp:') && key.length > 3 ? key.substring(3) : null;
+
 class LowStockProduct {
   LowStockProduct.fromJson(Json j)
     : id = '${j['id']}',
@@ -694,7 +793,16 @@ extension RseApi on PartnerApi {
       client.post('/partner/venues/$venueId/members', m.toJson());
 
   Future<void> updateVenueMember(String venueId, String memberId, MemberInput m) =>
-      client.put('/partner/venues/$venueId/members/$memberId', m.toJson());
+      client.put('/partner/venues/$venueId/members/$memberId', m.toJson(edit: true));
+
+  // ---- Attendance history per member (FitKey users who checked in) ----
+  Future<List<AttendanceMember>> attendanceMembers(String venueId) async => [
+    for (final m in _list((await client.get('/partner/venues/$venueId/attendance/members'))['members']))
+      AttendanceMember.fromJson(m),
+  ];
+
+  Future<MemberVisitHistory> attendanceMemberHistory(String venueId, String userId) async =>
+      MemberVisitHistory.fromJson(await client.get('/partner/venues/$venueId/attendance/members/$userId'));
 
   Future<void> deleteVenueMember(String venueId, String memberId) =>
       client.delete('/partner/venues/$venueId/members/$memberId');
@@ -786,6 +894,15 @@ extension RseApi on PartnerApi {
   Future<List<TrainerClientRow>> trainerClients() async => [
     for (final c in _list((await client.get('/partner/trainer/clients'))['clients'])) TrainerClientRow.fromJson(c),
   ];
+
+  /// Session calendar: sessions + still-free slots per day from the weekly availability.
+  Future<TrainerCalendar> trainerCalendar({DateTime? from, int days = 14}) async => TrainerCalendar.fromJson(
+    await client.get('/partner/trainer/calendar', query: {'from': from == null ? null : apiDate(from), 'days': '$days'}),
+  );
+
+  /// Marks a confirmed session `completed` or `cancelled` (the member is notified of a cancel, with [note]).
+  Future<void> setTrainerBookingStatus(String id, String status, {String? note}) =>
+      client.post('/partner/trainer/bookings/$id/status', {'status': status, 'note': ?note});
 
   Future<List<LowStockProduct>> lowStock() async => [
     for (final p in _list((await client.get('/partner/vendor/low-stock'))['products'])) LowStockProduct.fromJson(p),

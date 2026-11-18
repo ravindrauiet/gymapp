@@ -50,6 +50,8 @@ export function createApp() {
       contentSecurityPolicy: {
         directives: {
           'img-src': ["'self'", 'data:', 'https:'],
+          // Admin panel: address search when registering a vendor (OpenStreetMap Nominatim).
+          'connect-src': ["'self'", 'https://nominatim.openstreetmap.org'],
           'media-src': ["'self'", 'https:'],
           // Allow the admin panel over plain HTTP on a LAN IP during development; terminate TLS in front in prod.
           'upgrade-insecure-requests': null,

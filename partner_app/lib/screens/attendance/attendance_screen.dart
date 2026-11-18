@@ -7,10 +7,12 @@ import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
 
 import '../../data/models.dart';
+import '../../data/rse_api.dart' show AttendanceMember, MemberVisit, MemberVisitHistory, RseApi, visitsPerMonth;
 import '../../state/partner_session.dart';
 import '../../ui/ui.dart';
+import '../bookings/paid_via.dart' show paidViaVisual;
 
-/// P7 — daily list of FITKEY members who checked in, plus counts by day for a month.
+/// P7 — daily list of FITKEY members who checked in, counts by day for a month, and every member's visit history.
 class AttendanceScreen extends StatelessWidget {
   const AttendanceScreen({super.key, required this.venueId, required this.venueName});
 
@@ -20,7 +22,7 @@ class AttendanceScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return DefaultTabController(
-      length: 2,
+      length: 3,
       child: Scaffold(
         appBar: AppBar(
           title: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
@@ -30,9 +32,13 @@ class AttendanceScreen extends StatelessWidget {
                 overflow: TextOverflow.ellipsis,
                 style: const TextStyle(fontSize: 12, color: AppColors.text2, fontWeight: FontWeight.w600)),
           ]),
-          bottom: const TabBar(tabs: [Tab(text: 'Daily'), Tab(text: 'Monthly')]),
+          bottom: const TabBar(tabs: [Tab(text: 'Daily'), Tab(text: 'Monthly'), Tab(text: 'Members')]),
         ),
-        body: TabBarView(children: [_DailyTab(venueId: venueId), _MonthlyTab(venueId: venueId)]),
+        body: TabBarView(children: [
+          _DailyTab(venueId: venueId),
+          _MonthlyTab(venueId: venueId),
+          _MembersTab(venueId: venueId),
+        ]),
       ),
     );
   }
@@ -519,5 +525,302 @@ class _MonthChart extends StatelessWidget {
           ]),
       ],
     ));
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Members (history per member, BRD §10.1)
+// ---------------------------------------------------------------------------
+
+class _MembersTab extends StatefulWidget {
+  const _MembersTab({required this.venueId});
+
+  final String venueId;
+
+  @override
+  State<_MembersTab> createState() => _MembersTabState();
+}
+
+class _MembersTabState extends State<_MembersTab> with AutomaticKeepAliveClientMixin {
+  late Future<List<AttendanceMember>> _future = _load();
+  String _q = '';
+
+  @override
+  bool get wantKeepAlive => true;
+
+  Future<List<AttendanceMember>> _load() => context.read<PartnerSession>().api.attendanceMembers(widget.venueId);
+
+  Future<void> _refresh() async {
+    final f = _load();
+    setState(() => _future = f);
+    try {
+      await f;
+    } catch (_) {
+      // Shown by the error state.
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    super.build(context);
+    return Column(children: [
+      Padding(
+        padding: const EdgeInsets.fromLTRB(16, 14, 16, 4),
+        child: TextField(
+          onChanged: (v) => setState(() => _q = v.trim().toLowerCase()),
+          textInputAction: TextInputAction.search,
+          decoration: const InputDecoration(
+            hintText: 'Search by name or last 4 digits',
+            prefixIcon: Icon(Icons.search_rounded),
+          ),
+        ),
+      ),
+      Expanded(
+        child: FutureBuilder<List<AttendanceMember>>(
+          future: _future,
+          builder: (context, snap) {
+            if (snap.connectionState != ConnectionState.done) {
+              return const SkeletonList(count: 6, itemHeight: 62);
+            }
+            if (snap.hasError) {
+              return RefreshIndicator(
+                onRefresh: _refresh,
+                child: ListView(physics: const AlwaysScrollableScrollPhysics(), children: [
+                  const SizedBox(height: 40),
+                  ErrorView(error: snap.error!, onRetry: _refresh),
+                ]),
+              );
+            }
+            final all = snap.data!;
+            final shown = _q.isEmpty
+                ? all
+                : all.where((m) => m.name.toLowerCase().contains(_q) || (m.phoneLast4?.contains(_q) ?? false)).toList();
+            return RefreshIndicator(
+              onRefresh: _refresh,
+              child: ListView(
+                physics: const AlwaysScrollableScrollPhysics(),
+                padding: const EdgeInsets.fromLTRB(16, 10, 16, 32),
+                children: [
+                  if (all.isEmpty)
+                    const EmptyView(
+                      icon: Icons.people_outline_rounded,
+                      title: 'No member visits yet',
+                      message: 'FITKEY members who check in here show up with their visit history (last 180 days).',
+                    )
+                  else ...[
+                    SectionTitle(
+                      '${all.length} member${all.length == 1 ? '' : 's'}',
+                      subtitle: 'Checked in during the last 180 days · tap for history',
+                    ),
+                    if (shown.isEmpty)
+                      const EmptyView(icon: Icons.search_off_rounded, title: 'No match', message: 'Try another name.')
+                    else
+                      for (final m in shown)
+                        Padding(
+                          padding: const EdgeInsets.only(bottom: 10),
+                          child: AppCard(
+                            onTap: () => push(
+                              context,
+                              MemberVisitHistoryScreen(venueId: widget.venueId, userId: m.userId, memberName: m.name),
+                            ),
+                            padding: const EdgeInsets.all(12),
+                            child: Row(children: [
+                              PersonAvatar(name: m.name, size: 42),
+                              const SizedBox(width: 12),
+                              Expanded(
+                                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                                  Text(m.name,
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: const TextStyle(fontWeight: FontWeight.w800)),
+                                  const SizedBox(height: 2),
+                                  Text(
+                                    [
+                                      '•••• ${m.phoneLast4 ?? '----'}',
+                                      if (m.lastVisitAt != null) 'last ${formatShortDate(m.lastVisitAt!)}',
+                                    ].join(' · '),
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: const TextStyle(color: AppColors.text2, fontSize: 12.5),
+                                  ),
+                                ]),
+                              ),
+                              Tag('${m.visits} visit${m.visits == 1 ? '' : 's'}', color: AppColors.primary, dense: true),
+                              const SizedBox(width: 4),
+                              const Icon(Icons.chevron_right_rounded, color: AppColors.text3),
+                            ]),
+                          ),
+                        ),
+                  ],
+                ],
+              ),
+            );
+          },
+        ),
+      ),
+    ]);
+  }
+}
+
+/// Every check-in of one FITKEY member at a venue, with a per-month count.
+class MemberVisitHistoryScreen extends StatefulWidget {
+  const MemberVisitHistoryScreen({super.key, required this.venueId, required this.userId, this.memberName});
+
+  final String venueId;
+  final String userId;
+  final String? memberName;
+
+  @override
+  State<MemberVisitHistoryScreen> createState() => _MemberVisitHistoryScreenState();
+}
+
+class _MemberVisitHistoryScreenState extends State<MemberVisitHistoryScreen> {
+  late Future<MemberVisitHistory> _future = _load();
+
+  Future<MemberVisitHistory> _load() =>
+      context.read<PartnerSession>().api.attendanceMemberHistory(widget.venueId, widget.userId);
+
+  Future<void> _refresh() async {
+    final f = _load();
+    setState(() => _future = f);
+    try {
+      await f;
+    } catch (_) {
+      // Shown by the error state.
+    }
+  }
+
+  static String _paidLabel(MemberVisit v) {
+    final via = v.paidVia == null ? null : paidViaVisual(v.paidVia).long;
+    return [?via, ?v.costLabel].join(' · ');
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(title: Text(widget.memberName ?? 'Visit history')),
+      body: FutureBuilder<MemberVisitHistory>(
+        future: _future,
+        builder: (context, snap) {
+          if (snap.connectionState != ConnectionState.done) return const SkeletonList(count: 6, itemHeight: 56);
+          if (snap.hasError) {
+            return RefreshIndicator(
+              onRefresh: _refresh,
+              child: ListView(physics: const AlwaysScrollableScrollPhysics(), children: [
+                const SizedBox(height: 40),
+                ErrorView(error: snap.error!, onRetry: _refresh),
+              ]),
+            );
+          }
+          final h = snap.data!;
+          final months = visitsPerMonth(h.visits.map((v) => v.date)).take(12).toList();
+          final maxMonth = months.fold<int>(0, (m, e) => math.max(m, e.$2));
+          final first = h.visits.isEmpty ? null : h.visits.last.date;
+          return RefreshIndicator(
+            onRefresh: _refresh,
+            child: ListView(
+              physics: const AlwaysScrollableScrollPhysics(),
+              padding: const EdgeInsets.fromLTRB(16, 14, 16, 32),
+              children: [
+                AppCard(
+                  padding: const EdgeInsets.all(14),
+                  child: Row(children: [
+                    PersonAvatar(name: h.name, size: 48),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                        Text(h.name, style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 16)),
+                        const SizedBox(height: 2),
+                        Text('FITKEY member · •••• ${h.phoneLast4 ?? '----'}',
+                            style: const TextStyle(color: AppColors.text2, fontSize: 12.5)),
+                      ]),
+                    ),
+                  ]),
+                ),
+                const SizedBox(height: 12),
+                Row(children: [
+                  Expanded(child: MetricTile(label: 'Total visits', value: '${h.count}', icon: Icons.how_to_reg_rounded)),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: MetricTile(
+                      label: 'First visit',
+                      value: first == null ? '—' : formatShortDate(first),
+                      icon: Icons.flag_rounded,
+                      color: AppColors.blue,
+                    ),
+                  ),
+                ]),
+                if (months.isNotEmpty) ...[
+                  const SectionTitle('Visits per month'),
+                  AppCard(
+                    child: Column(children: [
+                      for (var i = 0; i < months.length; i++)
+                        Padding(
+                          padding: EdgeInsets.only(bottom: i == months.length - 1 ? 0 : 10),
+                          child: Row(children: [
+                            SizedBox(
+                              width: 72,
+                              child: Text(DateFormat('MMM yyyy').format(months[i].$1),
+                                  style: const TextStyle(fontWeight: FontWeight.w700, color: AppColors.text2)),
+                            ),
+                            Expanded(
+                              child: ClipRRect(
+                                borderRadius: BorderRadius.circular(6),
+                                child: LinearProgressIndicator(
+                                  value: maxMonth == 0 ? 0 : months[i].$2 / maxMonth,
+                                  minHeight: 10,
+                                  color: AppColors.primary,
+                                  backgroundColor: AppColors.surfaceAlt,
+                                ),
+                              ),
+                            ),
+                            SizedBox(
+                              width: 36,
+                              child: Text('${months[i].$2}',
+                                  textAlign: TextAlign.right, style: const TextStyle(fontWeight: FontWeight.w800)),
+                            ),
+                          ]),
+                        ),
+                    ]),
+                  ),
+                ],
+                SectionTitle('Visits', subtitle: h.visits.isEmpty ? null : 'Most recent first'),
+                if (h.visits.isEmpty)
+                  const EmptyView(icon: Icons.event_busy_rounded, title: 'No visits here yet')
+                else
+                  for (final v in h.visits)
+                    Padding(
+                      padding: const EdgeInsets.only(bottom: 8),
+                      child: AppCard(
+                        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                        child: Row(children: [
+                          Expanded(
+                            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                              Text(v.date == null ? '—' : formatDayDate(v.date!),
+                                  style: const TextStyle(fontWeight: FontWeight.w800)),
+                              if (_paidLabel(v).isNotEmpty) ...[
+                                const SizedBox(height: 2),
+                                Text(_paidLabel(v), style: const TextStyle(color: AppColors.text2, fontSize: 12.5)),
+                              ],
+                            ]),
+                          ),
+                          Column(crossAxisAlignment: CrossAxisAlignment.end, children: [
+                            if (v.checkedInAt != null)
+                              Text(formatClock(v.checkedInAt!), style: const TextStyle(fontWeight: FontWeight.w800)),
+                            if (v.method != null) ...[
+                              const SizedBox(height: 4),
+                              Tag(v.method!.toUpperCase(),
+                                  color: v.method == 'qr' ? AppColors.primary : AppColors.blue, dense: true),
+                            ],
+                          ]),
+                        ]),
+                      ),
+                    ),
+              ],
+            ),
+          );
+        },
+      ),
+    );
   }
 }

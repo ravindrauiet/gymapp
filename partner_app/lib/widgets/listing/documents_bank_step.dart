@@ -4,7 +4,7 @@
 
 import 'dart:async';
 
-import 'package:dio/dio.dart' show DioMediaType, FormData, MultipartFile;
+import 'package:dio/dio.dart' show Dio, DioMediaType, FormData, MultipartFile, Options;
 import 'package:file_picker/file_picker.dart' show FilePicker, FileType;
 import 'package:fitkey_core/fitkey_core.dart' show ApiException, resolveMediaUrl;
 import 'package:flutter/material.dart';
@@ -72,6 +72,17 @@ abstract final class ListingValidators {
     return null;
   }
 
+  /// GSTIN: 2-digit state code, 10-char PAN, entity no., 'Z', check char — e.g. 27AAPFU0939F1ZV. Optional: empty is fine.
+  static final gstinPattern = RegExp(r'^\d{2}[A-Z]{5}\d{4}[A-Z][1-9A-Z]Z[0-9A-Z]$');
+
+  static String? gstinOptional(String? v) {
+    final s = (v ?? '').trim().toUpperCase();
+    if (s.isEmpty) return null;
+    if (s.length != 15) return 'GSTIN has 15 characters, e.g. 27AAPFU0939F1ZV';
+    if (!gstinPattern.hasMatch(s)) return 'This doesn\'t look like a valid GSTIN';
+    return null;
+  }
+
   /// Masked display: XXXX-XXXX-1234.
   static String maskAadhaar(String last4) => 'XXXX-XXXX-$last4';
 }
@@ -102,10 +113,45 @@ Future<String> uploadDocumentBytes(PartnerApi api, List<int> bytes, String filen
     '/uploads',
     FormData.fromMap({'file': MultipartFile.fromBytes(bytes, filename: filename, contentType: _mediaFor(filename))}),
   );
-  return r['url'] as String;
+  final url = r['url'] as String;
+  // Upload URLs are `/api/v1/files/<uuid>` (no extension) — remember what we sent so the tile is right at once.
+  _pdfCache[url] = Future.value(_mediaFor(filename).subtype == 'pdf');
+  return url;
 }
 
-bool _isPdf(String url) => url.toLowerCase().split('?').first.endsWith('.pdf');
+/// What the URL alone says: true for a `.pdf` path, false for a known image extension, null when it can't tell
+/// (e.g. `/api/v1/files/<uuid>`).
+bool? pdfFromUrl(String url) {
+  final path = url.toLowerCase().split('?').first.split('#').first;
+  if (path.endsWith('.pdf')) return true;
+  if (RegExp(r'\.(jpe?g|png|webp|gif|heic)$').hasMatch(path)) return false;
+  return null;
+}
+
+/// True when a Content-Type header value is a PDF (`application/pdf; charset=…`, `application/x-pdf`).
+bool isPdfContentType(String? contentType) {
+  final ct = (contentType ?? '').toLowerCase().split(';').first.trim();
+  return ct == 'application/pdf' || ct == 'application/x-pdf';
+}
+
+/// Per-URL "is it a PDF?" answers for this app session (one HEAD request per uploaded file at most).
+final Map<String, Future<bool>> _pdfCache = {};
+
+/// Whether a document file is a PDF: from the URL when it tells, else from the file's Content-Type (HEAD, cached).
+/// Network errors count as "not a PDF" (the image tile then shows its fallback).
+Future<bool> documentIsPdf(String url) => _pdfCache.putIfAbsent(url, () async {
+  final hint = pdfFromUrl(url);
+  if (hint != null) return hint;
+  final abs = resolveMediaUrl(url);
+  if (abs == null) return false;
+  try {
+    final res = await Dio().head<void>(abs, options: Options(followRedirects: true));
+    return isPdfContentType(res.headers.value('content-type'));
+  } catch (_) {
+    _pdfCache.remove(url); // Try again next time instead of caching a network failure.
+    return false;
+  }
+});
 
 const _docHints = {
   'licence': ('Licence / registration no.', Icons.storefront_rounded),
@@ -462,8 +508,14 @@ class _DocRow extends StatelessWidget {
   }
 
   @override
-  Widget build(BuildContext context) {
-    final pdf = _isPdf(doc.fileUrl);
+  Widget build(BuildContext context) => FutureBuilder<bool>(
+        future: documentIsPdf(doc.fileUrl),
+        initialData: pdfFromUrl(doc.fileUrl),
+        builder: (context, snap) => _row(context, snap.data),
+      );
+
+  /// [pdf] null = type not known yet (neutral file tile).
+  Widget _row(BuildContext context, bool? pdf) {
     final fmt = DateFormat('d MMM yyyy');
     final expired = doc.expiresOn != null && doc.expiresOn!.isBefore(DateTime.now());
     return Container(
@@ -481,12 +533,17 @@ class _DocRow extends StatelessWidget {
               child: SizedBox(
                 width: 48,
                 height: 48,
-                child: pdf
-                    ? Container(
-                        color: AppColors.redSoft,
-                        child: const Icon(Icons.picture_as_pdf_rounded, color: AppColors.red),
-                      )
-                    : NetImage(doc.fileUrl, fallback: AppImages.gym, width: 48, height: 48),
+                child: switch (pdf) {
+                  true => Container(
+                      color: AppColors.redSoft,
+                      child: const Icon(Icons.picture_as_pdf_rounded, color: AppColors.red),
+                    ),
+                  false => NetImage(doc.fileUrl, fallback: AppImages.gym, width: 48, height: 48),
+                  null => Container(
+                      color: AppColors.surface,
+                      child: const Icon(Icons.insert_drive_file_rounded, color: AppColors.text3),
+                    ),
+                },
               ),
             ),
           ),
@@ -496,7 +553,7 @@ class _DocRow extends StatelessWidget {
               Row(children: [
                 Flexible(
                   child: Text(
-                    (doc.docNumber ?? '').isEmpty ? (pdf ? 'PDF document' : 'Photo') : doc.docNumber!,
+                    (doc.docNumber ?? '').isEmpty ? (switch (pdf) { true => 'PDF document', false => 'Photo', null => 'Document' }) : doc.docNumber!,
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13.5),

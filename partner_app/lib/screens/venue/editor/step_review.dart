@@ -94,6 +94,7 @@ class _ReviewStep extends StatelessWidget {
         _section(2, Icons.place_rounded, AppColors.red, 'Location', location.isEmpty ? 'No address' : location,
             extra: v.latitude == null ? 'Map pin not set' : 'Map pin set'),
         _section(3, Icons.schedule_rounded, AppColors.purple, 'Timings', scheduleSummary(schedule), extra: [
+          if (!schedule.sameEveryDay) ...scheduleDayLines(schedule),
           if (schedule.ladies.isNotEmpty)
             'Ladies only: ${schedule.ladies.map((w) => '${prettyRange(w.start, w.end)} (${prettyDays(w.days)})').join('; ')}',
           v.fitkeyPassMode == 'blocked' && v.passBlocks.isNotEmpty

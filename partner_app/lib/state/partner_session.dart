@@ -55,7 +55,9 @@ class PartnerSession extends ChangeNotifier {
   SessionStatus _statusFor(PartnerUser u) {
     if (u.isFitkeyStaff && !isActingAsPartner) return SessionStatus.signedIn;
     if (u.partnerType == null) return SessionStatus.needsPartnerType;
-    if ((u.name ?? '').trim().isEmpty || (u.email ?? '').trim().isEmpty) return SessionStatus.needsProfile;
+    // Only the name is compulsory ("don't make every field compulsory"): business email is optional, so assisted
+    // partners (no email) go straight on to the commission-plan handover.
+    if ((u.name ?? '').trim().isEmpty) return SessionStatus.needsProfile;
     return SessionStatus.signedIn;
   }
 

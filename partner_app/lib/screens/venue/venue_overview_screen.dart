@@ -346,7 +346,12 @@ class _VenueOverviewScreenState extends State<VenueOverviewScreen> {
                 AppCard(
                   padding: const EdgeInsets.symmetric(vertical: 6),
                   child: Column(children: [
-                    _detail(Icons.schedule_rounded, AppColors.primary, 'Timings', scheduleSummary(schedule)),
+                    _detail(
+                      Icons.schedule_rounded,
+                      AppColors.primary,
+                      'Timings',
+                      [scheduleSummary(schedule), if (!schedule.sameEveryDay) ...scheduleDayLines(schedule)].join('\n'),
+                    ),
                     if (schedule.ladies.isNotEmpty)
                       _detail(Icons.woman_rounded, AppColors.pink, 'Ladies-only hours',
                           schedule.ladies.map((w) => '${prettyRange(w.start, w.end)} (${prettyDays(w.days)})').join('\n')),

@@ -12,6 +12,7 @@ import '../../ui/ui.dart';
 import '../../widgets/commission_plan_card.dart';
 import '../home/shell.dart';
 import '../home/venue_tab_body.dart' show TabSection;
+import '../listing_types/listing_fields.dart' show InfoNote;
 import '../memberships/partner_earnings_screen.dart';
 import '../notifications/notifications_screen.dart';
 import '../trainer/partner_trainer_screen.dart';
@@ -55,6 +56,18 @@ IconData earningSourceIcon(String source) => switch (source) {
   'self' || 'walk_in' => Icons.storefront_rounded,
   'fitpass' => Icons.confirmation_number_rounded,
   _ => Icons.more_horiz_rounded,
+};
+
+/// Trainers, clinics and chemists collect money from members directly, so they have no FitKey payouts / payout
+/// invoices; venues and store sellers (FitKey collects store order money, pays delivered items weekly) do.
+String? directCollectionNote(PartnerType type) => switch (type) {
+  PartnerType.trainer =>
+    'You collect payments for sessions directly — FitKey doesn\'t hold this money, so there are no FitKey payouts.',
+  PartnerType.clinic =>
+    'You collect payments for consultations directly — FitKey doesn\'t hold this money, so there are no FitKey payouts.',
+  PartnerType.chemist =>
+    'You collect payments for orders directly — FitKey doesn\'t hold this money, so there are no FitKey payouts.',
+  _ => null,
 };
 
 /// Earn (BRD §10.3): live earnings by period and source, per-day chart, per-visit detail for FitKey pass users,
@@ -150,20 +163,29 @@ class _EarnTabState extends State<EarnTab> {
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
                   const TabSection('Payouts'),
-                  ToolRow(
-                    icon: Icons.account_balance_rounded,
-                    color: AppColors.green,
-                    title: 'Payouts',
-                    subtitle: 'Schedule, status and statements',
-                    onTap: () => shell.open(const PayoutsScreen()),
-                  ),
-                  ToolRow(
-                    icon: Icons.receipt_rounded,
-                    color: AppColors.blue,
-                    title: 'GST invoices',
-                    subtitle: 'Commission invoices for each payout',
-                    onTap: () => shell.open(const PayoutsScreen(invoices: true)),
-                  ),
+                  if (directCollectionNote(shell.type) case final note?)
+                    Padding(
+                      padding: const EdgeInsets.only(bottom: 10),
+                      child: InfoNote(note, icon: Icons.account_balance_wallet_rounded),
+                    )
+                  else ...[
+                    ToolRow(
+                      icon: Icons.account_balance_rounded,
+                      color: AppColors.green,
+                      title: 'Payouts',
+                      subtitle: shell.type == PartnerType.storeSeller
+                          ? 'Delivered orders, paid weekly · statements'
+                          : 'Schedule, status and statements',
+                      onTap: () => shell.open(const PayoutsScreen()),
+                    ),
+                    ToolRow(
+                      icon: Icons.receipt_rounded,
+                      color: AppColors.blue,
+                      title: 'GST invoices',
+                      subtitle: 'Commission invoices for each payout',
+                      onTap: () => shell.open(const PayoutsScreen(invoices: true)),
+                    ),
+                  ],
                   if (shell.type.isVenue)
                     ToolRow(
                       icon: Icons.table_chart_rounded,

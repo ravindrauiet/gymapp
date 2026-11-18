@@ -11,6 +11,8 @@ import { staffBlockedPath } from '../utils/partner_rules.js';
 export function signAccessToken(user, extra = {}) {
   const claims = { sub: user.id, role: user.role };
   if (extra.staffId) claims.staffId = extra.staffId;
+  // Signed marker: the actor is a FitKey admin (admin panel → Register a vendor). Re-checked against the DB per request.
+  if (extra.staffId && extra.actingAdmin) claims.actingAdmin = true;
   return jwt.sign(claims, config.jwtSecret, { expiresIn: extra.staffId ? '12h' : '30d' });
 }
 
@@ -21,11 +23,11 @@ export const STAFF_ACCESS_ENDED = 'This partner is live — FitKey assisted acce
  * and the partner must have nothing live yet (access is removed at go-live). Sets req.staffName.
  */
 async function checkStaffActing(req) {
-  if (staffBlockedPath(req.method, req.originalUrl ?? req.url)) {
+  if (!req.actingAdmin && staffBlockedPath(req.method, req.originalUrl ?? req.url)) {
     throw forbidden('Not available while a FitKey employee is acting for this partner');
   }
   const row = await queryOne(
-    `SELECT s.name, s.is_fitkey_staff,
+    `SELECT s.name, s.is_fitkey_staff, s.role,
             (EXISTS (SELECT 1 FROM venues WHERE owner_id = $2 AND status = 'live')
              OR EXISTS (SELECT 1 FROM trainers WHERE partner_id = $2 AND listing_status = 'live')
              OR EXISTS (SELECT 1 FROM health_clinics WHERE owner_id = $2 AND listing_status = 'live')
@@ -34,6 +36,13 @@ async function checkStaffActing(req) {
        FROM users s WHERE s.id = $1`,
     [req.staffId, req.user.id],
   );
+  // FitKey admins (admin web panel → "Register a vendor") manage everything on the vendor's behalf: no path
+  // restrictions and access doesn't end at go-live.
+  if (req.actingAdmin) {
+    if (row?.role !== 'admin') throw unauthorized('Admin access has ended — sign in again');
+    req.staffName = row.name ?? 'FitKey admin';
+    return;
+  }
   if (!row?.isFitkeyStaff) throw unauthorized('Assisted access has ended — sign in again');
   if (row.hasLive) throw forbidden(STAFF_ACCESS_ENDED);
   req.staffName = row.name ?? 'FitKey team';
@@ -65,6 +74,7 @@ export function requireAuth(...roles) {
       return next();
     }
     req.staffId = payload.staffId;
+    req.actingAdmin = payload.actingAdmin === true;
     if (req._staffChecked) return next(); // nested routers: checked once per request
     checkStaffActing(req).then(
       () => {
@@ -78,7 +88,7 @@ export function requireAuth(...roles) {
 
 /** Route-level guard: 403 for act-as (staff) requests. Use on money / member-data endpoints. */
 export function forbidStaffActing(req, _res, next) {
-  if (req.staffId) return next(forbidden('Not available while a FitKey employee is acting for this partner'));
+  if (req.staffId && !req.actingAdmin) return next(forbidden('Not available while a FitKey employee is acting for this partner'));
   next();
 }
 
