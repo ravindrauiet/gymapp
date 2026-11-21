@@ -118,11 +118,60 @@ const CSS = `
 .pill.ins-bad { background: rgba(255,84,112,.15); color: var(--danger); }
 .pill.ins-warn { background: rgba(255,107,53,.15); color: var(--orange); }
 .pill.ins-info { background: rgba(76,201,240,.15); color: var(--sky); }
+.ai-logtable td { white-space: nowrap; }
+.ai-logtable td.ai-model { color: var(--muted); font-size: 12px; max-width: 170px; overflow: hidden; text-overflow: ellipsis; }
+.ai-logtable tr.open { background: var(--surface-2); }
+.ai-logtable tr.ai-detail td { white-space: normal; background: var(--surface-2); padding: 4px 12px 14px; }
+.ai-err { color: var(--danger); font-size: 12px; max-width: 260px; white-space: normal; overflow-wrap: anywhere; margin-top: 3px; }
+.ai-pvs { display: grid; gap: 10px; grid-template-columns: repeat(auto-fit, minmax(min(260px, 100%), 1fr)); }
+.ai-pv { min-width: 0; }
+.ai-pv .k { color: var(--muted); font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .4px; margin-bottom: 4px; }
+.ai-pv pre { margin: 0; padding: 10px 12px; background: var(--bg); border: 1px solid var(--outline); border-radius: 10px; white-space: pre-wrap; overflow-wrap: anywhere; font: 13px/1.45 ui-monospace, Consolas, monospace; max-height: 280px; overflow-y: auto; }
 @media (max-width: 640px) {
   .ins-grid2 { grid-template-columns: 1fr; }
   .ins-funnel .st { grid-template-columns: 90px minmax(0, 1fr) 84px; }
   .ins-kpi .v { font-size: 22px; }
   .ins-dhead, .ins-dbody { padding-left: 14px; padding-right: 14px; }
+  .ins-head { gap: 8px 10px; }
+  .ins-head .ins-seg { width: 100%; }
+  .ins-seg button { flex: 1; min-height: 40px; }
+  .ins-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+  .ins-kpi { padding: 12px; }
+  .ins-kpi .v { font-size: 20px; overflow-wrap: anywhere; }
+  .ins-grid3 { grid-template-columns: minmax(0, 1fr); }
+  .ins-card { padding: 14px; }
+  .ins-mini { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .ins-toolbar > * { flex: 1 1 140px; }
+  .ins-toolbar input, .ins-toolbar select { width: 100% !important; min-width: 0; }
+  .ins-toolbar input[type=search] { flex-basis: 100%; min-width: 0; }
+  .ins-pager { justify-content: center; }
+  .ins-ev { grid-template-columns: 32px minmax(0, 1fr); padding: 8px 4px; }
+  .ins-ic { width: 32px; height: 32px; font-size: 15px; }
+  .ins-ev .rt { grid-column: 2; text-align: left; }
+  .ins-ev .rt b { display: inline; margin-right: 6px; }
+  /* User 360 is a full-screen sheet; the header scrolls away and the close button stays pinned */
+  .ins-drawer { width: 100vw; border-left: 0; }
+  .ins-dhead { position: static; padding-top: 14px; }
+  .ins-dtop .info { min-width: 0; flex: 1 1 calc(100% - 80px); padding-right: 40px; }
+  .ins-actions { width: 100%; }
+  .ins-actions button { flex: 1 1 auto; }
+  .ins-actions button[title^="Close"], .ins-dtop > button.ghost:last-child {
+    position: fixed; top: 10px; right: 10px; z-index: 5; flex: none; width: 44px; height: 44px; padding: 0; border-radius: 50%;
+    box-shadow: 0 4px 14px rgba(0,0,0,.5); border: 1px solid var(--outline);
+  }
+  .ins-modal { place-items: end stretch; padding: 0; }
+  .ins-modal form { width: 100%; border-radius: 18px 18px 0 0; max-height: 92vh; overflow-y: auto; padding-bottom: max(16px, env(safe-area-inset-bottom)); }
+  .ins-tip { white-space: normal; max-width: 70vw; }
+  /* AI call log: one card per call */
+  .ai-logtable, .ai-logtable tbody { display: block; width: 100%; }
+  .ai-logtable thead { display: none; }
+  .ai-logtable tr.click { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 4px 12px; border: 1px solid var(--outline); border-radius: 12px; padding: 10px 12px; margin-bottom: 8px; }
+  .ai-logtable tr.click td { display: block; border: 0; padding: 0; white-space: normal; text-align: left; min-width: 0; overflow-wrap: anywhere; }
+  .ai-logtable tr.click td::before { content: attr(data-l); display: block; color: var(--muted); font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .4px; }
+  .ai-logtable td.ai-model { max-width: none; }
+  .ai-logtable tr.ai-detail { display: block; margin: -6px 0 10px; }
+  .ai-logtable tr.ai-detail td { display: block; border: 0; border-radius: 0 0 12px 12px; padding: 10px 12px; }
+  .ai-err { max-width: none; }
 }
 `;
 if (!document.getElementById('ins-css')) document.head.append(h('style', { id: 'ins-css' }, CSS));
@@ -749,7 +798,7 @@ async function liveView() {
 
 // ------------------------------------------------------------------------------------------------ User 360 drawer
 const drawer = { id: null, tab: 'overview', el: null, backdrop: null, data: null, tlState: { type: 'all' } };
-const DTABS = [['overview', 'Overview'], ['activity', 'Activity'], ['passes', 'Passes'], ['money', 'Orders & payments'], ['visits', 'Visits'], ['health', 'Health'], ['proveit', 'ProveIt'], ['social', 'Social']];
+const DTABS = [['overview', 'Overview'], ['activity', 'Activity'], ['passes', 'Passes'], ['money', 'Orders & payments'], ['visits', 'Visits'], ['health', 'Health'], ['proveit', 'ProveIt'], ['social', 'Social'], ['ai', 'AI']];
 
 function closeUser() {
   drawer.el?.remove(); drawer.backdrop?.remove();
@@ -825,7 +874,7 @@ function renderDrawer() {
     tabs);
 
   function fillBody() {
-    const map = { overview: secOverview, activity: secActivity, passes: secPasses, money: secMoney, visits: secVisits, health: secHealth, proveit: secProveit, social: secSocial };
+    const map = { overview: secOverview, activity: secActivity, passes: secPasses, money: secMoney, visits: secVisits, health: secHealth, proveit: secProveit, social: secSocial, ai: secAi };
     body.replaceChildren(map[drawer.tab](d, st));
   }
   drawer.el.replaceChildren(head, body);
@@ -860,6 +909,7 @@ function secOverview(d, st) {
       ['Friends invited', num(st.invited)],
       ['Reports against', num(st.reportsAgainst), n(st.reportsAgainst) > 0],
     ])),
+    d.ai ? sec('AI (Mansi & food scans)', aiMini(d.ai)) : null,
     sec('Wallet', d.wallet ? mini([
       ['FitKey coins', num(w.fitkey)],
       w.fitkeyExpiresAt ? ['Coins expire', date(w.fitkeyExpiresAt)] : null,
@@ -1014,6 +1064,275 @@ function secSocial(d) {
   );
 }
 
+// ------------------------------------------------------------------------------------------------ 4. AI usage
+// Every OpenAI call (Mansi chat, its topic guard, meal-photo and label scans) is logged server-side with token counts and an
+// estimated cost; amounts arrive in rupees / dollars (floats), not paise.
+const AI_FEATURES = [['mansi_chat', 'Mansi chat'], ['topic_guard', 'Topic guard'], ['meal_scan', 'Meal photo scan'], ['label_scan', 'Label scan'], ['other', 'Other']];
+const AI_NAMES = Object.fromEntries(AI_FEATURES);
+const aiName = (f) => AI_NAMES[f] ?? label(String(f ?? 'other'));
+/** Rupees (float) → "₹6.96" / "₹0.44" / "₹1,234"; fine = keep 4 decimals for per-call amounts like ₹0.0353. */
+function rs(v, fine = false) {
+  if (v == null) return '—';
+  const x = Number(v);
+  if (!x) return '₹0';
+  const a = Math.abs(x);
+  if (!fine && a < 0.01) return '<₹0.01';
+  const max = a >= 1000 ? 0 : a >= 1 || !fine ? 2 : 4;
+  return `₹${x.toLocaleString('en-IN', { minimumFractionDigits: Math.min(2, max), maximumFractionDigits: max })}`;
+}
+const usd = (v) => (v == null ? '—' : `$${Number(v).toFixed(Number(v) && Math.abs(Number(v)) < 0.01 ? 6 : 4)}`);
+const ms = (v) => (v == null ? '—' : n(v) >= 1000 ? `${(n(v) / 1000).toFixed(1)} s` : `${num(v)} ms`);
+const tok = (v) => (n(v) >= 1e6 ? `${(n(v) / 1e6).toFixed(2)}M` : n(v) >= 1e4 ? `${(n(v) / 1e3).toFixed(1)}k` : num(v));
+const AI_STATUS = { ok: ['OK', 'ins-ok'], error: ['Error', 'ins-bad'], declined: ['Declined', 'ins-warn'] };
+
+const aiState = { days: 30, cache: {}, logs: { feature: '', status: '', q: '' } };
+
+async function aiView() {
+  const root = h('div', {});
+  const body = h('div', {});
+  const periods = h('div', { class: 'ins-seg' }, [1, 7, 30, 90].map((d) =>
+    h('button', { class: d === aiState.days ? 'active' : '', 'data-d': d, onclick: () => { aiState.days = d; periods.querySelectorAll('button').forEach((b) => b.classList.toggle('active', +b.dataset.d === d)); load(); } },
+      d === 1 ? 'Today' : `${d} days`)));
+  const stamp = h('span', { class: 'muted', style: 'font-size:12px' });
+  const logs = aiLogs({ state: aiState.logs });
+  root.append(
+    h('div', { class: 'ins-head' }, h('h2', {}, 'AI usage'), h('span', { class: 'muted' }, 'Mansi chat & food scans: calls, tokens and what they cost'),
+      h('span', { class: 'spacer' }), stamp, periods, h('button', { class: 'ghost', onclick: () => { delete aiState.cache[aiState.days]; load(); logs.reload(); } }, 'Refresh')),
+    body,
+    card('AI call log', 'Every request, newest first. Tap a row to see the (redacted) question and answer.', logs.el));
+
+  async function load() {
+    const days = aiState.days;
+    if (aiState.cache[days]) body.replaceChildren(renderAi(aiState.cache[days], logs));
+    else if (body.childElementCount) body.classList.add('ins-dim');
+    else body.replaceChildren(overviewSkeleton());
+    try {
+      const data = await api(`/admin/insights/ai?days=${days}`);
+      aiState.cache[days] = data;
+      if (days !== aiState.days) return;
+      body.replaceChildren(renderAi(data, logs));
+      stamp.textContent = `Updated ${time(new Date())}`;
+    } catch (err) {
+      if (!aiState.cache[days]) body.replaceChildren(h('p', { class: 'muted' }, err.message));
+      toast(err.message, true);
+    } finally {
+      body.classList.remove('ins-dim');
+    }
+  }
+  load();
+  return root;
+}
+
+/** Small table helper for the AI cards: cols [{ t, num, v(row), title(row) }], rowClick(row) optional. */
+function aiTable(cols, rows, rowClick) {
+  return h('div', { class: 'ins-scroll' }, h('table', { class: 'ins-table' },
+    h('thead', {}, h('tr', {}, cols.map((c) => h('th', { class: c.num ? 'num' : '' }, c.t)))),
+    h('tbody', {}, rows.map((r) => h('tr', { class: rowClick ? 'click' : '', onclick: rowClick ? () => rowClick(r) : null },
+      cols.map((c) => h('td', { class: c.num ? 'num' : '', title: c.title ? c.title(r) : null, style: c.style ?? null }, c.v(r) ?? '—')))))));
+}
+
+function renderAi(d, logs) {
+  const t = d.totals ?? {};
+  const series = d.series ?? [];
+  const labels = series.map((x) => x.day);
+  const col = (key) => series.map((x) => n(x[key]));
+  const per = d.days === 1 ? 'today' : `last ${d.days} days`;
+  const calls = n(t.calls);
+
+  const kpis = h('div', { class: 'ins-kpis' },
+    kpi('AI cost today', rs(d.today?.costInr), subs(h('b', {}, num(d.today?.calls)), ' calls'), { hero: true }),
+    kpi('Cost this month', rs(d.month?.costInr), subs(h('b', {}, num(d.month?.calls)), ' calls since the 1st'), { hero: true }),
+    kpi('Projected month', rs(d.projectedMonthInr), 'last 7 days’ daily average × 30', { title: 'Average daily cost over the last 7 days × 30' }),
+    kpi(`Cost · ${d.days === 1 ? 'today' : `${d.days}d`}`, rs(t.costInr), subs('≈ ', h('b', {}, usd(t.costUsd)), ' at list price')),
+    kpi('AI calls', num(calls), subs(h('b', {}, num(t.imageCalls)), ' with a photo')),
+    kpi('Tokens', tok(t.totalTokens), subs('in ', h('b', {}, tok(t.promptTokens)), ' · out ', h('b', {}, tok(t.completionTokens)))),
+    kpi('Cost per call', calls ? rs(n(t.costInr) / calls, true) : '—', subs(h('b', {}, calls ? tok(Math.round(n(t.totalTokens) / calls)) : '—'), ' tokens / call')),
+    kpi('Avg latency', ms(t.avgLatencyMs), subs('p95 ', h('b', {}, ms(t.p95LatencyMs)))),
+    kpi('Error rate', pct(t.errors, calls), subs(h('b', {}, num(t.errors)), ' failed calls'), { warn: n(t.errors) > 0 }),
+    kpi('Declined', num(t.declined), 'off-topic questions blocked by Mansi’s guard', { title: 'Questions Mansi refused because they were not about fitness, diet or wellness' }),
+    kpi('Members using AI', num(t.users), subs(h('b', {}, n(t.users) ? rs(n(t.costInr) / n(t.users), true) : '—'), ' per member')),
+    n(t.unpricedCalls) ? kpi('Unpriced calls', num(t.unpricedCalls), 'model missing from the price table, so cost not counted', { warn: true }) : null,
+  );
+
+  const charts = h('div', { class: 'ins-grid2' },
+    card('Cost per day', `${per} · ${rs(t.costInr)} estimated`,
+      chart({ labels, integer: false, series: [{ name: 'Cost', color: LIME, values: col('costInr') }], fmt: (v) => rs(v, true), axisFmt: (v) => `₹${shortNum(v)}` })),
+    card('Calls per day', `${per} · ${num(calls)} calls`,
+      chart({ labels, area: false, series: [
+        { name: 'Mansi chat', color: SERIES[0], values: col('chat') },
+        { name: 'Food scans', color: SERIES[1], values: col('scans') },
+        { name: 'Guard & other', color: SERIES[3], values: series.map((x) => Math.max(0, n(x.calls) - n(x.chat) - n(x.scans))) },
+        { name: 'Errors', color: SERIES[2], values: col('errors') },
+      ] })));
+
+  const empty = (msg) => h('div', { class: 'ins-empty' }, msg);
+  const feats = d.byFeature ?? [];
+  const featureCard = card('By feature', 'Tap a feature to filter the call log below',
+    feats.length ? shareBar(feats.map((f) => ({ name: aiName(f.feature), value: n(f.costInr) })), (v) => rs(v)) : null,
+    feats.length ? h('div', { style: 'margin-top:10px' }, aiTable([
+      { t: 'Feature', v: (f) => aiName(f.feature) },
+      { t: 'Calls', num: true, v: (f) => num(f.calls) },
+      { t: 'Errors', num: true, v: (f) => (n(f.errors) ? h('span', { style: 'color:var(--danger)' }, num(f.errors)) : '0') },
+      { t: 'Tokens', num: true, v: (f) => tok(f.tokens) },
+      { t: 'Cost', num: true, v: (f) => rs(f.costInr), title: (f) => usd(f.costUsd) },
+      { t: '₹ / call', num: true, v: (f) => rs(f.costInrPerCall, true) },
+      { t: 'Avg latency', num: true, v: (f) => ms(f.avgLatencyMs) },
+    ], feats, (f) => logs.filter({ feature: f.feature }))) : empty('No AI calls in this period.'));
+
+  const models = d.byModel ?? [];
+  const modelCard = card('By model', 'Model name as reported by OpenAI',
+    models.length ? aiTable([
+      { t: 'Model', v: (m) => m.model || '—', style: 'overflow-wrap:anywhere' },
+      { t: 'Calls', num: true, v: (m) => num(m.calls) },
+      { t: 'Tokens in', num: true, v: (m) => tok(m.promptTokens) },
+      { t: 'Tokens out', num: true, v: (m) => tok(m.completionTokens) },
+      { t: 'Cost', num: true, v: (m) => rs(m.costInr) },
+    ], models) : empty('No AI calls in this period.'));
+
+  const top = d.topUsers ?? [];
+  const usersCard = card('Top members by AI cost', `${per} · tap to open the member`,
+    top.length ? aiTable([
+      { t: 'Member', v: (u) => h('div', { class: 'ins-who' }, avatar({ id: u.userId, name: u.name, phone: u.phone }), h('div', { style: 'min-width:0' },
+        h('div', { class: 'nm' }, u.name || 'No name yet'), h('div', { class: 'ph' }, u.phone || ''))) },
+      { t: 'Calls', num: true, v: (u) => num(u.calls) },
+      { t: 'Tokens', num: true, v: (u) => tok(u.tokens) },
+      { t: 'Cost', num: true, v: (u) => rs(u.costInr) },
+    ], top, (u) => openUser(u.userId)) : empty('No member used AI in this period.'));
+
+  const pr = d.pricing ?? {};
+  const rate = n(pr.usdInr);
+  const priceRows = Object.entries(pr.models ?? {});
+  const pricingCard = card('Pricing used for estimates', `US$ per 1 million tokens · 1 USD = ₹${rate || '—'}`,
+    priceRows.length ? aiTable([
+      { t: 'Model', v: ([m]) => m },
+      { t: 'Input', num: true, v: ([, p]) => `$${p.in}` },
+      { t: 'Output', num: true, v: ([, p]) => `$${p.out}` },
+      { t: '₹ in / 1M', num: true, v: ([, p]) => (rate ? rs(p.in * rate) : '—') },
+      { t: '₹ out / 1M', num: true, v: ([, p]) => (rate ? rs(p.out * rate) : '—') },
+    ], priceRows) : null,
+    h('p', { class: 'muted', style: 'margin:10px 0 0;font-size:12px' }, `⚠ ${pr.note || 'Estimated from token counts at list prices; your OpenAI bill is the source of truth.'}`));
+
+  return h('div', {}, kpis, charts,
+    h('div', { class: 'ins-grid2' }, featureCard, modelCard),
+    h('div', { class: 'ins-grid2' }, usersCard, pricingCard));
+}
+
+/**
+ * AI call log with filters and "Load more" (keyset on id). Used by the AI usage tab and the User 360 "AI" tab (userId set).
+ * Returns { el, reload, filter(patch) }.
+ */
+function aiLogs({ userId = null, state = { feature: '', status: '', q: '' } } = {}) {
+  const box = h('div', { class: 'ai-logs' });
+  const countEl = h('span', { class: 'muted', style: 'font-size:12px' });
+  const more = h('button', { class: 'ghost', hidden: true, onclick: () => fetchPage(true) }, 'Load more');
+  const feature = h('select', { 'aria-label': 'Feature', onchange: (e) => { state.feature = e.target.value; fetchPage(false); } },
+    h('option', { value: '' }, 'All features'), AI_FEATURES.map(([v, t]) => h('option', { value: v, selected: v === state.feature }, t)));
+  const status = h('select', { 'aria-label': 'Status', onchange: (e) => { state.status = e.target.value; fetchPage(false); } },
+    [['', 'Any status'], ['ok', 'OK'], ['error', 'Errors'], ['declined', 'Declined (off-topic)']].map(([v, t]) => h('option', { value: v, selected: v === state.status }, t)));
+  const search = h('input', { type: 'search', placeholder: userId ? 'Search question / answer…' : 'Search question, answer or member…', value: state.q });
+  let timer;
+  search.addEventListener('input', () => { clearTimeout(timer); timer = setTimeout(() => { state.q = search.value.trim(); fetchPage(false); }, 350); });
+  const tbody = h('tbody', {});
+  const NUMS = ['Tokens in / out', 'Cost', 'Latency'];
+  const cols = ['Time', userId ? null : 'Member', 'Feature', 'Model', ...NUMS, 'Status'].filter(Boolean);
+  const table = h('table', { class: 'ins-table ai-logtable' }, h('thead', {}, h('tr', {}, cols.map((c) => h('th', { class: NUMS.includes(c) ? 'num' : '' }, c)))), tbody);
+  const el = h('div', {}, h('div', { class: 'ins-toolbar' }, search, feature, status, countEl), box, h('div', { class: 'ins-pager' }, more));
+  let nextBefore = null;
+  let shown = 0;
+  let seq = 0;
+
+  function row(l) {
+    const st = AI_STATUS[l.status] ?? [label(String(l.status ?? '—')), ''];
+    const detail = h('tr', { class: 'ai-detail', hidden: true }, h('td', { colspan: cols.length }, detailView(l)));
+    const tr = h('tr', {
+      class: 'click', 'aria-expanded': 'false',
+      onclick: () => { detail.hidden = !detail.hidden; tr.setAttribute('aria-expanded', String(!detail.hidden)); tr.classList.toggle('open', !detail.hidden); },
+    },
+      h('td', { 'data-l': 'Time', title: new Date(l.createdAt).toLocaleString('en-IN') }, dateTime(l.createdAt)),
+      userId ? null : h('td', { 'data-l': 'Member' }, l.userId
+        ? h('button', { class: 'ins-ulink', onclick: (e) => { e.stopPropagation(); openUser(l.userId); } }, l.userName || l.userPhone || 'Member')
+        : h('span', { class: 'muted' }, '—')),
+      h('td', { 'data-l': 'Feature' }, aiName(l.feature), l.hasImage ? h('span', { title: 'Included a photo', style: 'margin-left:6px' }, '📷') : null),
+      h('td', { 'data-l': 'Model', class: 'ai-model', title: l.model ?? '' }, l.model || '—'),
+      h('td', { 'data-l': 'Tokens in / out', class: 'num' }, `${num(l.promptTokens)} / ${num(l.completionTokens)}`),
+      h('td', { 'data-l': 'Cost', class: 'num', title: l.costUsd != null ? `${usd(l.costUsd)} (US$)` : 'Not priced' }, rs(l.costInr, true)),
+      h('td', { 'data-l': 'Latency', class: 'num' }, ms(l.latencyMs)),
+      h('td', { 'data-l': 'Status', title: l.error ?? '' }, pill(l.status === 'error' && l.httpStatus ? `${st[0]} ${l.httpStatus}` : st[0], st[1]),
+        l.status === 'error' && l.error ? h('div', { class: 'ai-err' }, l.error) : null));
+    return [tr, detail];
+  }
+
+  function detailView(l) {
+    const block = (title, text) => h('div', { class: 'ai-pv' }, h('div', { class: 'k' }, title), h('pre', {}, text || '—'));
+    return h('div', {},
+      h('div', { class: 'ai-pvs' }, block(l.hasImage ? 'Input (photo + text, redacted)' : 'Input (redacted)', l.inputPreview), block('Output', l.outputPreview)),
+      l.error ? h('div', { class: 'ai-err', style: 'max-width:none;margin-top:8px' }, `Error${l.httpStatus ? ` (HTTP ${l.httpStatus})` : ''}: ${l.error}`) : null,
+      h('div', { class: 'ins-meta', style: 'margin-top:8px' },
+        h('span', {}, 'Log ', h('b', {}, `#${l.id}`)), h('span', {}, 'Total tokens ', h('b', {}, num(l.totalTokens))),
+        h('span', {}, 'Cost ', h('b', {}, `${rs(l.costInr, true)} · ${usd(l.costUsd)}`)),
+        h('span', {}, 'Model ', h('b', {}, l.model || '—')),
+        h('span', {}, h('b', {}, new Date(l.createdAt).toLocaleString('en-IN')))));
+  }
+
+  async function fetchPage(append) {
+    const my = ++seq;
+    const qs = new URLSearchParams({ limit: 50 });
+    if (userId) qs.set('userId', userId);
+    if (state.feature) qs.set('feature', state.feature);
+    if (state.status) qs.set('status', state.status);
+    if (state.q) qs.set('q', state.q);
+    if (append && nextBefore) qs.set('before', nextBefore);
+    if (!append && !box.childElementCount) box.replaceChildren(...Array.from({ length: 6 }, () => h('div', { style: 'padding:8px 0' }, skel(16))));
+    else if (!append) box.classList.add('ins-dim');
+    more.disabled = true;
+    try {
+      const r = await api(`/admin/insights/ai/logs?${qs}`);
+      if (my !== seq) return;
+      if (!append) { tbody.replaceChildren(); shown = 0; }
+      for (const l of r.logs) tbody.append(...row(l));
+      shown += r.logs.length;
+      nextBefore = r.nextBefore;
+      more.hidden = !nextBefore;
+      countEl.textContent = shown ? `${num(shown)}${nextBefore ? '+' : ''} call${shown === 1 ? '' : 's'}` : '';
+      box.replaceChildren(shown ? h('div', { class: 'ins-scroll' }, table)
+        : h('div', { class: 'ins-empty' }, state.feature || state.status || state.q ? 'No AI calls match these filters.' : 'No AI calls logged yet.'));
+    } catch (err) {
+      if (my === seq) { if (!append) box.replaceChildren(h('p', { class: 'muted' }, err.message)); toast(err.message, true); }
+    } finally {
+      if (my === seq) { box.classList.remove('ins-dim'); more.disabled = false; }
+    }
+  }
+  fetchPage(false);
+  return {
+    el,
+    reload: () => fetchPage(false),
+    filter(patch) {
+      Object.assign(state, patch);
+      feature.value = state.feature; status.value = state.status; search.value = state.q;
+      fetchPage(false);
+      el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    },
+  };
+}
+
+function aiMini(ai) {
+  return mini([
+    ['AI calls', num(ai.calls)],
+    ['Mansi chats', num(ai.chats)],
+    ['Food scans', num(ai.scans)],
+    ['Declined (off-topic)', num(ai.declined), n(ai.declined) > 0],
+    ['Tokens', tok(ai.tokens)],
+    ['Est. AI cost', rs(ai.costInr)],
+    ['Last used', ai.lastAt ? ago(ai.lastAt) : 'never'],
+  ]);
+}
+
+function secAi(d) {
+  return h('div', {},
+    d.ai ? sec('AI usage · lifetime', aiMini(d.ai)) : null,
+    sec('AI calls', h('div', { class: 'ins-card' }, aiLogs({ userId: d.user.id }).el)));
+}
+
 // ------------------------------------------------------------------------------------------------ admin actions
 function modal(title, fields, submitText, onSubmit, { danger = false, note } = {}) {
   const err = h('p', { style: 'color:var(--danger);margin:0', hidden: true });
@@ -1091,11 +1410,12 @@ function coinsDialog(u, wallet) {
 A.register('insights', 'Insights', insightsView);
 A.register('users', 'Users', usersView);
 A.register('live', 'Live activity', liveView);
+A.register('ai', 'AI usage', aiView);
 // Show the analytics tabs right after "Dashboard" instead of at the end of the nav.
 {
   const nav = document.querySelector('#tabs');
   const dash = nav?.querySelector('[data-tab="dashboard"]');
-  const mine = ['insights', 'users', 'live'].map((k) => nav?.querySelector(`[data-tab="${k}"]`)).filter(Boolean);
+  const mine = ['insights', 'users', 'live', 'ai'].map((k) => nav?.querySelector(`[data-tab="${k}"]`)).filter(Boolean);
   if (dash && mine.length) dash.after(...mine);
 }
 // Let other modules open a member profile: window.FitkeyAdmin.openUser(id)

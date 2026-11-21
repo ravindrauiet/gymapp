@@ -100,6 +100,7 @@ function setBadge(key, n, capped = false) {
   if (!b) return;
   b.textContent = capped ? `${n}+` : String(n);
   b.hidden = !n;
+  syncMenu();
 }
 async function refreshBadges() {
   const [a, m] = await Promise.allSettled([
@@ -154,8 +155,28 @@ $('#logout').addEventListener('click', logout);
 function goTab(tab) {
   currentTab = tab;
   document.querySelectorAll('#tabs button').forEach((b) => b.classList.toggle('active', b.dataset.tab === tab));
+  setMenu(false);
+  syncMenu();
   render();
 }
+
+// Phones / tablets: the nav is a sheet opened from the "☰" button (CSS shows it only on narrow screens).
+function setMenu(open) {
+  $('.topbar').classList.toggle('menu-open', open);
+  document.body.classList.toggle('menu-lock', open);
+  $('#menu-btn').setAttribute('aria-expanded', String(open));
+  if (open) $('#tabs button.active')?.scrollIntoView({ block: 'nearest' });
+}
+function syncMenu() {
+  const active = document.querySelector('#tabs button.active');
+  $('#menu-label').textContent = active ? active.firstChild?.textContent.trim() || 'Menu' : 'Menu';
+  $('#menu-btn').classList.toggle('has-badge', [...document.querySelectorAll('#tabs .badge')].some((b) => !b.hidden));
+}
+$('#menu-btn').addEventListener('click', () => setMenu(!$('.topbar').classList.contains('menu-open')));
+document.addEventListener('click', (e) => {
+  if ($('.topbar').classList.contains('menu-open') && !e.target.closest('#tabs button, #menu-btn')) setMenu(false);
+});
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape') setMenu(false); });
 $('#tabs').addEventListener('click', (e) => {
   const tab = e.target.closest('button')?.dataset.tab;
   if (tab) goTab(tab);
@@ -1005,6 +1026,9 @@ async function render() {
   $('#login').hidden = signedIn;
   $('#tabs').hidden = !signedIn;
   $('#logout').hidden = !signedIn;
+  $('#menu-btn').hidden = !signedIn;
+  if (!signedIn) setMenu(false);
+  syncMenu();
   const view = $('#view');
   view.replaceChildren();
   if (!signedIn) {

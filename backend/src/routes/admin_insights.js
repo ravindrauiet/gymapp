@@ -18,6 +18,7 @@ import { forgetSeen, requireAuth } from '../middleware/auth.js';
 import { badRequest, notFound, validate } from '../utils/http.js';
 import { notify } from '../utils/notify.js';
 import { balances } from '../utils/wallet.js';
+import { AI_PRICES, USD_INR } from '../utils/ai_usage.js';
 
 const router = Router();
 router.use(requireAuth('admin'));
@@ -448,6 +449,15 @@ router.get('/users/:id', async (req, res) => {
     ),
     balances(id).catch(() => null),
   ]);
+  const ai = await queryOne(
+    `SELECT COUNT(*)::int AS calls, COUNT(*) FILTER (WHERE feature = 'mansi_chat')::int AS chats,
+            COUNT(*) FILTER (WHERE feature IN ('meal_scan', 'label_scan'))::int AS scans,
+            COUNT(*) FILTER (WHERE status = 'declined')::int AS declined,
+            COALESCE(SUM(total_tokens), 0)::bigint AS tokens, COALESCE(SUM(cost_inr), 0)::float AS cost_inr,
+            MAX(created_at) AS last_at
+     FROM ai_usage_logs WHERE user_id = $1`,
+    [id],
+  ).catch(() => null);
   res.json({
     user,
     stats,
@@ -459,7 +469,141 @@ router.get('/users/:id', async (req, res) => {
     health: { steps, weights, meals, goal },
     proveit,
     social: { referrals, circles, reportsAgainst: reports },
+    ai,
   });
+});
+
+// ------------------------------------------------------------------------------------------------ AI usage
+const AI_FEATURES = ['mansi_chat', 'topic_guard', 'meal_scan', 'label_scan', 'other'];
+
+/** GET /admin/insights/ai?days=30 — calls, tokens, estimated cost (₹ / $), errors, latency; by feature / model / day. */
+router.get('/ai', async (req, res) => {
+  const { days } = validate(z.object({ days: z.coerce.number().int().min(1).max(365).default(30) }), req.query);
+  const tz = config.tz;
+  const since = '((now() AT TIME ZONE $1)::date - ($2::int - 1))';
+  const inPeriod = (col = 'created_at') => '(' + col + ' AT TIME ZONE $1)::date >= ' + since;
+  const [totals, byFeature, byModel, series, topUsers, today, month] = await Promise.all([
+    queryOne(
+      'SELECT COUNT(*)::int AS calls,' +
+        " COUNT(*) FILTER (WHERE status = 'error')::int AS errors," +
+        " COUNT(*) FILTER (WHERE status = 'declined')::int AS declined," +
+        ' COUNT(*) FILTER (WHERE has_image)::int AS image_calls,' +
+        ' COALESCE(SUM(prompt_tokens), 0)::bigint AS prompt_tokens,' +
+        ' COALESCE(SUM(completion_tokens), 0)::bigint AS completion_tokens,' +
+        ' COALESCE(SUM(total_tokens), 0)::bigint AS total_tokens,' +
+        ' COALESCE(SUM(cost_usd), 0)::float AS cost_usd,' +
+        ' COALESCE(SUM(cost_inr), 0)::float AS cost_inr,' +
+        " ROUND(AVG(latency_ms) FILTER (WHERE status = 'ok'))::int AS avg_latency_ms," +
+        " ROUND((PERCENTILE_CONT(0.95) WITHIN GROUP (ORDER BY latency_ms) FILTER (WHERE status = 'ok'))::numeric)::int AS p95_latency_ms," +
+        ' COUNT(DISTINCT user_id)::int AS users,' +
+        " COUNT(*) FILTER (WHERE cost_usd IS NULL AND status = 'ok')::int AS unpriced_calls" +
+        ' FROM ai_usage_logs WHERE ' + inPeriod(),
+      [tz, days],
+    ),
+    query(
+      'SELECT feature, COUNT(*)::int AS calls,' +
+        " COUNT(*) FILTER (WHERE status = 'error')::int AS errors," +
+        ' COALESCE(SUM(total_tokens), 0)::bigint AS tokens, COALESCE(SUM(cost_inr), 0)::float AS cost_inr,' +
+        ' COALESCE(SUM(cost_usd), 0)::float AS cost_usd, ROUND(AVG(latency_ms))::int AS avg_latency_ms,' +
+        ' COALESCE(SUM(cost_inr), 0)::float / GREATEST(COUNT(*), 1) AS cost_inr_per_call' +
+        ' FROM ai_usage_logs WHERE ' + inPeriod() + ' GROUP BY feature ORDER BY cost_inr DESC',
+      [tz, days],
+    ),
+    query(
+      'SELECT model, COUNT(*)::int AS calls, COALESCE(SUM(prompt_tokens), 0)::bigint AS prompt_tokens,' +
+        ' COALESCE(SUM(completion_tokens), 0)::bigint AS completion_tokens, COALESCE(SUM(cost_inr), 0)::float AS cost_inr' +
+        ' FROM ai_usage_logs WHERE ' + inPeriod() + ' GROUP BY model ORDER BY cost_inr DESC',
+      [tz, days],
+    ),
+    query(
+      "WITH d AS (SELECT generate_series(" + since + ", (now() AT TIME ZONE $1)::date, interval '1 day')::date AS day)" +
+        " SELECT to_char(d.day, 'YYYY-MM-DD') AS day, COUNT(l.id)::int AS calls," +
+        ' COALESCE(SUM(l.total_tokens), 0)::bigint AS tokens, COALESCE(SUM(l.cost_inr), 0)::float AS cost_inr,' +
+        " COUNT(l.id) FILTER (WHERE l.status = 'error')::int AS errors," +
+        " COUNT(l.id) FILTER (WHERE l.feature = 'mansi_chat')::int AS chat," +
+        " COUNT(l.id) FILTER (WHERE l.feature IN ('meal_scan', 'label_scan'))::int AS scans" +
+        ' FROM d LEFT JOIN ai_usage_logs l ON (l.created_at AT TIME ZONE $1)::date = d.day' +
+        ' GROUP BY d.day ORDER BY d.day',
+      [tz, days],
+    ),
+    query(
+      'SELECT l.user_id, u.name, u.phone, COUNT(*)::int AS calls, COALESCE(SUM(l.total_tokens), 0)::bigint AS tokens,' +
+        ' COALESCE(SUM(l.cost_inr), 0)::float AS cost_inr' +
+        ' FROM ai_usage_logs l LEFT JOIN users u ON u.id = l.user_id' +
+        ' WHERE ' + inPeriod('l.created_at') + ' AND l.user_id IS NOT NULL' +
+        ' GROUP BY l.user_id, u.name, u.phone ORDER BY cost_inr DESC LIMIT 15',
+      [tz, days],
+    ),
+    queryOne(
+      'SELECT COUNT(*)::int AS calls, COALESCE(SUM(cost_inr), 0)::float AS cost_inr FROM ai_usage_logs' +
+        ' WHERE (created_at AT TIME ZONE $1)::date = (now() AT TIME ZONE $1)::date',
+      [tz],
+    ),
+    queryOne(
+      'SELECT COUNT(*)::int AS calls, COALESCE(SUM(cost_inr), 0)::float AS cost_inr FROM ai_usage_logs' +
+        " WHERE created_at >= date_trunc('month', now() AT TIME ZONE $1) AT TIME ZONE $1",
+      [tz],
+    ),
+  ]);
+  // Run-rate projection for a 30-day month from the last 7 days.
+  const recent = series.slice(-7);
+  const last7 = recent.reduce((a, d) => a + Number(d.costInr), 0);
+  res.json({
+    days,
+    totals,
+    today,
+    month,
+    projectedMonthInr: Math.round((last7 / Math.max(1, recent.length)) * 30 * 100) / 100,
+    byFeature,
+    byModel,
+    series,
+    topUsers,
+    pricing: {
+      usdInr: USD_INR,
+      models: AI_PRICES,
+      note: 'Estimated from OpenAI token counts at list prices; your OpenAI bill is the source of truth.',
+    },
+  });
+});
+
+/** GET /admin/insights/ai/logs?feature=&status=&userId=&q=&before=&limit= — individual calls, newest first. */
+router.get('/ai/logs', async (req, res) => {
+  const f = validate(
+    z.object({
+      feature: z.enum(AI_FEATURES).optional(),
+      status: z.enum(['ok', 'error', 'declined']).optional(),
+      userId: uuid.optional(),
+      q: z.string().trim().max(80).optional(),
+      before: z.coerce.number().int().positive().optional(),
+      limit: z.coerce.number().int().min(1).max(200).default(50),
+    }),
+    req.query,
+  );
+  const where = ['TRUE'];
+  const params = [];
+  const p = (v) => {
+    params.push(v);
+    return '$' + params.length;
+  };
+  if (f.feature) where.push('l.feature = ' + p(f.feature));
+  if (f.status) where.push('l.status = ' + p(f.status));
+  if (f.userId) where.push('l.user_id = ' + p(f.userId));
+  if (f.q) {
+    const qp = p(f.q);
+    where.push(
+      "(l.input_preview ILIKE '%' || " + qp + " || '%' OR l.output_preview ILIKE '%' || " + qp + " || '%' OR u.name ILIKE '%' || " + qp + " || '%')",
+    );
+  }
+  if (f.before) where.push('l.id < ' + p(f.before));
+  const logs = await query(
+    'SELECT l.id, l.created_at, l.user_id, u.name AS user_name, u.phone AS user_phone, l.feature, l.model, l.status,' +
+      ' l.http_status, l.error, l.prompt_tokens, l.completion_tokens, l.total_tokens, l.cost_usd::float AS cost_usd,' +
+      ' l.cost_inr::float AS cost_inr, l.latency_ms, l.has_image, l.input_preview, l.output_preview' +
+      ' FROM ai_usage_logs l LEFT JOIN users u ON u.id = l.user_id' +
+      ' WHERE ' + where.join(' AND ') + ' ORDER BY l.id DESC LIMIT ' + p(f.limit),
+    params,
+  );
+  res.json({ logs, nextBefore: logs.length === f.limit ? logs[logs.length - 1].id : null });
 });
 
 // ------------------------------------------------------------------------------------------------ actions

@@ -5,6 +5,7 @@ import { config } from '../config.js';
 import { query, queryOne } from '../db/index.js';
 import { requireAuth } from '../middleware/auth.js';
 import { HttpError, badRequest, validate } from '../utils/http.js';
+import { aiContext, logAiUsage } from '../utils/ai_usage.js';
 
 const router = Router();
 
@@ -58,8 +59,11 @@ router.use(
 const toDataUrl = (b64) => (b64.startsWith('data:') ? b64 : `data:image/jpeg;base64,${b64}`);
 
 /** Calls OpenAI chat completions and maps failures to messages that are safe to show members. */
-async function openai(body, { timeoutMs = 60_000 } = {}) {
+async function openai(body, { timeoutMs = 60_000, feature, input, hasImage = false } = {}) {
   if (!config.openaiApiKey) throw badRequest('AI features are not configured on the server yet');
+  const model = body.model ?? config.openaiModel;
+  const started = Date.now();
+  const log = (extra) => logAiUsage({ feature, model, input, hasImage, latencyMs: Date.now() - started, ...extra });
   let response;
   try {
     response = await fetch('https://api.openai.com/v1/chat/completions', {
@@ -70,17 +74,21 @@ async function openai(body, { timeoutMs = 60_000 } = {}) {
     });
   } catch (err) {
     console.error('OpenAI request failed:', err);
+    log({ status: 'error', error: err?.name === 'TimeoutError' ? 'timeout' : 'network error' });
     throw new HttpError(503, 'Mansi is unreachable right now. Please try again.');
   }
   const data = await response.json().catch(() => ({}));
   if (!response.ok) {
     // Never forward OpenAI's raw error: it can echo part of the API key.
     console.error('OpenAI error:', response.status, data?.error?.message);
+    log({ status: 'error', httpStatus: response.status, error: data?.error?.code ?? data?.error?.type ?? `HTTP ${response.status}` });
     if (response.status === 429) throw new HttpError(503, 'Mansi is getting a lot of questions — try again in a minute.');
     if (response.status === 400) throw badRequest('That image or message could not be processed. Try another one.');
     throw new HttpError(503, 'Mansi is unavailable right now. Please try again shortly.');
   }
-  return data.choices?.[0]?.message?.content ?? '';
+  const content = data.choices?.[0]?.message?.content ?? '';
+  log({ status: 'ok', httpStatus: response.status, usage: data.usage, model: data.model ?? model, output: content });
+  return content;
 }
 
 // ---------------------------------------------------------------------------
@@ -126,6 +134,7 @@ router.post('/nutrition-from-image', async (req, res) => {
     req.body,
   );
 
+  aiContext.enterWith({ userId: req.user.id });
   const content = await openai({
     messages: [
       { role: 'system', content: `${PROMPTS[mode]}\nRespond ONLY with a JSON object of this shape:\n${NUTRITION_JSON}` },
@@ -141,7 +150,7 @@ router.post('/nutrition-from-image', async (req, res) => {
     response_format: { type: 'json_object' },
     temperature: 0.2,
     max_tokens: 700,
-  });
+  }, { feature: mode === 'label' ? 'label_scan' : 'meal_scan', input: mode === 'label' ? 'Nutrition label photo' : 'Meal photo', hasImage: true });
 
   let extracted;
   try {
@@ -349,7 +358,7 @@ async function classifyTopic(messages, imageBase64) {
         temperature: 0,
         max_tokens: 40,
       },
-      { timeoutMs: GUARD_TIMEOUT_MS },
+      { timeoutMs: GUARD_TIMEOUT_MS, feature: 'topic_guard', input: latest, hasImage: Boolean(imageBase64) },
     );
     const out = JSON.parse(content);
     if (!['in_scope', 'out_of_scope', 'mixed'].includes(out.verdict)) return null;
@@ -438,6 +447,7 @@ const CODE_RE = /```|^\s*(def \w+\(|function \w+\(|import \w|from \w+ import|#in
 
 router.post('/chat', async (req, res) => {
   const started = Date.now();
+  aiContext.enterWith({ userId: req.user.id });
   const { messages, imageBase64 } = validate(chatSchema, req.body);
   if (messages[messages.length - 1].role !== 'user') throw badRequest('The last message must be from the member');
   const latest = messages[messages.length - 1].content;
@@ -448,6 +458,9 @@ router.post('/chat', async (req, res) => {
 
   if (scope.verdict === 'out_of_scope') {
     logDecline({ ...scope, text: latest, name: member.name });
+    if (scope.source === 'keyword') {
+      logAiUsage({ feature: 'mansi_chat', model: 'none (keyword rule)', status: 'declined', input: latest, output: MANSI_DECLINE, latencyMs: Date.now() - started });
+    }
     return res.json({ reply: MANSI_DECLINE, declined: true, category: scope.category, guardMs });
   }
   if (scope.verdict === 'mixed') logDecline({ ...scope, text: latest, name: member.name });
@@ -493,7 +506,7 @@ Style:
       messages: [{ role: 'system', content: systemPrompt + note }, ...history],
       max_tokens: 900,
       temperature: 0.7,
-    })
+    }, { feature: 'mansi_chat', input: latest, hasImage: Boolean(imageBase64) })
   ).trim();
 
   if (CODE_RE.test(reply)) {
