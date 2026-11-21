@@ -198,8 +198,8 @@ router.post('/:id', async (req, res) => {
     }
     if (body.status === 'paid' && !(body.utr ?? p.utr)) throw badRequest('utr: Enter the bank UTR / reference of the transfer');
     const updated = await queryOne(
-      `UPDATE partner_payouts SET status = $2, utr = COALESCE($3, utr), bank_account_id = $4,
-              paid_at = CASE WHEN $2 = 'paid' THEN COALESCE(paid_at, now()) ELSE NULL END
+      `UPDATE partner_payouts SET status = $2::varchar, utr = COALESCE($3, utr), bank_account_id = $4,
+              paid_at = CASE WHEN $2::varchar = 'paid' THEN COALESCE(paid_at, now()) ELSE NULL END
        WHERE id = $1
        RETURNING id, owner_id, period_start, period_end, gross_paise, commission_paise, gst_paise, net_paise, status, utr, paid_at`,
       [id, body.status, body.utr ?? null, bankId],

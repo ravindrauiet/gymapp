@@ -41,6 +41,7 @@ import bookingsRouter from './routes/bookings.js';
 import membershipsRouter from './routes/memberships.js';
 import partnerRseRouter from './routes/partner_rse.js';
 import adminPayoutsRouter from './routes/admin_payouts.js';
+import adminInsightsRouter from './routes/admin_insights.js';
 
 export function createApp() {
   const app = express();
@@ -113,6 +114,7 @@ export function createApp() {
   api.use('/partner/clinic', partnerClinicRouter);
   api.use('/partner/chemist', partnerChemistRouter);
   // FITKEY team
+  api.use('/admin/insights', adminInsightsRouter); // dashboard analytics, user 360, activity feed
   api.use('/admin/payouts', adminPayoutsRouter); // Partner payouts (run weekly, mark paid)
   api.use('/admin', adminRouter);
   // Corporate Dashboard (company / college HR)

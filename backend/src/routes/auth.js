@@ -111,10 +111,13 @@ router.post('/otp/verify', otpLimiter, async (req, res) => {
     `INSERT INTO users (phone, role) VALUES ($1, $2)
      ON CONFLICT (phone, role) DO UPDATE SET updated_at = now()
      RETURNING id, phone, email, name, role, city, gender, birth_date, avatar_url, created_at,
-               partner_type, is_fitkey_staff, partner_go_live_at, (xmax = 0) AS inserted`,
+               partner_type, is_fitkey_staff, partner_go_live_at, is_suspended, suspended_reason, (xmax = 0) AS inserted`,
     [phone, role],
   );
-  const { inserted, ...publicUser } = user;
+  if (user.isSuspended) {
+    throw forbidden(`Your FITKEY account is suspended${user.suspendedReason ? `: ${user.suspendedReason}` : ''}. Contact support@fitkey.in.`);
+  }
+  const { inserted, isSuspended: _s, suspendedReason: _r, ...publicUser } = user;
 
   let referral;
   if (role === 'user') {

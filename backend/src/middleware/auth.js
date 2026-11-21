@@ -48,6 +48,36 @@ async function checkStaffActing(req) {
   req.staffName = row.name ?? 'FitKey team';
 }
 
+// ------------------------------------------------------------------------------------- activity + suspension
+// Every authenticated call stamps users.last_seen_at (admin dashboard: DAU / WAU / MAU, "last active") and reads the
+// suspension flag. Cached per user for a minute so it costs at most one small query per user per minute.
+const SEEN_TTL_MS = 60_000;
+const seen = new Map(); // userId → { at, suspended, reason }
+
+/** Drops the cached state (after an admin suspends / restores an account). */
+export function forgetSeen(userId) {
+  seen.delete(userId);
+}
+
+async function touchUser(userId) {
+  const hit = seen.get(userId);
+  if (hit && Date.now() - hit.at < SEEN_TTL_MS) return hit;
+  let row = null;
+  try {
+    row = await queryOne(
+      `UPDATE users SET last_seen_at = now() WHERE id = $1 RETURNING is_suspended, suspended_reason`,
+      [userId],
+    );
+  } catch {
+    // Column not migrated yet / DB hiccup: never block a request because of activity tracking.
+    return { suspended: false };
+  }
+  const v = { at: Date.now(), suspended: row?.isSuspended === true, reason: row?.suspendedReason ?? null };
+  if (seen.size > 50_000) seen.clear();
+  seen.set(userId, v);
+  return v;
+}
+
 /**
  * Requires a valid Bearer token. Pass roles to restrict access, e.g. requireAuth('partner').
  * Sets req.user = { id, role }; for act-as tokens also req.staffId / req.staffName (and applies the staff guard).
@@ -69,6 +99,16 @@ export function requireAuth(...roles) {
     if (roles.length && !roles.includes(req.user.role)) {
       return next(forbidden(`This endpoint is for ${roles.join('/')} accounts`));
     }
+    // Members and partners: stamp activity and refuse suspended accounts (admins are never suspended here).
+    const gate = req.user.role === 'admin' || payload.staffId ? Promise.resolve({ suspended: false }) : touchUser(req.user.id);
+    gate.then((g) => {
+      if (g.suspended) {
+        return next(forbidden(`Your FITKEY account is suspended${g.reason ? `: ${g.reason}` : ''}. Contact support@fitkey.in.`));
+      }
+      continueAuth();
+    }, () => continueAuth());
+
+    function continueAuth() {
     if (!payload.staffId) {
       req.staffId = null;
       return next();
@@ -83,6 +123,7 @@ export function requireAuth(...roles) {
       },
       next,
     );
+    }
   };
 }
 

@@ -10,7 +10,7 @@ types.setTypeParser(types.builtins.DATE, (v) => v);
 
 export const pool = new Pool({
   connectionString: config.databaseUrl,
-  max: 10,
+  max: Number(process.env.PG_POOL_MAX ?? 10),
   idleTimeoutMillis: 30_000,
 });
 

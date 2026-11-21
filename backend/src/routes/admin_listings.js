@@ -213,9 +213,9 @@ router.post('/partner-bank/:id', async (req, res) => {
   if (!uuid.safeParse(req.params.id).success) throw notFound('Bank account not found');
   const b = validate(z.object({ status: z.enum(['verified', 'failed', 'pending']), verifiedName: z.string().trim().max(160).optional() }), req.body ?? {});
   const account = await queryOne(
-    `UPDATE partner_bank_accounts SET status = $2,
-       verified_at = CASE WHEN $2 = 'verified' THEN now() ELSE NULL END,
-       verified_name = CASE WHEN $2 = 'verified' THEN COALESCE($3, verified_name, holder_name) ELSE verified_name END
+    `UPDATE partner_bank_accounts SET status = $2::varchar,
+       verified_at = CASE WHEN $2::varchar = 'verified' THEN now() ELSE NULL END,
+       verified_name = CASE WHEN $2::varchar = 'verified' THEN COALESCE($3, verified_name, holder_name) ELSE verified_name END
      WHERE id = $1
      RETURNING id, owner_id, holder_name, RIGHT(account_number, 4) AS last4, ifsc, bank_name, status, verified_name, verified_at, is_primary`,
     [req.params.id, b.status, b.verifiedName ?? null],

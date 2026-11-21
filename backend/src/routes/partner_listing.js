@@ -175,7 +175,7 @@ router.post('/kyc', async (req, res) => {
   const verified = mockKyc();
   const kyc = await queryOne(
     `INSERT INTO partner_kyc (owner_id, method, aadhaar_masked, name_on_id, status, verified_at)
-     VALUES ($1, $2, $3, $4, $5, CASE WHEN $5 = 'verified' THEN now() END)
+     VALUES ($1, $2, $3, $4, $5::varchar, CASE WHEN $5::varchar = 'verified' THEN now() END)
      ON CONFLICT (owner_id) DO UPDATE SET method = EXCLUDED.method, aadhaar_masked = EXCLUDED.aadhaar_masked,
        name_on_id = EXCLUDED.name_on_id, status = EXCLUDED.status, verified_at = EXCLUDED.verified_at, updated_at = now()
      RETURNING ${KYC_FIELDS}`,
@@ -222,7 +222,7 @@ router.post('/bank', async (req, res) => {
     return queryOne(
       `INSERT INTO partner_bank_accounts (owner_id, holder_name, account_number, ifsc, bank_name, status, verified_name,
                                           verified_at, is_primary)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, CASE WHEN $6 = 'verified' THEN now() END, true)
+       VALUES ($1, $2, $3, $4, $5, $6::varchar, $7, CASE WHEN $6::varchar = 'verified' THEN now() END, true)
        RETURNING ${BANK_FIELDS}`,
       [req.user.id, b.holderName, b.accountNumber, b.ifsc, bankNameFromIfsc(b.ifsc), mock ? 'verified' : 'pending',
         mock ? b.holderName : null],
